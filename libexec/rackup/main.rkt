@@ -7,6 +7,7 @@
          racket/system
          "install.rkt"
          "paths.rkt"
+         "runtime.rkt"
          "shell.rkt"
          "shims.rkt"
          "state.rkt"
@@ -18,7 +19,8 @@
   (displayln "rackup - Racket toolchain manager")
   (displayln "")
   (displayln "Commands:")
-  (displayln "  install <spec> [--variant cs|bc] [--distribution full|minimal] [--snapshot-site auto|utah|northwestern] [--set-default]")
+  (displayln
+   "  install <spec> [--variant cs|bc] [--distribution full|minimal] [--snapshot-site auto|utah|northwestern] [--set-default]")
   (displayln "  link <name> <path> [--set-default] [--force]")
   (displayln "  list")
   (displayln "  default [<toolchain>]")
@@ -29,6 +31,7 @@
   (displayln "  remove <toolchain>")
   (displayln "  reshim")
   (displayln "  init [--shell bash|zsh]")
+  (displayln "  runtime status|install|upgrade")
   (displayln "  doctor")
   (displayln "  help"))
 
@@ -50,8 +53,7 @@
         (define m (read-toolchain-meta id))
         (define tags
           (filter values
-                  (list (and (equal? id default-id) "default")
-                        (and (equal? id active-id) "active"))))
+                  (list (and (equal? id default-id) "default") (and (equal? id active-id) "active"))))
         (printf "~a ~a  (~a, ~a, ~a)\n"
                 (if (null? tags) " " "*")
                 id
@@ -66,7 +68,9 @@
   (match rest
     ['()
      (define id (get-default-toolchain))
-     (if id (displayln id) (displayln ""))]
+     (if id
+         (displayln id)
+         (displayln ""))]
     [(list "--unset")
      (clear-default-toolchain!)
      (displayln "Cleared default toolchain.")]
@@ -97,7 +101,9 @@
       [(list x more ...)
        (if exe
            (rackup-error "usage: rackup which <exe> [--toolchain <toolchain>]")
-           (begin (set! exe x) (loop more)))])))
+           (begin
+             (set! exe x)
+             (loop more)))])))
 
 (define (cmd-which rest)
   (ensure-index!)
@@ -114,8 +120,7 @@
 (define (cmd-shell rest)
   (ensure-index!)
   (match rest
-    [(list "--deactivate")
-     (display (emit-shell-deactivation))]
+    [(list "--deactivate") (display (emit-shell-deactivation))]
     [(list spec)
      (define id (resolve-toolchain-or-die spec))
      (display (emit-shell-activation id))]
@@ -125,15 +130,15 @@
   (define shell-name #f)
   (match rest
     ['() (void)]
-    [(list "--shell" sh)
-     (set! shell-name sh)]
+    [(list "--shell" sh) (set! shell-name sh)]
     [_ (rackup-error "usage: rackup init [--shell bash|zsh]")])
   (define rc (init-shell! shell-name))
   (reshim!)
   (printf "Initialized shell integration in ~a\n" (path->string rc)))
 
 (define (split-on-double-dash xs)
-  (let loop ([left null] [rest xs])
+  (let loop ([left null]
+             [rest xs])
     (cond
       [(null? rest) (values (reverse left) null)]
       [(equal? (car rest) "--") (values (reverse left) (cdr rest))]
@@ -166,8 +171,7 @@
 
 (define (cmd-remove rest)
   (match rest
-    [(list spec)
-     (remove-toolchain! (resolve-toolchain-or-die spec))]
+    [(list spec) (remove-toolchain! (resolve-toolchain-or-die spec))]
     [_ (rackup-error "usage: rackup remove <toolchain>")]))
 
 (define (cmd-reshim)
@@ -193,14 +197,12 @@
   (doctor-report))
 
 (define (main)
-  (with-handlers ([exn:fail:user?
-                   (lambda (e)
-                     (eprintf "~a\n" (exn-message e))
-                     (exit 2))]
-                  [exn:fail?
-                   (lambda (e)
-                     (eprintf "rackup: internal error: ~a\n" (exn-message e))
-                     (exit 1))])
+  (with-handlers ([exn:fail:user? (lambda (e)
+                                    (eprintf "~a\n" (exn-message e))
+                                    (exit 2))]
+                  [exn:fail? (lambda (e)
+                               (eprintf "rackup: internal error: ~a\n" (exn-message e))
+                               (exit 1))])
     (define args (vector->list (current-command-line-arguments)))
     (match args
       ['() (usage)]
@@ -216,5 +218,8 @@
       [(list "remove" rest ...) (cmd-remove rest)]
       [(list "reshim") (cmd-reshim)]
       [(list "init" rest ...) (cmd-init rest)]
+      [(list "runtime" rest ...) (cmd-runtime rest)]
       [(list "doctor") (cmd-doctor)]
-      [_ (usage) (exit 2)])))
+      [_
+       (usage)
+       (exit 2)])))

@@ -116,7 +116,7 @@
     <h1>rackup <span class="ok">curl | sh</span></h1>
     <p class="sub">
       Install the <code>rackup</code> toolchain manager bootstrap script directly from GitHub Pages.
-      This installs the manager itself (not a Racket toolchain yet).
+      This installs the manager and a hidden internal runtime (but not a user Racket toolchain yet).
     </p>
 
     <section class="card">
@@ -132,7 +132,7 @@
     <section class="card">
       <div class="label">Notes</div>
       <ul>
-        <li><code>rackup</code> currently requires a host <code>racket</code> to run the manager itself.</li>
+        <li>The bootstrap installs a hidden internal runtime so a preinstalled system <code>racket</code> is not required.</li>
         <li>The bootstrap script prompts before editing shell config unless you pass <code>-y</code>.</li>
         <li>After bootstrap: run <code>rackup install stable --set-default</code>.</li>
       </ul>

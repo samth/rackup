@@ -53,6 +53,20 @@ jobs:
         run: |
           scripts/docker-test-fresh-install.sh --mode bootstrap --spec stable
 
+  docker-e2e-bootstrap-no-host-racket:
+    name: Docker E2E (bootstrap, no system Racket + hidden runtime)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Docker bootstrap without host racket (hidden runtime)
+        run: |
+          scripts/docker-test-fresh-install.sh \
+            --mode bootstrap \
+            --host-racket absent \
+            --spec stable \
+            --spec 8.18
+
   docker-e2e-source-build-link:
     name: Docker E2E (real source build local link)
     runs-on: ubuntu-latest

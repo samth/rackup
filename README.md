@@ -42,7 +42,12 @@ sh scripts/install.sh
 ```
 
 It supports `-y` for noninteractive installs and prompts before shell config edits by default.
-Note: `rackup` currently requires a host `racket` to run the manager itself.
+The bootstrap installs a hidden internal Racket runtime for `rackup` itself, but does not
+install a user toolchain automatically. The first user toolchain install is explicit, e.g.:
+
+```bash
+rackup install stable --set-default
+```
 
 ## GitHub Pages Installer Site
 
@@ -65,9 +70,9 @@ scripts/docker-test-fresh-install.sh
 This builds a Docker image (`ubuntu:24.04` + distro `racket`) and then runs an
 end-to-end smoke test in a disposable container with an empty `RACKUP_HOME`.
 
-Why the image includes system `racket`: current `rackup` is implemented in
-Bash + Racket, so it needs a host Racket to run the manager itself while it
-installs the target toolchain.
+`rackup` bootstraps without a host Racket by installing a hidden internal
+runtime first. The default Docker E2E image includes system `racket`
+because several test modes exercise direct (non-bootstrap) execution.
 
 Useful variants:
 

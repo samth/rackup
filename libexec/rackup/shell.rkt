@@ -18,36 +18,41 @@
 (define end-marker "# <<< rackup initialize <<<")
 
 (define (shell-helper-script)
-  (string-append
-   "# rackup shell helper\n"
-   "rackup() {\n"
-   "  local _rackup_bin=\"${RACKUP_HOME:-$HOME/.rackup}/bin/rackup\"\n"
-   "  if [ \"$#\" -gt 0 ] && [ \"$1\" = \"shell\" ]; then\n"
-   "    shift\n"
-   "    eval \"$(\"$_rackup_bin\" shell \"$@\")\"\n"
-   "  else\n"
-   "    \"$_rackup_bin\" \"$@\"\n"
-   "  fi\n"
-   "}\n"))
+  (string-append "# rackup shell helper\n"
+                 "rackup() {\n"
+                 "  local _rackup_bin=\"${RACKUP_HOME:-$HOME/.rackup}/bin/rackup\"\n"
+                 "  if [ \"$#\" -gt 0 ] && [ \"$1\" = \"shell\" ]; then\n"
+                 "    shift\n"
+                 "    eval \"$(\"$_rackup_bin\" shell \"$@\")\"\n"
+                 "  else\n"
+                 "    \"$_rackup_bin\" \"$@\"\n"
+                 "  fi\n"
+                 "}\n"))
 
 (define (managed-rc-block shell-name)
   (define base "${RACKUP_HOME:-$HOME/.rackup}")
-  (define shell-script
-    (format "~a/shell/rackup.~a" base shell-name))
-  (string-append
-   start-marker "\n"
-   "if [ -d \"" base "/shims\" ]; then\n"
-   "  case \":$PATH:\" in\n"
-   "    *\":"
-   base
-   "/shims:\"*) ;;\n"
-   "    *) export PATH=\""
-   base
-   "/shims:$PATH\" ;;\n"
-   "  esac\n"
-   "fi\n"
-   "[ -f \"" shell-script "\" ] && . \"" shell-script "\"\n"
-   end-marker "\n"))
+  (define shell-script (format "~a/shell/rackup.~a" base shell-name))
+  (string-append start-marker
+                 "\n"
+                 "if [ -d \""
+                 base
+                 "/shims\" ]; then\n"
+                 "  case \":$PATH:\" in\n"
+                 "    *\":"
+                 base
+                 "/shims:\"*) ;;\n"
+                 "    *) export PATH=\""
+                 base
+                 "/shims:$PATH\" ;;\n"
+                 "  esac\n"
+                 "fi\n"
+                 "[ -f \""
+                 shell-script
+                 "\" ] && . \""
+                 shell-script
+                 "\"\n"
+                 end-marker
+                 "\n"))
 
 (define (emit-path-prepend)
   "if [ -d \"${RACKUP_HOME:-$HOME/.rackup}/shims\" ]; then\n  case \":$PATH:\" in *\":${RACKUP_HOME:-$HOME/.rackup}/shims:\"*) ;; *) export PATH=\"${RACKUP_HOME:-$HOME/.rackup}/shims:$PATH\" ;; esac\nfi\n")
@@ -64,11 +69,14 @@
     (rackup-error "toolchain not installed: ~a" toolchain-id))
   (define extra-env (toolchain-env-vars toolchain-id))
   (define addon (path->string* (rackup-addon-dir toolchain-id)))
-  (string-append
-   (emit-path-prepend)
-   (emit-env-exports extra-env)
-   "export RACKUP_TOOLCHAIN=" (sh-single-quote toolchain-id) "\n"
-   "export PLTADDONDIR=" (sh-single-quote addon) "\n"))
+  (string-append (emit-path-prepend)
+                 (emit-env-exports extra-env)
+                 "export RACKUP_TOOLCHAIN="
+                 (sh-single-quote toolchain-id)
+                 "\n"
+                 "export PLTADDONDIR="
+                 (sh-single-quote addon)
+                 "\n"))
 
 (define (deactivation-extra-vars)
   (define active (getenv "RACKUP_TOOLCHAIN"))
@@ -80,13 +88,12 @@
 
 (define (emit-shell-deactivation)
   (define extra-vars (remove-duplicates (deactivation-extra-vars)))
-  (string-append
-   (emit-path-prepend)
-   (apply string-append
-          (for/list ([k (in-list extra-vars)])
-            (format "unset ~a\n" k)))
-   "unset RACKUP_TOOLCHAIN\n"
-   "unset PLTADDONDIR\n"))
+  (string-append (emit-path-prepend)
+                 (apply string-append
+                        (for/list ([k (in-list extra-vars)])
+                          (format "unset ~a\n" k)))
+                 "unset RACKUP_TOOLCHAIN\n"
+                 "unset PLTADDONDIR\n"))
 
 (define (guess-shell)
   (define sh (or (getenv "SHELL") ""))
@@ -95,8 +102,7 @@
     [else "bash"]))
 
 (define (rc-path shell-name)
-  (build-path (find-system-path 'home-dir)
-              (format ".~arc" shell-name)))
+  (build-path (find-system-path 'home-dir) (format ".~arc" shell-name)))
 
 (define (replace-managed-block existing new-block)
   (define start-match (regexp-match-positions (regexp (regexp-quote start-marker)) existing))
@@ -114,11 +120,11 @@
                                      (char=? (string-ref after-end 0) #\newline))
                                 (substring after-end 1)
                                 after-end)])
-           (string-append (substring existing 0 start-pos)
-                          new-block
-                          after-end*)))]
+           (string-append (substring existing 0 start-pos) new-block after-end*)))]
     [else
-     (string-append (if (string-blank? existing) "" (string-append existing "\n"))
+     (string-append (if (string-blank? existing)
+                        ""
+                        (string-append existing "\n"))
                     new-block)]))
 
 (define (init-shell! [shell-name #f])

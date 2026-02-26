@@ -10,6 +10,7 @@ SOURCE_BUILD_REPO="${RACKUP_E2E_SOURCE_BUILD_REPO:-https://github.com/racket/rac
 SOURCE_BUILD_REF="${RACKUP_E2E_SOURCE_BUILD_REF:-v8.18}"
 SOURCE_BUILD_TARGET="${RACKUP_E2E_SOURCE_BUILD_TARGET:-base}"
 SOURCE_BUILD_JOBS="${RACKUP_E2E_SOURCE_BUILD_JOBS:-2}"
+HOST_RACKET="${RACKUP_E2E_HOST_RACKET:-present}"
 
 WORKDIR="${WORKDIR:-/work}"
 TEST_HOME="${HOME:-/tmp/rackup-e2e-home}"
@@ -51,6 +52,7 @@ echo "mode=$MODE"
 echo "specs=$SPECS_CSV"
 echo "snapshot_site=$SNAPSHOT_SITE"
 echo "local_link_mode=$LOCAL_LINK_MODE"
+echo "host_racket_mode=$HOST_RACKET"
 if [[ "$LOCAL_LINK_MODE" == "build" ]]; then
   echo "source_build_repo=$SOURCE_BUILD_REPO"
   echo "source_build_ref=$SOURCE_BUILD_REF"
@@ -59,8 +61,15 @@ if [[ "$LOCAL_LINK_MODE" == "build" ]]; then
 fi
 echo "HOME=$HOME"
 echo "PWD=$(pwd)"
-echo "host-racket=$(command -v racket)"
-racket -v || true
+host_racket_path="$(command -v racket || true)"
+echo "host-racket=${host_racket_path:-<missing>}"
+if [[ -n "$host_racket_path" ]]; then
+  racket -v || true
+fi
+
+if [[ "$MODE" == "direct" && "$HOST_RACKET" == "absent" ]]; then
+  fail "direct mode requires a host racket; use --mode bootstrap for host-racket absent"
+fi
 
 echo
 echo "== Preparing fresh source copy (excluding compiled artifacts) =="
@@ -75,6 +84,7 @@ tar -C "$WORKDIR" \
 echo "RUN_SRC=$RUN_SRC"
 
 if [[ "$UNIT_TESTS" == "1" ]]; then
+  [[ -n "$host_racket_path" ]] || fail "unit tests require host racket in the container"
   echo
   echo "== Running unit tests =="
   (
@@ -155,8 +165,9 @@ create_fake_local_source_tree() {
   local root="${TMPDIR}/rackup-e2e-local-src"
   local plthome="$root/racket"
   local bin_dir="$plthome/bin"
+  local chez_bin_dir="$root/racket/src/build/cs/c/ChezScheme/pb/bin/pb"
   rm -rf "$root"
-  mkdir -p "$bin_dir" "$plthome/collects" "$root/pkgs"
+  mkdir -p "$bin_dir" "$plthome/collects" "$root/pkgs" "$chez_bin_dir"
   cat > "$bin_dir/racket" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -179,7 +190,17 @@ EOF
 set -euo pipefail
 printf 'FAKE-RACO %s\n' "$*"
 EOF
-  chmod +x "$bin_dir/racket" "$bin_dir/raco"
+  cat > "$chez_bin_dir/scheme" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'FAKE-SCHEME %s\n' "$*"
+EOF
+  cat > "$chez_bin_dir/petite" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'FAKE-PETITE %s\n' "$*"
+EOF
+  chmod +x "$bin_dir/racket" "$bin_dir/raco" "$chez_bin_dir/scheme" "$chez_bin_dir/petite"
   echo "$root"
 }
 
@@ -273,6 +294,13 @@ EOF
 echo
 echo "== rackup smoke =="
 run_rackup doctor
+runtime_status="$(run_rackup runtime status)"
+echo "$runtime_status"
+if [[ "$MODE" == "bootstrap" ]]; then
+  assert_contains "present: yes" "$runtime_status" "bootstrap should install hidden runtime"
+else
+  assert_contains "present: " "$runtime_status" "runtime status output missing"
+fi
 
 IFS=',' read -r -a SPECS <<< "$SPECS_CSV"
 declare -a INSTALLED_IDS=()
@@ -407,6 +435,8 @@ linked_id="$(run_rackup link localsrc "$local_src_root" --set-default | tail -n 
 assert_eq "local-localsrc" "$linked_id" "unexpected linked toolchain id"
 run_rackup which racket --toolchain localsrc
 run_rackup which raco --toolchain localsrc
+run_rackup which scheme --toolchain localsrc
+run_rackup which petite --toolchain localsrc
 linked_version="$(shim_racket -e '(display (version))')"
 if [[ "$LOCAL_LINK_MODE" == "fake" ]]; then
   assert_contains "9.99-local" "$linked_version" "linked fake source tree should report fake version"
@@ -424,8 +454,27 @@ assert_eq "${local_src_root}/racket" "$link_run_plthome" "rackup run should appl
 if [[ "$LOCAL_LINK_MODE" == "build" ]]; then
   run_rackup run localsrc -- raco help >/dev/null
   run_rackup run localsrc -- racket -e '(display "ok")' >/dev/null
+  run_rackup run localsrc -- scheme --version >/dev/null
+  run_rackup run localsrc -- petite --version >/dev/null
+else
+  fake_scheme_out="$(run_rackup run localsrc -- scheme --version)"
+  fake_petite_out="$(run_rackup run localsrc -- petite --version)"
+  assert_contains "FAKE-SCHEME --version" "$fake_scheme_out" "linked fake source tree should expose scheme"
+  assert_contains "FAKE-PETITE --version" "$fake_petite_out" "linked fake source tree should expose petite"
 fi
 run_rackup default "$primary_id"
+
+if [[ "$HOST_RACKET" == "absent" ]]; then
+  echo
+  echo "== Hidden runtime recovery failure-mode check =="
+  rm -rf "$RACKUP_HOME/runtime"
+  if run_rackup list >/tmp/rackup-e2e-missing-runtime.out 2>/tmp/rackup-e2e-missing-runtime.err; then
+    fail "expected rackup to fail when hidden runtime is removed and no host racket is present"
+  fi
+  missing_err="$(cat /tmp/rackup-e2e-missing-runtime.err)"
+  assert_contains "no Racket runtime available" "$missing_err" "missing-runtime error should mention runtime"
+  assert_contains "install.sh" "$missing_err" "missing-runtime error should include recovery instructions"
+fi
 
 echo
 echo "Fresh-container install test PASSED"

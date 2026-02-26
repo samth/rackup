@@ -27,20 +27,21 @@
          ensure-toolchain-addon-dir!)
 
 (define (empty-index)
-  (hash 'installed-toolchains (hash)
-        'aliases (hash)
-        'default-toolchain #f))
+  (hash 'installed-toolchains (hash) 'aliases (hash) 'default-toolchain #f))
 
 (define (normalize-index idx)
   (cond
     [(hash? idx)
-     (hash 'installed-toolchains (if (hash? (hash-ref idx 'installed-toolchains #f))
-                                     (hash-ref idx 'installed-toolchains)
-                                     (hash))
-           'aliases (if (hash? (hash-ref idx 'aliases #f))
-                        (hash-ref idx 'aliases)
-                        (hash))
-           'default-toolchain (hash-ref idx 'default-toolchain #f))]
+     (hash 'installed-toolchains
+           (if (hash? (hash-ref idx 'installed-toolchains #f))
+               (hash-ref idx 'installed-toolchains)
+               (hash))
+           'aliases
+           (if (hash? (hash-ref idx 'aliases #f))
+               (hash-ref idx 'aliases)
+               (hash))
+           'default-toolchain
+           (hash-ref idx 'default-toolchain #f))]
     [else (empty-index)]))
 
 (define (load-index)
@@ -67,8 +68,7 @@
   (hash-has-key? (installed-toolchains idx) id))
 
 (define (get-default-toolchain [idx (load-index)])
-  (or (read-string-file (rackup-default-file) #f)
-      (hash-ref idx 'default-toolchain #f)))
+  (or (read-string-file (rackup-default-file) #f) (hash-ref idx 'default-toolchain #f)))
 
 (define (set-default-toolchain! id)
   (ensure-index!)
@@ -101,20 +101,28 @@
     [(list? raw)
      (for/list ([entry (in-list raw)]
                 #:when (and (list? entry) (= (length entry) 2)))
-       (cons (format "~a" (car entry))
-             (format "~a" (cadr entry))))]
+       (cons (format "~a" (car entry)) (format "~a" (cadr entry))))]
     [else null]))
 
 (define (meta-summary meta)
-  (for/hash ([k '(id kind requested-spec resolved-version variant distribution arch platform snapshot-site snapshot-stamp installed-at executables)])
+  (for/hash ([k '(id kind
+                     requested-spec
+                     resolved-version
+                     variant
+                     distribution
+                     arch
+                     platform
+                     snapshot-site
+                     snapshot-stamp
+                     installed-at
+                     executables)])
     (values k (hash-ref meta k #f))))
 
 (define (register-toolchain! id meta)
   (ensure-index!)
   (write-toolchain-meta! id meta)
   (define idx (load-index))
-  (define new-installed
-    (hash-set (installed-toolchains idx) id (meta-summary meta)))
+  (define new-installed (hash-set (installed-toolchains idx) id (meta-summary meta)))
   (save-index! (hash-set idx 'installed-toolchains new-installed))
   (when (not (get-default-toolchain))
     (set-default-toolchain! id)))
@@ -133,22 +141,20 @@
 (define (find-local-toolchain name [idx (load-index)])
   (define ids (installed-toolchain-ids idx))
   (cond
-    [(or (not name) (string-blank? name))
-     (get-default-toolchain idx)]
-    [(hash-has-key? (hash-ref idx 'aliases (hash)) name)
-     (hash-ref (hash-ref idx 'aliases) name)]
+    [(or (not name) (string-blank? name)) (get-default-toolchain idx)]
+    [(hash-has-key? (hash-ref idx 'aliases (hash)) name) (hash-ref (hash-ref idx 'aliases) name)]
     [(member name ids) name]
     [else
      (define (unique xs)
        (and (= (length xs) 1) (car xs)))
      (or (unique (filter (lambda (id) (string-prefix? id name)) ids))
-         (let ([matches
-                (for/list ([id ids]
-                           #:when (let ([m (read-toolchain-meta id)])
-                                    (and (hash? m)
-                                         (or (equal? name (hash-ref m 'requested-spec #f))
-                                             (equal? name (hash-ref m 'resolved-version #f))))))
-                  id)])
+         (let ([matches (for/list ([id ids]
+                                   #:when
+                                   (let ([m (read-toolchain-meta id)])
+                                     (and (hash? m)
+                                          (or (equal? name (hash-ref m 'requested-spec #f))
+                                              (equal? name (hash-ref m 'resolved-version #f))))))
+                          id)])
            (unique matches))
          #f)]))
 

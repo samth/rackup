@@ -1,11 +1,13 @@
 FROM ubuntu:24.04
 
+ARG INCLUDE_SYSTEM_RACKET=1
+
 ENV DEBIAN_FRONTEND=noninteractive \
     LANG=C.UTF-8 \
     LC_ALL=C.UTF-8
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
+    PKGS="\
       bash \
       build-essential \
       ca-certificates \
@@ -19,13 +21,15 @@ RUN apt-get update && \
       libncurses-dev \
       libreadline-dev \
       libssl-dev \
-      racket \
       pkg-config \
       tar \
       unzip \
       zlib1g-dev \
       xz-utils \
-      zsh && \
+      zsh" && \
+    if [ "$INCLUDE_SYSTEM_RACKET" = "1" ]; then PKGS="$PKGS racket"; fi && \
+    apt-get install -y --no-install-recommends \
+      $PKGS && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /work

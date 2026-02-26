@@ -23,15 +23,15 @@
 (define (write-string-file path s)
   (make-directory* (or (path-only path) "."))
   (call-with-output-file* path
-    #:exists 'truncate/replace
-    (lambda (out)
-      (display s out)
-      (newline out))))
+                          #:exists 'truncate/replace
+                          (lambda (out)
+                            (display s out)
+                            (newline out))))
 
 (define (write-rktd-file path v)
   (make-directory* (or (path-only path) "."))
   (call-with-output-file* path
-    #:exists 'truncate/replace
-    (lambda (out)
-      (write v out)
-      (newline out))))
+                          #:exists 'truncate/replace
+                          (lambda (out)
+                            (write v out)
+                            (newline out))))

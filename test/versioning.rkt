@@ -19,22 +19,20 @@
   (check-true (cs-supported? "7.4"))
   (check-false (cs-supported? "7.3"))
 
-  (check-equal?
-   (canonical-toolchain-id 'release
-                           #:resolved-version "8.18"
-                           #:variant 'cs
-                           #:arch "x86_64"
-                           #:platform "linux"
-                           #:distribution 'full)
-   "release-8.18-cs-x86_64-linux-full")
+  (check-equal? (canonical-toolchain-id 'release
+                                        #:resolved-version "8.18"
+                                        #:variant 'cs
+                                        #:arch "x86_64"
+                                        #:platform "linux"
+                                        #:distribution 'full)
+                "release-8.18-cs-x86_64-linux-full")
 
-  (check-equal?
-   (canonical-toolchain-id 'snapshot
-                           #:resolved-version "8.19.0.1"
-                           #:variant 'cs
-                           #:arch "x86_64"
-                           #:platform "linux"
-                           #:distribution 'full
-                           #:snapshot-site 'utah
-                           #:snapshot-stamp "20260225-abcd")
-   "snapshot-utah-20260225-abcd-8.19.0.1-cs-x86_64-linux-full"))
+  (check-equal? (canonical-toolchain-id 'snapshot
+                                        #:resolved-version "8.19.0.1"
+                                        #:variant 'cs
+                                        #:arch "x86_64"
+                                        #:platform "linux"
+                                        #:distribution 'full
+                                        #:snapshot-site 'utah
+                                        #:snapshot-stamp "20260225-abcd")
+                "snapshot-utah-20260225-abcd-8.19.0.1-cs-x86_64-linux-full"))

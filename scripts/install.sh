@@ -19,6 +19,7 @@ Behavior:
   - Prompts before editing shell config by default.
   - With -y, accepts defaults (including shell init).
   - Installs files under ~/.rackup unless --prefix or RACKUP_HOME is set.
+  - Installs a hidden internal Racket runtime for rackup itself.
 
 Examples:
   curl -fsSL https://samth.github.io/rackup/install.sh | sh
@@ -64,11 +65,6 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-if ! command -v racket >/dev/null 2>&1; then
-  echo "Error: 'racket' is required to run rackup." >&2
-  exit 1
-fi
-
 TMPDIR_INSTALL="$(mktemp -d "${TMPDIR:-/tmp}/rackup-install.XXXXXX")"
 cleanup() {
   rm -rf "$TMPDIR_INSTALL"
@@ -107,8 +103,24 @@ echo "Installing rackup into $PREFIX"
 cp -R "$SRC_DIR/bin/." "$PREFIX/bin/"
 cp -R "$SRC_DIR/libexec/." "$PREFIX/libexec/"
 chmod +x "$PREFIX/bin/rackup"
+chmod +x "$PREFIX/libexec/rackup-bootstrap.sh" 2>/dev/null || true
 
 echo "Installed: $PREFIX/bin/rackup"
+
+if [ ! -r "$PREFIX/libexec/rackup-bootstrap.sh" ]; then
+  echo "Error: missing bootstrap helper after install." >&2
+  exit 1
+fi
+
+RACKUP_HOME="$PREFIX"
+export RACKUP_HOME
+. "$PREFIX/libexec/rackup-bootstrap.sh"
+
+echo "Ensuring hidden runtime is installed..."
+rackup_hidden_runtime_install_if_missing
+
+echo "Registering/validating hidden runtime..."
+"$PREFIX/bin/rackup" runtime install >/dev/null
 
 default_shell="$(basename "${SHELL:-bash}")"
 if [ -n "$INIT_SHELL" ]; then
@@ -148,6 +160,6 @@ rackup installed successfully.
 
 Next steps:
   1. Ensure \${RACKUP_HOME:-$PREFIX}/shims is on PATH (or run 'rackup init').
-  2. Install a toolchain:
+  2. Install your first toolchain:
        $PREFIX/bin/rackup install stable --set-default
 EOF

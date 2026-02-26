@@ -42,9 +42,7 @@
 (define (system*/check who . args)
   (define ok? (apply system* args))
   (unless ok?
-    (rackup-error "~a failed: ~a"
-                  who
-                  (string-join (map path->string* args) " "))))
+    (rackup-error "~a failed: ~a" who (string-join (map path->string* args) " "))))
 
 (define (pad2 n)
   (~r n #:min-width 2 #:pad-string "0"))
@@ -78,7 +76,4 @@
 
 (define (sh-single-quote s)
   (define str (format "~a" s))
-  (string-append
-   "'"
-   (regexp-replace* #px"'" str "'\"'\"'")
-   "'"))
+  (string-append "'" (regexp-replace* #px"'" str "'\"'\"'") "'"))

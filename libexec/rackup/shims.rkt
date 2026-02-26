@@ -18,39 +18,38 @@
          current-toolchain-source)
 
 (define (dispatcher-script)
-  (string-append
-   "#!/usr/bin/env bash\n"
-   "set -euo pipefail\n"
-   "SELF=\"${BASH_SOURCE[0]}\"\n"
-   "LIBEXEC_DIR=\"$(cd -P \"$(dirname \"$SELF\")\" && pwd)\"\n"
-   "HOME_DIR=\"${RACKUP_HOME:-$(cd -P \"$LIBEXEC_DIR/..\" && pwd)}\"\n"
-   "SHIM_NAME=\"$(basename \"$0\")\"\n"
-   "DEFAULT_FILE=\"$HOME_DIR/state/default-toolchain\"\n"
-   "ENV_FILE=\"\"\n"
-   "ACTIVE=\"${RACKUP_TOOLCHAIN:-}\"\n"
-   "if [[ -z \"$ACTIVE\" && -f \"$DEFAULT_FILE\" ]]; then\n"
-   "  ACTIVE=\"$(tr -d '\\r\\n' < \"$DEFAULT_FILE\")\"\n"
-   "fi\n"
-   "if [[ -z \"$ACTIVE\" ]]; then\n"
-   "  echo \"rackup: no active/default toolchain configured\" >&2\n"
-   "  echo \"Try: rackup list ; rackup default <toolchain>\" >&2\n"
-   "  exit 2\n"
-   "fi\n"
-   "TARGET=\"$HOME_DIR/toolchains/$ACTIVE/bin/$SHIM_NAME\"\n"
-   "ENV_FILE=\"$HOME_DIR/toolchains/$ACTIVE/env.sh\"\n"
-   "if [[ ! -x \"$TARGET\" ]]; then\n"
-   "  echo \"rackup: executable '$SHIM_NAME' not found in toolchain '$ACTIVE'\" >&2\n"
-   "  echo \"Try: rackup which $SHIM_NAME --toolchain $ACTIVE\" >&2\n"
-   "  exit 127\n"
-   "fi\n"
-   "if [[ -f \"$ENV_FILE\" ]]; then\n"
-   "  # shellcheck disable=SC1090\n"
-   "  . \"$ENV_FILE\"\n"
-   "fi\n"
-   "if [[ -z \"${PLTADDONDIR:-}\" ]]; then\n"
-   "  export PLTADDONDIR=\"$HOME_DIR/addons/$ACTIVE\"\n"
-   "fi\n"
-   "exec \"$TARGET\" \"$@\"\n"))
+  (string-append "#!/usr/bin/env bash\n"
+                 "set -euo pipefail\n"
+                 "SELF=\"${BASH_SOURCE[0]}\"\n"
+                 "LIBEXEC_DIR=\"$(cd -P \"$(dirname \"$SELF\")\" && pwd)\"\n"
+                 "HOME_DIR=\"${RACKUP_HOME:-$(cd -P \"$LIBEXEC_DIR/..\" && pwd)}\"\n"
+                 "SHIM_NAME=\"$(basename \"$0\")\"\n"
+                 "DEFAULT_FILE=\"$HOME_DIR/state/default-toolchain\"\n"
+                 "ENV_FILE=\"\"\n"
+                 "ACTIVE=\"${RACKUP_TOOLCHAIN:-}\"\n"
+                 "if [[ -z \"$ACTIVE\" && -f \"$DEFAULT_FILE\" ]]; then\n"
+                 "  ACTIVE=\"$(tr -d '\\r\\n' < \"$DEFAULT_FILE\")\"\n"
+                 "fi\n"
+                 "if [[ -z \"$ACTIVE\" ]]; then\n"
+                 "  echo \"rackup: no active/default toolchain configured\" >&2\n"
+                 "  echo \"Try: rackup list ; rackup default <toolchain>\" >&2\n"
+                 "  exit 2\n"
+                 "fi\n"
+                 "TARGET=\"$HOME_DIR/toolchains/$ACTIVE/bin/$SHIM_NAME\"\n"
+                 "ENV_FILE=\"$HOME_DIR/toolchains/$ACTIVE/env.sh\"\n"
+                 "if [[ ! -x \"$TARGET\" ]]; then\n"
+                 "  echo \"rackup: executable '$SHIM_NAME' not found in toolchain '$ACTIVE'\" >&2\n"
+                 "  echo \"Try: rackup which $SHIM_NAME --toolchain $ACTIVE\" >&2\n"
+                 "  exit 127\n"
+                 "fi\n"
+                 "if [[ -f \"$ENV_FILE\" ]]; then\n"
+                 "  # shellcheck disable=SC1090\n"
+                 "  . \"$ENV_FILE\"\n"
+                 "fi\n"
+                 "if [[ -z \"${PLTADDONDIR:-}\" ]]; then\n"
+                 "  export PLTADDONDIR=\"$HOME_DIR/addons/$ACTIVE\"\n"
+                 "fi\n"
+                 "exec \"$TARGET\" \"$@\"\n"))
 
 (define (ensure-shim-dispatcher!)
   (ensure-rackup-layout!)
@@ -95,13 +94,11 @@
 
 (define (all-installed-executables)
   (define ids (installed-toolchain-ids))
-  (sort (remove-duplicates
-         (append*
-          (for/list ([id ids])
-            (define m (read-toolchain-meta id))
-            (if (and (hash? m) (list? (hash-ref m 'executables #f)))
-                (hash-ref m 'executables)
-                null))))
+  (sort (remove-duplicates (append* (for/list ([id ids])
+                                      (define m (read-toolchain-meta id))
+                                      (if (and (hash? m) (list? (hash-ref m 'executables #f)))
+                                          (hash-ref m 'executables)
+                                          null))))
         string<?))
 
 (define (reshim!)
@@ -113,10 +110,10 @@
   (for ([name (in-set desired)])
     (unless (equal? name "rackup")
       (define p (build-path shims-dir name))
-      (when (link-exists? p) (delete-file p))
+      (when (link-exists? p)
+        (delete-file p))
       (make-file-or-directory-link dispatcher p)))
   (for ([p (in-list (directory-list shims-dir #:build? #t))])
     (define name (path-basename-string p))
-    (when (and (not (set-member? desired name))
-               (rackup-managed-shim? p))
+    (when (and (not (set-member? desired name)) (rackup-managed-shim? p))
       (delete-file p))))

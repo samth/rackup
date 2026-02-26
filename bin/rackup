@@ -1,7 +1,17 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/sh
+set -eu
 
-SELF_DIR="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CORE="${SELF_DIR}/../libexec/rackup-core.rkt"
+SELF_DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
+LIBEXEC_DIR="$SELF_DIR/../libexec"
+CORE="$LIBEXEC_DIR/rackup-core.rkt"
+BOOTSTRAP_SH="$LIBEXEC_DIR/rackup-bootstrap.sh"
 
-exec racket "${CORE}" "$@"
+if [ ! -r "$BOOTSTRAP_SH" ]; then
+  echo "rackup: missing bootstrap helper: $BOOTSTRAP_SH" >&2
+  exit 1
+fi
+
+. "$BOOTSTRAP_SH"
+
+RACKET_EXE="$(rackup_select_runtime_racket_or_fail)" || exit 1
+exec "$RACKET_EXE" "$CORE" "$@"

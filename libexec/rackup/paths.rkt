@@ -14,6 +14,14 @@
          rackup-cache-dir
          rackup-download-cache-dir
          rackup-state-dir
+         rackup-runtime-dir
+         rackup-runtime-versions-dir
+         rackup-runtime-current-link
+         rackup-runtime-lock-dir
+         rackup-runtime-version-dir
+         rackup-runtime-install-dir
+         rackup-runtime-meta-file
+         rackup-runtime-bin-link
          rackup-index-file
          rackup-config-file
          rackup-default-file
@@ -34,25 +42,55 @@
       (string->path env)
       (build-path (find-system-path 'home-dir) ".rackup")))
 
-(define (rackup-bin-dir) (build-path (rackup-home) "bin"))
-(define (rackup-libexec-dir) (build-path (rackup-home) "libexec"))
-(define (rackup-shims-dir) (build-path (rackup-home) "shims"))
-(define (rackup-shell-dir) (build-path (rackup-home) "shell"))
-(define (rackup-toolchains-dir) (build-path (rackup-home) "toolchains"))
-(define (rackup-addons-dir) (build-path (rackup-home) "addons"))
-(define (rackup-cache-dir) (build-path (rackup-home) "cache"))
-(define (rackup-download-cache-dir) (build-path (rackup-cache-dir) "downloads"))
-(define (rackup-state-dir) (build-path (rackup-home) "state"))
+(define (rackup-bin-dir)
+  (build-path (rackup-home) "bin"))
+(define (rackup-libexec-dir)
+  (build-path (rackup-home) "libexec"))
+(define (rackup-shims-dir)
+  (build-path (rackup-home) "shims"))
+(define (rackup-shell-dir)
+  (build-path (rackup-home) "shell"))
+(define (rackup-toolchains-dir)
+  (build-path (rackup-home) "toolchains"))
+(define (rackup-addons-dir)
+  (build-path (rackup-home) "addons"))
+(define (rackup-cache-dir)
+  (build-path (rackup-home) "cache"))
+(define (rackup-download-cache-dir)
+  (build-path (rackup-cache-dir) "downloads"))
+(define (rackup-state-dir)
+  (build-path (rackup-home) "state"))
+(define (rackup-runtime-dir)
+  (build-path (rackup-home) "runtime"))
+(define (rackup-runtime-versions-dir)
+  (build-path (rackup-runtime-dir) "versions"))
+(define (rackup-runtime-current-link)
+  (build-path (rackup-runtime-dir) "current"))
+(define (rackup-runtime-lock-dir)
+  (build-path (rackup-runtime-dir) ".lock"))
 
-(define (rackup-index-file) (build-path (rackup-state-dir) "index.rktd"))
-(define (rackup-config-file) (build-path (rackup-state-dir) "config.rktd"))
-(define (rackup-default-file) (build-path (rackup-state-dir) "default-toolchain"))
+(define (rackup-runtime-version-dir id)
+  (build-path (rackup-runtime-versions-dir) id))
+(define (rackup-runtime-install-dir id)
+  (build-path (rackup-runtime-version-dir id) "install"))
+(define (rackup-runtime-meta-file id)
+  (build-path (rackup-runtime-version-dir id) "meta.rktd"))
+(define (rackup-runtime-bin-link id)
+  (build-path (rackup-runtime-version-dir id) "bin"))
 
-(define (rackup-shim-dispatcher) (build-path (rackup-libexec-dir) "rackup-shim"))
-(define (rackup-bin-entry) (build-path (rackup-bin-dir) "rackup"))
+(define (rackup-index-file)
+  (build-path (rackup-state-dir) "index.rktd"))
+(define (rackup-config-file)
+  (build-path (rackup-state-dir) "config.rktd"))
+(define (rackup-default-file)
+  (build-path (rackup-state-dir) "default-toolchain"))
+
+(define (rackup-shim-dispatcher)
+  (build-path (rackup-libexec-dir) "rackup-shim"))
+(define (rackup-bin-entry)
+  (build-path (rackup-bin-dir) "rackup"))
 (define (rackup-shell-script shell-name)
-  (build-path (rackup-shell-dir)
-              (format "rackup.~a" shell-name)))
+  (build-path (rackup-shell-dir) (format "rackup.~a" shell-name)))
 
 (define (rackup-toolchain-dir id)
   (build-path (rackup-toolchains-dir) id))
@@ -75,6 +113,8 @@
                  (rackup-shell-dir)
                  (rackup-toolchains-dir)
                  (rackup-addons-dir)
+                 (rackup-runtime-dir)
+                 (rackup-runtime-versions-dir)
                  (rackup-download-cache-dir)
                  (rackup-state-dir))])
     (ensure-directory* p)))

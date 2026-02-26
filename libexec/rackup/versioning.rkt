@@ -20,8 +20,7 @@
          distribution->string)
 
 (define (numeric-version? s)
-  (and (string? s)
-       (regexp-match? #px"^[0-9]+(?:\\.[0-9]+){0,3}$" s)))
+  (and (string? s) (regexp-match? #px"^[0-9]+(?:\\.[0-9]+){0,3}$" s)))
 
 (define (version-token->number v)
   (cond
@@ -38,11 +37,8 @@
         (+ (* (string->number a) (expt 10 10))
            (* (string->number b) (expt 10 7))
            (* (string->number c) (expt 10 4)))]
-       [(list a b)
-        (+ (* (string->number a) (expt 10 10))
-           (* (string->number b) (expt 10 7)))]
-       [(list a)
-        (+ (* (string->number a) (expt 10 10)))]
+       [(list a b) (+ (* (string->number a) (expt 10 10)) (* (string->number b) (expt 10 7)))]
+       [(list a) (+ (* (string->number a) (expt 10 10)))]
        [_ 0])]))
 
 (define (cmp-versions a b)
@@ -65,21 +61,15 @@
 
 (define (parse-install-spec spec)
   (cond
-    [(or (equal? spec "stable"))
-     (hash 'input spec 'kind 'stable)]
-    [(or (equal? spec "pre-release") (equal? spec "pre"))
-     (hash 'input spec 'kind 'pre-release)]
+    [(or (equal? spec "stable")) (hash 'input spec 'kind 'stable)]
+    [(or (equal? spec "pre-release") (equal? spec "pre")) (hash 'input spec 'kind 'pre-release)]
     [(or (equal? spec "snapshot") (equal? spec "current"))
      (hash 'input spec 'kind 'snapshot 'snapshot-site 'auto)]
     [(regexp-match #px"^snapshot:(utah|northwestern)$" spec)
-     => (lambda (m)
-          (hash 'input spec
-                'kind 'snapshot
-                'snapshot-site (string->symbol (list-ref m 1))))]
-    [(numeric-version? spec)
-     (hash 'input spec 'kind 'release 'version spec)]
-    [else
-     (rackup-error "invalid version spec '~a'" spec)]))
+     =>
+     (lambda (m) (hash 'input spec 'kind 'snapshot 'snapshot-site (string->symbol (list-ref m 1))))]
+    [(numeric-version? spec) (hash 'input spec 'kind 'release 'version spec)]
+    [else (rackup-error "invalid version spec '~a'" spec)]))
 
 (define (sanitize-id-part s)
   (regexp-replace* #px"[^A-Za-z0-9._-]+" (format "~a" s) "_"))
@@ -114,32 +104,33 @@
       ['snapshot "snapshot"]
       [_ (sanitize-id-part kind)]))
   (define parts
-    (append
-     (list prefix)
-     (if (eq? kind 'snapshot)
-         (list (sanitize-id-part (or snapshot-site "unknown"))
-               (sanitize-id-part (or snapshot-stamp "unstamped")))
-         null)
-     (list (sanitize-id-part resolved-version)
-           (sanitize-id-part (variant->string variant))
-           (sanitize-id-part arch)
-           (sanitize-id-part platform)
-           (sanitize-id-part (distribution->string distribution)))))
+    (append (list prefix)
+            (if (eq? kind 'snapshot)
+                (list (sanitize-id-part (or snapshot-site "unknown"))
+                      (sanitize-id-part (or snapshot-stamp "unstamped")))
+                null)
+            (list (sanitize-id-part resolved-version)
+                  (sanitize-id-part (variant->string variant))
+                  (sanitize-id-part arch)
+                  (sanitize-id-part platform)
+                  (sanitize-id-part (distribution->string distribution)))))
   (string-join parts "-"))
 
 (define (normalized-host-arch)
   (define raw (system-type 'machine))
-  (define m (if (symbol? raw) (symbol->string raw) (format "~a" raw)))
+  (define m
+    (if (symbol? raw)
+        (symbol->string raw)
+        (format "~a" raw)))
   (cond
-    [(or (member m '("x86_64" "amd64"))
-         (regexp-match? #px"x86_64|amd64" m))
-     "x86_64"]
+    [(or (member m '("x86_64" "amd64")) (regexp-match? #px"x86_64|amd64" m)) "x86_64"]
     [(member m '("aarch64" "arm64")) "aarch64"]
     [(member m '("i386" "i686" "x86")) "i386"]
     [(equal? m "arm32") "arm"]
     [else m]))
 
-(define (linux-platform-token) "linux")
+(define (linux-platform-token)
+  "linux")
 
 (define (arch-token->normalized token)
   (cond
