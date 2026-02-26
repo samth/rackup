@@ -1,0 +1,8 @@
+.git
+.gitignore
+.rackup
+/tmp
+*.log
+libexec/compiled
+libexec/rackup/compiled
+test/compiled

@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SELF_DIR="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CORE="${SELF_DIR}/../libexec/rackup-core.rkt"
+
+exec racket "${CORE}" "$@"

@@ -1,0 +1,9 @@
+# Racket compiled artifacts
+compiled/
+**/compiled/
+
+# Tool output
+.rackup/
+
+# Misc
+.DS_Store

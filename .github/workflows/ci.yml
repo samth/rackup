@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  unit-tests:
+    name: Unit Tests (Racket)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Racket
+        uses: Bogdanp/setup-racket@v1.14
+        with:
+          architecture: x64
+          distribution: full
+          variant: CS
+          version: stable
+      - name: Build
+        run: raco make libexec/rackup-core.rkt libexec/rackup/*.rkt
+      - name: Test
+        run: TMPDIR=/tmp raco test test/versioning.rkt test/remote.rkt test/state-shims.rkt
+
+  docker-e2e-direct:
+    name: Docker E2E (direct, stable + older)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Docker fresh-container installs
+        run: |
+          scripts/docker-test-fresh-install.sh --spec stable --spec 8.18 --spec 7.9
+
+  docker-e2e-bootstrap:
+    name: Docker E2E (bootstrap)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Docker bootstrap fresh-container install
+        run: |
+          scripts/docker-test-fresh-install.sh --mode bootstrap --spec stable
