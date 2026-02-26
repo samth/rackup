@@ -20,6 +20,7 @@
          clear-default-toolchain!
          read-toolchain-meta
          write-toolchain-meta!
+         toolchain-env-vars
          register-toolchain!
          unregister-toolchain!
          find-local-toolchain
@@ -89,6 +90,20 @@
 
 (define (write-toolchain-meta! id meta)
   (write-rktd-file (rackup-toolchain-meta-file id) meta))
+
+(define (toolchain-env-vars id)
+  (define m (read-toolchain-meta id))
+  (define raw (and (hash? m) (hash-ref m 'env-vars #f)))
+  (cond
+    [(hash? raw)
+     (for/list ([k (in-list (sort (hash-keys raw) string<?))])
+       (cons k (hash-ref raw k)))]
+    [(list? raw)
+     (for/list ([entry (in-list raw)]
+                #:when (and (list? entry) (= (length entry) 2)))
+       (cons (format "~a" (car entry))
+             (format "~a" (cadr entry))))]
+    [else null]))
 
 (define (meta-summary meta)
   (for/hash ([k '(id kind requested-spec resolved-version variant distribution arch platform snapshot-site snapshot-stamp installed-at executables)])

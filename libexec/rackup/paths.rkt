@@ -24,6 +24,7 @@
          rackup-toolchain-install-dir
          rackup-toolchain-meta-file
          rackup-toolchain-bin-link
+         rackup-toolchain-env-file
          rackup-addon-dir
          ensure-rackup-layout!)
 
@@ -61,6 +62,8 @@
   (build-path (rackup-toolchain-dir id) "meta.rktd"))
 (define (rackup-toolchain-bin-link id)
   (build-path (rackup-toolchain-dir id) "bin"))
+(define (rackup-toolchain-env-file id)
+  (build-path (rackup-toolchain-dir id) "env.sh"))
 (define (rackup-addon-dir id)
   (build-path (rackup-addons-dir) id))
 

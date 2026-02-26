@@ -133,6 +133,35 @@ EOF
   echo "$pkg_dir"
 }
 
+create_fake_local_source_tree() {
+  local root="${TMPDIR}/rackup-e2e-local-src"
+  local plthome="$root/racket"
+  local bin_dir="$plthome/bin"
+  rm -rf "$root"
+  mkdir -p "$bin_dir" "$plthome/collects" "$root/pkgs"
+  cat > "$bin_dir/racket" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$#" -ge 2 && "$1" == "-e" ]]; then
+  case "$2" in
+    *"(version)"*) printf '9.99-local'; exit 0 ;;
+    *"system-type 'vm"*) printf 'cs'; exit 0 ;;
+  esac
+fi
+printf 'PLTHOME=%s\n' "${PLTHOME:-}"
+printf 'PLTCOLLECTS=%s\n' "${PLTCOLLECTS:-}"
+printf 'PLTADDONDIR=%s\n' "${PLTADDONDIR:-}"
+printf 'ARGS=%s\n' "$*"
+EOF
+  cat > "$bin_dir/raco" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'FAKE-RACO %s\n' "$*"
+EOF
+  chmod +x "$bin_dir/racket" "$bin_dir/raco"
+  echo "$root"
+}
+
 shell_eval_snippet_test() {
   local shell_name="$1"
   local toolchain_id="$2"
@@ -325,6 +354,21 @@ shell_eval_snippet_test bash "$shell_test_id" "$shell_test_prefix"
 shell_eval_snippet_test zsh "$shell_test_id" "$shell_test_prefix"
 shell_helper_function_test bash "$shell_test_id" "$shell_test_prefix"
 shell_helper_function_test zsh "$shell_test_id" "$shell_test_prefix"
+
+echo
+echo "== Local in-place source build link smoke =="
+fake_src_root="$(create_fake_local_source_tree)"
+linked_id="$(run_rackup link localsrc "$fake_src_root" --set-default | tail -n 1)"
+assert_eq "local-localsrc" "$linked_id" "unexpected linked toolchain id"
+run_rackup which racket --toolchain localsrc
+run_rackup which raco --toolchain localsrc
+link_shim_out="$(shim_racket)"
+assert_contains "PLTHOME=${fake_src_root}/racket" "$link_shim_out" "linked shim should export PLTHOME"
+assert_contains "PLTCOLLECTS=${fake_src_root}/racket/collects:${fake_src_root}/pkgs" "$link_shim_out" "linked shim should export PLTCOLLECTS"
+assert_contains "PLTADDONDIR=${RACKUP_HOME}/addons/${linked_id}" "$link_shim_out" "linked shim should export PLTADDONDIR"
+link_run_out="$(run_rackup run localsrc -- racket)"
+assert_contains "PLTHOME=${fake_src_root}/racket" "$link_run_out" "rackup run should apply linked toolchain env"
+run_rackup default "$primary_id"
 
 echo
 echo "Fresh-container install test PASSED"

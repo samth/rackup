@@ -1,6 +1,7 @@
 #lang racket/base
 
 (require racket/file
+         racket/list
          racket/path
          racket/string
          "paths.rkt"
@@ -51,18 +52,39 @@
 (define (emit-path-prepend)
   "if [ -d \"${RACKUP_HOME:-$HOME/.rackup}/shims\" ]; then\n  case \":$PATH:\" in *\":${RACKUP_HOME:-$HOME/.rackup}/shims:\"*) ;; *) export PATH=\"${RACKUP_HOME:-$HOME/.rackup}/shims:$PATH\" ;; esac\nfi\n")
 
+(define (emit-env-exports vars)
+  (apply string-append
+         (for/list ([kv (in-list vars)])
+           (define k (car kv))
+           (define v (cdr kv))
+           (format "export ~a=~a\n" k (sh-single-quote v)))))
+
 (define (emit-shell-activation toolchain-id)
   (unless (toolchain-exists? toolchain-id)
     (rackup-error "toolchain not installed: ~a" toolchain-id))
+  (define extra-env (toolchain-env-vars toolchain-id))
   (define addon (path->string* (rackup-addon-dir toolchain-id)))
   (string-append
    (emit-path-prepend)
-   "export RACKUP_TOOLCHAIN='" toolchain-id "'\n"
-   "export PLTADDONDIR='" addon "'\n"))
+   (emit-env-exports extra-env)
+   "export RACKUP_TOOLCHAIN=" (sh-single-quote toolchain-id) "\n"
+   "export PLTADDONDIR=" (sh-single-quote addon) "\n"))
+
+(define (deactivation-extra-vars)
+  (define active (getenv "RACKUP_TOOLCHAIN"))
+  (cond
+    [(and active (toolchain-exists? active))
+     (for/list ([kv (in-list (toolchain-env-vars active))])
+       (car kv))]
+    [else null]))
 
 (define (emit-shell-deactivation)
+  (define extra-vars (remove-duplicates (deactivation-extra-vars)))
   (string-append
    (emit-path-prepend)
+   (apply string-append
+          (for/list ([k (in-list extra-vars)])
+            (format "unset ~a\n" k)))
    "unset RACKUP_TOOLCHAIN\n"
    "unset PLTADDONDIR\n"))
 

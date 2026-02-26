@@ -4,6 +4,7 @@
          racket/list
          racket/match
          racket/path
+         racket/port
          racket/string
          racket/system
          "paths.rkt"
@@ -15,6 +16,7 @@
          "versioning.rkt")
 
 (provide install-toolchain!
+         link-toolchain!
          remove-toolchain!
          enumerate-toolchain-executables
          doctor-report)
@@ -76,6 +78,127 @@
     (delete-directory/files link))
   (make-file-or-directory-link real-bin-dir link)
   link)
+
+(define (write-toolchain-env-file! id env-vars)
+  (define p (rackup-toolchain-env-file id))
+  (define body
+    (string-append
+     "#!/usr/bin/env bash\n"
+     "# rackup managed toolchain environment\n"
+     (apply string-append
+            (for/list ([kv (in-list env-vars)])
+              (format "export ~a=~a\n" (car kv) (sh-single-quote (cdr kv)))))))
+  (write-string-file p body)
+  (file-or-directory-permissions p #o644)
+  p)
+
+(define (delete-toolchain-env-file! id)
+  (define p (rackup-toolchain-env-file id))
+  (when (file-exists? p)
+    (delete-file p)))
+
+(define (path-complete-string p)
+  (path->string* (path->complete-path p)))
+
+(define (path-join/colon paths)
+  (string-join (map path->string* paths) ":"))
+
+(define (maybe-parent p)
+  (and p (path-only p)))
+
+(define (detect-local-source-layout path-input)
+  (define input-path
+    (path->complete-path
+     (expand-user-path
+      (if (path? path-input) path-input (string->path path-input)))))
+  (define (dir? . parts)
+    (directory-exists? (apply build-path input-path parts)))
+  (cond
+    [(and (dir? "racket") (dir? "racket" "bin") (dir? "racket" "collects"))
+     (define source-root input-path)
+     (define plthome (build-path source-root "racket"))
+     (define bin-dir (build-path plthome "bin"))
+     (define collects (build-path plthome "collects"))
+     (define pkgs (build-path source-root "pkgs"))
+     (hash 'input-path (path-complete-string input-path)
+           'source-root (path-complete-string source-root)
+           'plthome (path-complete-string plthome)
+           'bin-dir (path-complete-string bin-dir)
+           'collects-dir (path-complete-string collects)
+           'pkgs-dir (and (directory-exists? pkgs) (path-complete-string pkgs)))]
+    [else
+     (define maybe-bin
+       (cond
+         [(and (directory-exists? input-path)
+               (directory-exists? (build-path input-path "collects"))
+               (directory-exists? (build-path input-path "bin")))
+          (build-path input-path "bin")]
+         [(and (directory-exists? input-path)
+               (equal? (path-basename-string input-path) "bin")
+               (directory-exists? (build-path (or (maybe-parent input-path) input-path) "collects")))
+          input-path]
+         [else #f]))
+     (unless maybe-bin
+       (rackup-error
+        (string-append
+         "could not detect an in-place source build layout at ~a\n"
+         "Expected either <root>/racket/bin + <root>/racket/collects or <plthome>/bin + <plthome>/collects")
+        (path->string* input-path)))
+     (define plthome (or (maybe-parent maybe-bin) input-path))
+     (define maybe-root (maybe-parent plthome))
+     (define pkgs (and maybe-root (build-path maybe-root "pkgs")))
+     (hash 'input-path (path-complete-string input-path)
+           'source-root (and maybe-root (directory-exists? pkgs) (path-complete-string maybe-root))
+           'plthome (path-complete-string plthome)
+           'bin-dir (path-complete-string maybe-bin)
+           'collects-dir (path-complete-string (build-path plthome "collects"))
+           'pkgs-dir (and (directory-exists? pkgs) (path-complete-string pkgs)))]))
+
+(define (local-layout-env-vars layout)
+  (define collects-dir (hash-ref layout 'collects-dir))
+  (define pkgs-dir (hash-ref layout 'pkgs-dir #f))
+  (define collects-path
+    (if pkgs-dir
+        (path-join/colon (list collects-dir pkgs-dir))
+        (path-join/colon (list collects-dir))))
+  (list (cons "PLTHOME" (hash-ref layout 'plthome))
+        (cons "PLTCOLLECTS" collects-path)))
+
+(define (capture-program-output #:env [env-vars null] exe . args)
+  (define old-vals
+    (for/list ([kv (in-list env-vars)])
+      (cons (car kv) (getenv (car kv)))))
+  (define out (open-output-string))
+  (define err (open-output-string))
+  (dynamic-wind
+   (lambda ()
+     (for ([kv (in-list env-vars)])
+       (putenv (car kv) (cdr kv))))
+   (lambda ()
+     (parameterize ([current-output-port out]
+                    [current-error-port err])
+       (if (apply system* exe args)
+           (string-trim (get-output-string out))
+           #f)))
+   (lambda ()
+     (for ([kv (in-list old-vals)])
+       (define k (car kv))
+       (define v (cdr kv))
+       (if v (putenv k v) (putenv k ""))))))
+
+(define (probe-local-racket-version+variant bin-dir env-vars)
+  (define racket-exe (build-path (string->path bin-dir) "racket"))
+  (define version-out
+    (capture-program-output #:env env-vars
+                            racket-exe
+                            "-e" "(display (version))"))
+  (define variant-out
+    (capture-program-output #:env env-vars
+                            racket-exe
+                            "-e"
+                            "(display (let ([v (system-type 'vm)]) (if (symbol? v) (symbol->string v) (format \"~a\" v))))"))
+  (values (and version-out (not (string-blank? version-out)) version-out)
+          (and variant-out (not (string-blank? variant-out)) (string-downcase variant-out))))
 
 (define (toolchain-meta request id real-bin-dir executables)
   (hash 'id id
@@ -147,6 +270,97 @@
       [(list flag _ ...)
        (rackup-error "unknown install flag: ~a" flag)])))
 
+(define (parse-link-options opts)
+  (define set-default? #f)
+  (define force? #f)
+  (let loop ([rest opts])
+    (match rest
+      ['() (hash 'set-default? set-default?
+                 'force? force?)]
+      [(list "--set-default" more ...)
+       (set! set-default? #t)
+       (loop more)]
+      [(list "--force" more ...)
+       (set! force? #t)
+       (loop more)]
+      [(list flag _ ...)
+       (rackup-error "unknown link flag: ~a" flag)])))
+
+(define (local-toolchain-id name)
+  (string-append "local-" (sanitize-id-part name)))
+
+(define (local-toolchain-meta id name layout real-bin-dir executables)
+  (define env-vars (local-layout-env-vars layout))
+  (define-values (version* variant*) (probe-local-racket-version+variant (path->string* real-bin-dir) env-vars))
+  (define platform-raw (system-type 'os))
+  (define platform (if (symbol? platform-raw)
+                       (symbol->string platform-raw)
+                       (format "~a" platform-raw)))
+  (hash 'id id
+        'kind 'local
+        'requested-spec name
+        'resolved-version (or version* "local")
+        'variant (or (and variant* (string->symbol variant*)) 'unknown)
+        'distribution 'in-place
+        'arch (normalized-host-arch)
+        'platform platform
+        'snapshot-site #f
+        'snapshot-stamp #f
+        'installer-url #f
+        'installer-filename #f
+        'source-path (hash-ref layout 'input-path)
+        'source-root (hash-ref layout 'source-root #f)
+        'plthome (hash-ref layout 'plthome)
+        'pltcollects (cdr (assoc "PLTCOLLECTS" env-vars))
+        'install-root #f
+        'bin-link (path->string* (rackup-toolchain-bin-link id))
+        'real-bin-dir (path->string* real-bin-dir)
+        'env-vars (for/list ([kv (in-list env-vars)])
+                    (list (car kv) (cdr kv)))
+        'executables executables
+        'installed-at (current-iso8601)))
+
+(define (link-toolchain! name local-path opts)
+  (ensure-rackup-layout!)
+  (ensure-index!)
+  (when (or (not (string? name)) (string-blank? name))
+    (rackup-error "toolchain link name must be non-empty"))
+  (define parsed-opts (parse-link-options opts))
+  (define id (local-toolchain-id name))
+  (define tc-dir (rackup-toolchain-dir id))
+  (define layout (detect-local-source-layout local-path))
+  (define real-bin-dir (string->path (hash-ref layout 'bin-dir)))
+  (define racket-exe (build-path real-bin-dir "racket"))
+  (unless (file-executable?/safe racket-exe)
+    (rackup-error "linked toolchain does not contain an executable racket binary at ~a"
+                  (path->string* racket-exe)))
+  (cond
+    [(directory-exists? tc-dir)
+     (if (hash-ref parsed-opts 'force? #f)
+         (begin
+           (delete-directory/files tc-dir)
+           (link-toolchain! name local-path opts))
+         (begin
+           (rackup-error "toolchain already exists: ~a (use --force to relink)" id)))]
+    [else
+     (with-handlers ([exn:fail?
+                      (lambda (e)
+                        (when (directory-exists? tc-dir)
+                          (delete-directory/files tc-dir))
+                        (raise e))])
+       (make-directory* tc-dir)
+       (make-bin-link! id real-bin-dir)
+       (write-toolchain-env-file! id (local-layout-env-vars layout))
+       (ensure-toolchain-addon-dir! id)
+       (define executables (enumerate-toolchain-executables real-bin-dir))
+       (define meta (local-toolchain-meta id name layout real-bin-dir executables))
+       (register-toolchain! id meta)
+       (when (hash-ref parsed-opts 'set-default? #f)
+         (set-default-toolchain! id))
+       (reshim!)
+       (displayln (format "Linked ~a => ~a" id (hash-ref layout 'plthome)))
+       id)]))
+
 (define (install-toolchain! spec opts)
   (ensure-rackup-layout!)
   (ensure-index!)
@@ -185,6 +399,7 @@
        (run-linux-installer! installer-path install-root)
        (define real-bin-dir (detect-bin-dir install-root))
        (make-bin-link! id real-bin-dir)
+       (delete-toolchain-env-file! id)
        (ensure-toolchain-addon-dir! id)
        (define executables (enumerate-toolchain-executables real-bin-dir))
        (define meta (toolchain-meta request id real-bin-dir executables))

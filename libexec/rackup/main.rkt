@@ -19,6 +19,7 @@
   (displayln "")
   (displayln "Commands:")
   (displayln "  install <spec> [--variant cs|bc] [--distribution full|minimal] [--snapshot-site auto|utah|northwestern] [--set-default]")
+  (displayln "  link <name> <path> [--set-default] [--force]")
   (displayln "  list")
   (displayln "  default [<toolchain>]")
   (displayln "  current")
@@ -138,6 +139,11 @@
       [(equal? (car rest) "--") (values (reverse left) (cdr rest))]
       [else (loop (cons (car rest) left) (cdr rest))])))
 
+(define (apply-toolchain-runtime-env! id)
+  (for ([kv (in-list (toolchain-env-vars id))])
+    (putenv (car kv) (cdr kv)))
+  (putenv "PLTADDONDIR" (path->string (rackup-addon-dir id))))
+
 (define (cmd-run rest)
   (ensure-index!)
   (define-values (head tail) (split-on-double-dash rest))
@@ -147,7 +153,7 @@
        (rackup-error "usage: rackup run <toolchain> -- <command> [args...]"))
      (define id (resolve-toolchain-or-die spec))
      (putenv "RACKUP_TOOLCHAIN" id)
-     (putenv "PLTADDONDIR" (path->string (rackup-addon-dir id)))
+     (apply-toolchain-runtime-env! id)
      (define old-path (or (getenv "PATH") ""))
      (define shims (path->string (rackup-shims-dir)))
      (unless (regexp-match? (pregexp (format "(^|:)~a(:|$)" (regexp-quote shims))) old-path)
@@ -176,6 +182,13 @@
      (displayln id)]
     [_ (rackup-error "usage: rackup install <spec> [flags]")]))
 
+(define (cmd-link rest)
+  (match rest
+    [(list name path more ...)
+     (define id (link-toolchain! name path more))
+     (displayln id)]
+    [_ (rackup-error "usage: rackup link <name> <path> [--set-default] [--force]")]))
+
 (define (cmd-doctor)
   (doctor-report))
 
@@ -193,6 +206,7 @@
       ['() (usage)]
       [(list "help" _ ...) (usage)]
       [(list "install" rest ...) (cmd-install rest)]
+      [(list "link" rest ...) (cmd-link rest)]
       [(list "list") (cmd-list)]
       [(list "default" rest ...) (cmd-default rest)]
       [(list "current") (cmd-current)]

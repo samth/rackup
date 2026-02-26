@@ -15,7 +15,8 @@
          system*/check
          current-iso8601
          path-basename-string
-         maybe-string->symbol)
+         maybe-string->symbol
+         sh-single-quote)
 
 (define (rackup-error fmt . args)
   (raise-user-error 'rackup (apply format fmt args)))
@@ -74,3 +75,10 @@
     [(symbol? v) v]
     [(string? v) (string->symbol v)]
     [else #f]))
+
+(define (sh-single-quote s)
+  (define str (format "~a" s))
+  (string-append
+   "'"
+   (regexp-replace* #px"'" str "'\"'\"'")
+   "'"))
