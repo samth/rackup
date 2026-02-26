@@ -20,6 +20,8 @@ jobs:
           version: stable
       - name: Build
         run: raco make libexec/rackup-core.rkt libexec/rackup/*.rkt
+      - name: Install test deps
+        run: raco pkg install --auto recspecs
       - name: Test (includes local-link unit coverage)
         run: TMPDIR=/tmp raco test test/versioning.rkt test/remote.rkt test/state-shims.rkt
 
