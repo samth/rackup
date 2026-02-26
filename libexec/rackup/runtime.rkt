@@ -3,6 +3,7 @@
 (require racket/file
          racket/match
          racket/path
+         racket/port
          racket/string
          racket/system
          "paths.rkt"
@@ -20,6 +21,14 @@
 (define (hidden-runtime-racket-path)
   (define p (build-path (rackup-runtime-current-link) "bin" "racket"))
   (and (executable-file? p) p))
+
+(define (hidden-runtime-raco-path)
+  (define racket-exe (hidden-runtime-racket-path))
+  (and racket-exe
+       (let ([dir (path-only racket-exe)])
+         (and dir
+              (let ([p (build-path dir "raco")])
+                (and (executable-file? p) p))))))
 
 (define (hidden-runtime-present?)
   (and (hidden-runtime-racket-path) #t))
@@ -192,6 +201,25 @@
           (displayln (format "Adopted hidden runtime: ~a" current-id)))
         current-id)))
 
+(define (rackup-core-source-path)
+  (build-path (rackup-libexec-dir) "rackup-core.rkt"))
+
+(define (precompile-rackup-sources!)
+  (define raco-exe (hidden-runtime-raco-path))
+  (define core (rackup-core-source-path))
+  (when (and raco-exe (file-exists? core))
+    (define out (open-output-nowhere))
+    (define err (open-output-string))
+    (define ok?
+      (parameterize ([current-output-port out]
+                     [current-error-port err])
+        (system* raco-exe "make" core)))
+    (unless ok?
+      (define details (string-trim (get-output-string err)))
+      (eprintf "rackup: warning: failed to precompile rackup sources with raco make\n")
+      (unless (string-blank? details)
+        (eprintf "~a\n" details)))))
+
 (define (with-runtime-lock thunk)
   (ensure-rackup-layout!)
   (define lock-dir (rackup-runtime-lock-dir))
@@ -291,6 +319,10 @@
              (printf "distribution: ~a\n" (hash-ref m 'distribution ""))
              (printf "installed-at: ~a\n" (hash-ref m 'installed-at ""))))
          (displayln "present: no"))]
-    [(list "install") (install-hidden-runtime!)]
-    [(list "upgrade") (upgrade-hidden-runtime!)]
+    [(list "install")
+     (install-hidden-runtime!)
+     (precompile-rackup-sources!)]
+    [(list "upgrade")
+     (upgrade-hidden-runtime!)
+     (precompile-rackup-sources!)]
     [_ (rackup-error "usage: rackup runtime status|install|upgrade")]))

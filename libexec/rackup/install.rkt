@@ -22,6 +22,31 @@
          enumerate-toolchain-executables
          doctor-report)
 
+(define (install-color-enabled?)
+  (and (terminal-port? (current-output-port)) (not (getenv "NO_COLOR"))))
+
+(define (ansi-color code s)
+  (if (install-color-enabled?)
+      (string-append "\u001b[" code "m" s "\u001b[0m")
+      s))
+
+(define (install-info fmt . args)
+  (displayln (ansi-color "34" (apply format fmt args))))
+
+(define (install-ok fmt . args)
+  (displayln (ansi-color "32" (apply format fmt args))))
+
+(define (install-warn fmt . args)
+  (eprintf "~a\n" (ansi-color "33" (apply format fmt args))))
+
+(define (truncate-lines s [max-lines 80])
+  (define lines (string-split s "\n"))
+  (if (<= (length lines) max-lines)
+      s
+      (string-append (string-join (take lines max-lines) "\n")
+                     "\n..."
+                     (format "\n[truncated to first ~a lines]" max-lines))))
+
 (define (installer-cache-file installer-url)
   (build-path (rackup-download-cache-dir)
               (path-basename-string (string->path (car (reverse (string-split installer-url "/")))))))
@@ -30,7 +55,7 @@
   (ensure-rackup-layout!)
   (define cache-path (installer-cache-file installer-url))
   (when (or no-cache? (not (file-exists? cache-path)))
-    (displayln (format "Downloading installer: ~a" installer-url))
+    (install-info "Downloading installer: ~a" installer-url)
     (download-url->file installer-url cache-path)
     (file-or-directory-permissions cache-path #o755))
   cache-path)
@@ -42,8 +67,20 @@
   ;; Use the same dest/in-place flow as setup-racket for Linux.
   (define installer (path->complete-path installer-file))
   (define dest (path->complete-path install-root))
-  (displayln (format "Installing into ~a" (path->string dest)))
-  (system*/check 'linux-installer (shell-exe) installer "--create-dir" "--in-place" "--dest" dest))
+  (install-info "Installing into ~a" (path->string dest))
+  (define combined (open-output-string))
+  (define ok?
+    (parameterize ([current-output-port combined]
+                   [current-error-port combined])
+      (system* (shell-exe) installer "--create-dir" "--in-place" "--dest" dest)))
+  (unless ok?
+    (define details (string-trim (get-output-string combined)))
+    (install-warn "Installer script failed.")
+    (unless (string-blank? details)
+      (eprintf "%s\n" (truncate-lines details)))
+    (rackup-error "linux-installer failed: ~a --create-dir --in-place --dest ~a"
+                  (path->string* installer)
+                  (path->string* dest))))
 
 (define (detect-bin-dir install-root)
   (define p1 (build-path install-root "bin"))
@@ -518,7 +555,7 @@
            (delete-directory/files tc-dir)
            (install-toolchain! spec opts))
          (begin
-           (displayln (format "Already installed: ~a" id))
+           (install-ok "Already installed: ~a" id)
            (when (hash-ref parsed-opts 'set-default? #f)
              (set-default-toolchain! id))
            (reshim!)
@@ -543,7 +580,7 @@
        (when (hash-ref parsed-opts 'set-default? #f)
          (set-default-toolchain! id))
        (reshim!)
-       (displayln (format "Installed ~a" id))
+       (install-ok "Installed ~a" id)
        id)]))
 
 (define (remove-toolchain! id)

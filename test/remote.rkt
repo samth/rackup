@@ -64,4 +64,21 @@
                                            #:variant 'cs
                                            #:distribution 'minimal
                                            #:arch "x86_64")
-                "racket-minimal-current-x86_64-linux-cs.sh"))
+                "racket-minimal-current-x86_64-linux-cs.sh")
+
+  (define fake-all-versions-html
+    (string-append
+     "<html><body>\n"
+     "<a href=\"/releases/9.1/\">9.1</a>\n"
+     "<a href=\"/installers/8.18/\">8.18</a>\n"
+     "<a href=\"https://download.racket-lang.org/releases/7.9/\">7.9</a>\n"
+     "<a href=\"/releases/9.1/\">9.1</a>\n"
+     "<a href=\"/misc/2026/\">2026</a>\n"
+     "</body></html>\n"))
+  (check-equal? (parse-all-versions-html fake-all-versions-html)
+                '("9.1" "8.18" "7.9"))
+
+  (define fake-all-versions-html-fallback
+    "<a class=\"v\">8.16.0.4</a> <a class=\"v\">8.15</a>")
+  (check-equal? (parse-all-versions-html fake-all-versions-html-fallback)
+                '("8.16.0.4" "8.15")))

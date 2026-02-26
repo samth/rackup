@@ -7,6 +7,7 @@
          racket/system
          "install.rkt"
          "paths.rkt"
+         "remote.rkt"
          "runtime.rkt"
          "shell.rkt"
          "shims.rkt"
@@ -15,25 +16,43 @@
 
 (provide main)
 
+(define (usage-line cmd desc)
+  (printf "  ~a~a~a\n"
+          cmd
+          (make-string (max 2 (- 22 (string-length cmd))) #\space)
+          desc))
+
 (define (usage)
   (displayln "rackup - Racket toolchain manager")
   (displayln "")
   (displayln "Commands:")
-  (displayln
-   "  install <spec> [--variant cs|bc] [--distribution full|minimal] [--snapshot-site auto|utah|northwestern] [--set-default]")
-  (displayln "  link <name> <path> [--set-default] [--force]")
-  (displayln "  list")
-  (displayln "  default [<toolchain>]")
-  (displayln "  current")
-  (displayln "  which <exe> [--toolchain <toolchain>]")
-  (displayln "  shell <toolchain> | shell --deactivate")
-  (displayln "  run <toolchain> -- <command> [args...]")
-  (displayln "  remove <toolchain>")
-  (displayln "  reshim")
-  (displayln "  init [--shell bash|zsh]")
-  (displayln "  runtime status|install|upgrade")
-  (displayln "  doctor")
-  (displayln "  help"))
+  (usage-line "available [--all|--limit N]"
+              "List remote install specs and recent release versions.")
+  (usage-line "install <spec> [flags]"
+              "Install a Racket toolchain (release, pre-release, snapshot).")
+  (usage-line "link <name> <path> [flags]"
+              "Link an in-place/local Racket build as a managed toolchain.")
+  (usage-line "list" "List installed toolchains (shows default/active tags).")
+  (usage-line "default [<toolchain>|--unset]"
+              "Show, set, or clear the global default toolchain.")
+  (usage-line "current" "Show the active toolchain and whether it is shell/global.")
+  (usage-line "which <exe> [--toolchain <toolchain>]"
+              "Show the real executable path for a tool in a toolchain.")
+  (usage-line "shell <toolchain> | shell --deactivate"
+              "Emit shell code to activate/deactivate a toolchain in this shell.")
+  (usage-line "run <toolchain> -- <command> [args...]"
+              "Run a command using a specific toolchain without changing defaults.")
+  (usage-line "remove <toolchain>"
+              "Remove an installed or linked toolchain and its addon dir.")
+  (usage-line "reshim" "Rebuild executable shims from installed toolchains.")
+  (usage-line "init [--shell bash|zsh]"
+              "Install/update shell integration in ~/.bashrc or ~/.zshrc.")
+  (usage-line "runtime status|install|upgrade"
+              "Manage rackup's hidden internal runtime used to run rackup itself.")
+  (usage-line "doctor" "Print diagnostics for paths, runtime, and installed toolchains.")
+  (usage-line "help" "Show this help text.")
+  (displayln "")
+  (displayln "Use `rackup <command>` for the command, and `rackup help` for this summary."))
 
 (define (resolve-toolchain-or-die spec)
   (define id (find-local-toolchain spec))
@@ -186,6 +205,74 @@
      (displayln id)]
     [_ (rackup-error "usage: rackup install <spec> [flags]")]))
 
+(define (parse-available-options rest)
+  (define limit 20)
+  (let loop ([xs rest])
+    (match xs
+      ['() limit]
+      [(list "--all") #f]
+      [(list "--limit" n more ...)
+       (define k (string->number n))
+       (unless (and (exact-integer? k) (positive? k))
+         (rackup-error "invalid --limit value: ~a (expected positive integer)" n))
+       (set! limit k)
+       (loop more)]
+      [(list flag _ ...) (rackup-error "usage: rackup available [--all|--limit N] (unknown flag ~a)"
+                                       flag)])))
+
+(define (fmt-req-summary req)
+  (define kind (hash-ref req 'kind #f))
+  (define version (hash-ref req 'resolved-version "?"))
+  (define variant (hash-ref req 'variant "?"))
+  (define dist (hash-ref req 'distribution "?"))
+  (define arch (hash-ref req 'arch "?"))
+  (define snap-site (hash-ref req 'snapshot-site #f))
+  (define snap-stamp (hash-ref req 'snapshot-stamp #f))
+  (if (eq? kind 'snapshot)
+      (format "~a (~a, stamp ~a, ~a, ~a, ~a)"
+              version
+              (or snap-site "?")
+              (or snap-stamp "?")
+              variant
+              dist
+              arch)
+      (format "~a (~a, ~a, ~a)" version variant dist arch)))
+
+(define (display-available-alias label spec)
+  (with-handlers ([exn:fail? (lambda (e)
+                               (printf "  ~a -> unavailable (~a)\n" label (exn-message e)))])
+    (define req (resolve-install-request spec))
+    (printf "  ~a -> ~a\n" label (fmt-req-summary req))))
+
+(define (cmd-available rest)
+  (define limit (parse-available-options rest))
+  (displayln "Install aliases:")
+  (display-available-alias "stable" "stable")
+  (display-available-alias "pre-release" "pre-release")
+  (display-available-alias "snapshot" "snapshot")
+  (display-available-alias "snapshot:utah" "snapshot:utah")
+  (display-available-alias "snapshot:northwestern" "snapshot:northwestern")
+  (newline)
+  (define versions
+    (with-handlers ([exn:fail? (lambda (e)
+                                 (rackup-error "failed to fetch release list: ~a" (exn-message e)))])
+      (fetch-all-release-versions)))
+  (define shown (if (and limit (> (length versions) limit)) (take versions limit) versions))
+  (printf "Release versions (~a):\n"
+          (if limit
+              (format "showing ~a of ~a" (length shown) (length versions))
+              (format "all ~a" (length shown))))
+  (for ([v shown])
+    (printf "  ~a\n" v))
+  (newline)
+  (displayln "Examples:")
+  (displayln "  rackup install stable")
+  (displayln "  rackup install 8.18")
+  (displayln "  rackup install pre-release")
+  (displayln "  rackup install snapshot")
+  (newline)
+  (displayln "Note: specific variant/distribution/arch compatibility is checked at install time."))
+
 (define (cmd-link rest)
   (match rest
     [(list name path more ...)
@@ -206,7 +293,8 @@
     (define args (vector->list (current-command-line-arguments)))
     (match args
       ['() (usage)]
-      [(list "help" _ ...) (usage)]
+      [(or (list "help" _ ...) (list "--help") (list "-h")) (usage)]
+      [(list "available" rest ...) (cmd-available rest)]
       [(list "install" rest ...) (cmd-install rest)]
       [(list "link" rest ...) (cmd-link rest)]
       [(list "list") (cmd-list)]

@@ -168,6 +168,13 @@ current_shim_version() {
   shim_racket -e '(display (version))'
 }
 
+assert_rackup_self_compiled() {
+  local core_zo="$RACKUP_HOME/libexec/compiled/rackup-core_rkt.zo"
+  local main_zo="$RACKUP_HOME/libexec/rackup/compiled/main_rkt.zo"
+  [[ -f "$core_zo" ]] || fail "expected rackup core bytecode at $core_zo"
+  [[ -f "$main_zo" ]] || fail "expected rackup main bytecode at $main_zo"
+}
+
 version_prefix_for_spec() {
   local spec="$1"
   case "$spec" in
@@ -330,6 +337,9 @@ runtime_status="$(run_rackup runtime status)"
 echo "$runtime_status"
 if [[ "$MODE" == "bootstrap" || "$MODE" == "bootstrap-curl" ]]; then
   assert_contains "present: yes" "$runtime_status" "bootstrap should install hidden runtime"
+  echo
+  echo "== rackup self-precompile check =="
+  assert_rackup_self_compiled
 else
   assert_contains "present: " "$runtime_status" "runtime status output missing"
 fi

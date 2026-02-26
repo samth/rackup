@@ -11,6 +11,8 @@
          "versioning.rkt")
 
 (provide lookup-stable-version
+         parse-all-versions-html
+         fetch-all-release-versions
          fetch-table-rktd
          fetch-version-rktd
          fetch-snapshot-stamp
@@ -20,6 +22,7 @@
          download-url->file)
 
 (define release-version-url "https://download.racket-lang.org/version.txt")
+(define all-versions-url "https://download.racket-lang.org/all-versions.html")
 (define pre-release-installers-base "https://pre-release.racket-lang.org/installers/")
 (define snapshot-sites
   (hash 'utah "https://users.cs.utah.edu/plt" 'northwestern "https://plt.cs.northwestern.edu"))
@@ -126,6 +129,32 @@
   (match (regexp-match version-re (http-get-string release-version-url))
     [(list _ v) v]
     [_ (rackup-error "failed to parse stable version from ~a" release-version-url)]))
+
+(define (parse-all-versions-html html)
+  (define (extract rx)
+    (for/list ([m (in-list (regexp-match* rx html #:match-select cdr))])
+      (car m)))
+  ;; Prefer versions that appear in release/installers links.
+  (define from-links
+    (append (extract #px"href=\"(?:[^\"]*/)?(?:releases|installers)/([0-9]+(?:\\.[0-9]+){1,3})/?(?:[\"#?])")
+            (extract #px"https?://download[.]racket-lang[.]org/(?:releases|installers)/([0-9]+(?:\\.[0-9]+){1,3})/?")))
+  ;; Current page uses table rows like `<strong>Version 9.1</strong>`.
+  (define from-version-labels
+    (extract #px"\\bVersion\\s+([0-9]+(?:\\.[0-9]+){1,3})\\b"))
+  ;; Fall back to anchored text if link formats drift.
+  (define from-anchor-text
+    (extract #px"<a[^>]*>\\s*([0-9]+(?:\\.[0-9]+){1,3})\\s*</a>"))
+  (define candidates (append from-links from-version-labels from-anchor-text))
+  (define versions
+    (remove-duplicates (filter numeric-version? candidates) string=?))
+  (sort versions (lambda (a b) (> (cmp-versions a b) 0))))
+
+(define (fetch-all-release-versions)
+  (define html (http-get-string all-versions-url))
+  (define versions (parse-all-versions-html html))
+  (unless (pair? versions)
+    (rackup-error "failed to parse release versions from ~a" all-versions-url))
+  versions)
 
 (define (installers-base-url-for-release version)
   (format "https://download.racket-lang.org/installers/~a/" version))
@@ -292,6 +321,35 @@
 (define (snapshot-installers-base site)
   (format "~a/snapshots/current/installers/" (hash-ref snapshot-sites site)))
 
+(define (select-snapshot-installer-filename table
+                                            version-rktd
+                                            #:variant variant
+                                            #:distribution distribution
+                                            #:arch arch
+                                            #:platform [platform "linux"]
+                                            #:ext [ext "sh"])
+  (define resolved-version (resolved-version-from-version-rktd version-rktd "current"))
+  (define fallback-token
+    (if (and (string? resolved-version) (not (equal? resolved-version "current")))
+        resolved-version
+        (best-version-token-from-table table "current")))
+  (define (select token #:allow-prefix? [allow-prefix? #f])
+    (select-installer-filename table
+                               #:version-token token
+                               #:variant variant
+                               #:distribution distribution
+                               #:arch arch
+                               #:platform platform
+                               #:ext ext
+                               #:allow-version-prefix? allow-prefix?))
+  (with-handlers ([exn:fail?
+                   (lambda (e)
+                     (cond
+                       [(numeric-version? fallback-token) (select fallback-token #:allow-prefix? #t)]
+                       [(not (equal? fallback-token "current")) (select fallback-token)]
+                       [else (raise e)]))])
+    (select "current")))
+
 (define (try-resolve-snapshot-site sites #:distribution distribution #:arch arch #:variant variant)
   (define results
     (for/list ([site sites])
@@ -302,11 +360,11 @@
         (define version-rktd (fetch-version-rktd base))
         (define table (fetch-table-rktd base))
         ;; Ensure the requested combo exists before choosing this site.
-        (void (select-installer-filename table
-                                         #:version-token "current"
-                                         #:variant variant
-                                         #:distribution distribution
-                                         #:arch arch))
+        (void (select-snapshot-installer-filename table
+                                                  version-rktd
+                                                  #:variant variant
+                                                  #:distribution distribution
+                                                  #:arch arch))
         (hash 'site site 'ok? #t 'stamp stamp 'table table 'version version-rktd))))
   (define ok-results (filter (lambda (r) (hash-ref r 'ok? #f)) results))
   (unless (pair? ok-results)
@@ -503,13 +561,13 @@
      (when (and (equal? variant 'cs) (not (cs-supported? resolved-version)))
        (rackup-error "snapshot resolved to version without CS support: ~a" resolved-version))
      (define filename
-       (select-installer-filename table
-                                  #:version-token "current"
-                                  #:variant variant
-                                  #:distribution distribution*
-                                  #:arch arch
-                                  #:platform platform
-                                  #:ext "sh"))
+       (select-snapshot-installer-filename table
+                                           version-rktd
+                                           #:variant variant
+                                           #:distribution distribution*
+                                           #:arch arch
+                                           #:platform platform
+                                           #:ext "sh"))
      (hash 'kind
            'snapshot
            'requested-spec
