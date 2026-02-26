@@ -223,10 +223,14 @@ rackup_hidden_runtime_install_if_missing() {
   fi
 
   rackup_warn "installing hidden runtime: $runtime_id"
-  if ! /bin/sh "$installer_cache" --create-dir --in-place --dest "$install_root"; then
+  installer_log="$(mktemp "${TMPDIR:-/tmp}/rackup-hidden-runtime-installer.XXXXXX.log")"
+  if ! /bin/sh "$installer_cache" --create-dir --in-place --dest "$install_root" >"$installer_log" 2>&1; then
+    sed -n '1,200p' "$installer_log" >&2 || true
+    rm -f "$installer_log"
     rm -rf "$tmp_version_dir"
     rackup_fail "hidden runtime installer failed"
   fi
+  rm -f "$installer_log"
 
   rm -rf "$version_dir"
   mv "$tmp_version_dir" "$version_dir"

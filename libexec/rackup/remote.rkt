@@ -1,12 +1,12 @@
 #lang racket/base
 
-(require net/url
-         racket/file
+(require racket/file
          racket/list
          racket/match
          racket/path
          racket/port
          racket/string
+         racket/system
          "util.rkt"
          "versioning.rkt")
 
@@ -33,38 +33,92 @@
     [(list _ code) (string->number code)]
     [_ #f]))
 
-(define (http-open url-str)
+(define net/url:string->url #f)
+(define net/url:get-pure-port/headers #f)
+(define net/url:loaded? #f)
+
+(define (ensure-net/url!)
+  (unless net/url:loaded?
+    (set! net/url:string->url (dynamic-require 'net/url 'string->url))
+    (set! net/url:get-pure-port/headers (dynamic-require 'net/url 'get-pure-port/headers))
+    (set! net/url:loaded? #t)))
+
+(define (http-external-tool)
+  (cond
+    [(find-executable-path "curl") => (lambda (p) (cons 'curl p))]
+    [(find-executable-path "wget") => (lambda (p) (cons 'wget p))]
+    [else #f]))
+
+(define (command-display-string args)
+  (string-join (map path->string* args) " "))
+
+(define (system*/capture who . args)
+  (define out (open-output-string))
+  (define err (open-output-string))
+  (parameterize ([current-output-port out]
+                 [current-error-port err])
+    (if (apply system* args)
+        (get-output-string out)
+        (rackup-error "~a failed: ~a~a"
+                      who
+                      (command-display-string args)
+                      (let ([e (string-trim (get-output-string err))])
+                        (if (string-blank? e) "" (string-append "\n" e)))))))
+
+(define (external-http-get-string url-str)
+  (match (http-external-tool)
+    [(cons 'curl exe) (system*/capture 'curl exe "-fsSL" url-str)]
+    [(cons 'wget exe) (system*/capture 'wget exe "-qO-" url-str)]
+    [_ #f]))
+
+(define (external-download-url->file url-str dest-path)
+  (make-directory* (or (path-only dest-path) "."))
+  (match (http-external-tool)
+    [(cons 'curl exe)
+     (system*/check 'curl-download exe "-fsSL" url-str "-o" dest-path)
+     dest-path]
+    [(cons 'wget exe)
+     (system*/check 'wget-download exe "-qO" dest-path url-str)
+     dest-path]
+    [_ #f]))
+
+(define (http-open/racket url-str)
+  (ensure-net/url!)
   (define u
-    (if (url? url-str)
-        url-str
-        (string->url url-str)))
-  (define-values (in headers) (get-pure-port/headers u #:redirections 5 #:status? #t))
+    (if (string? url-str)
+        (net/url:string->url url-str)
+        url-str))
+  (define-values (in headers) (net/url:get-pure-port/headers u #:redirections 5 #:status? #t))
   (define code (status-code headers))
   (unless (equal? code 200)
     (close-input-port in)
     (rackup-error "HTTP request failed (~a): ~a"
                   code
-                  (if (url? url-str)
-                      (url->string url-str)
-                      url-str)))
+                  (path->string* url-str)))
   in)
 
 (define (http-get-string url-str)
-  (define in (http-open url-str))
-  (begin0 (port->string in)
-    (close-input-port in)))
+  (or (external-http-get-string url-str)
+      (let ([in (http-open/racket url-str)])
+        (begin0 (port->string in)
+          (close-input-port in)))))
 
 (define (http-get-rktd url-str)
-  (define in (http-open url-str))
+  (define s (http-get-string url-str))
+  (define in (open-input-string s))
   (begin0 (read in)
     (close-input-port in)))
 
 (define (download-url->file url-str dest-path)
-  (make-directory* (or (path-only dest-path) "."))
-  (define in (http-open url-str))
-  (call-with-output-file* dest-path #:exists 'truncate/replace (lambda (out) (copy-port in out)))
-  (close-input-port in)
-  dest-path)
+  (or (external-download-url->file url-str dest-path)
+      (let ()
+        (make-directory* (or (path-only dest-path) "."))
+        (define in (http-open/racket url-str))
+        (call-with-output-file* dest-path
+          #:exists 'truncate/replace
+          (lambda (out) (copy-port in out)))
+        (close-input-port in)
+        dest-path)))
 
 (define version-re #px"\\(stable \"([^\"]+)\"\\)")
 

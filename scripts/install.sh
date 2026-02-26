@@ -147,16 +147,22 @@ do_init=0
 if [ "$YES" -eq 1 ]; then
   do_init=1
 else
-  printf "Initialize %s shell config now? [Y/n] " "$shell_to_init"
-  read -r answer || true
-  case "${answer:-Y}" in
-    y|Y|yes|YES|"")
-      do_init=1
-      ;;
-    *)
-      do_init=0
-      ;;
-  esac
+  if [ -r /dev/tty ] && [ -w /dev/tty ]; then
+    printf "Initialize %s shell config now? [Y/n] " "$shell_to_init" > /dev/tty
+    answer=""
+    read -r answer < /dev/tty || true
+    case "${answer:-Y}" in
+      y|Y|yes|YES|"")
+        do_init=1
+        ;;
+      *)
+        do_init=0
+        ;;
+    esac
+  else
+    echo "No interactive TTY detected; skipping shell init (rerun with -y to accept defaults)." >&2
+    do_init=0
+  fi
 fi
 
 if [ "$do_init" -eq 1 ]; then
