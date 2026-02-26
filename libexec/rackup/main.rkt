@@ -16,7 +16,8 @@
          "state.rkt"
          "util.rkt")
 
-(provide main)
+(provide main
+         split-install-command-args)
 
 (define (usage-line cmd desc)
   (printf "  ~a~a~a\n" cmd (make-string (max 2 (- 22 (string-length cmd))) #\space) desc))
@@ -246,6 +247,65 @@
     (rackup-error "no matching installed toolchain: ~a" spec))
   id)
 
+(define install-option-arity
+  (hash "--variant"
+        1
+        "--distribution"
+        1
+        "--snapshot-site"
+        1
+        "--arch"
+        1
+        "--set-default"
+        0
+        "--force"
+        0
+        "--no-cache"
+        0))
+
+(define (string-flag-like? s)
+  (and (string? s) (> (string-length s) 0) (char=? (string-ref s 0) #\-)))
+
+(define (split-install-command-args rest)
+  ;; Accept a single install spec with flags interspersed before/after it.
+  ;; `racket/cmdline` handles option parsing in install.rkt once options are isolated.
+  (define spec #f)
+  (define opts-rev null)
+  (let loop ([xs rest])
+    (match xs
+      ['()
+       (unless spec
+         (rackup-error "usage: rackup install <spec> [flags]"))
+       (values spec (reverse opts-rev))]
+      [(list "--" more ...)
+       (cond
+         [(null? more) (rackup-error "usage: rackup install <spec> [flags]")]
+         [spec (rackup-error "usage: rackup install <spec> [flags] (extra argument ~a)" (car more))]
+         [(pair? (cdr more))
+          (rackup-error "usage: rackup install <spec> [flags] (extra argument ~a)" (cadr more))]
+         [else (values (car more) (reverse opts-rev))])]
+      [(list tok more ...)
+       (define arity (hash-ref install-option-arity tok #f))
+       (cond
+         [arity
+          (when (< (length more) arity)
+            (rackup-error "rackup install: the ~s option needs ~a argument~a"
+                          tok
+                          arity
+                          (if (= arity 1) "" "s")))
+          (define-values (consumed rest*)
+            (if (= arity 0)
+                (values (list tok) more)
+                (values (list tok (car more)) (cdr more))))
+          (set! opts-rev (append (reverse consumed) opts-rev))
+          (loop rest*)]
+         [(help-flag? tok) (rackup-error "usage: rackup install <spec> [flags]")]
+         [(string-flag-like? tok) (rackup-error "unknown install flag: ~a" tok)]
+         [spec (rackup-error "usage: rackup install <spec> [flags] (extra argument ~a)" tok)]
+         [else
+          (set! spec tok)
+          (loop more)])])))
+
 (define (toolchain-dir-ids/safe)
   (with-handlers ([exn:fail? (lambda (_) null)])
     (if (directory-exists? (rackup-toolchains-dir))
@@ -457,9 +517,10 @@
   (displayln "Reshim complete."))
 
 (define (cmd-install rest)
-  (match rest
-    [(list spec more ...) (void (install-toolchain! spec more))]
-    [_ (rackup-error "usage: rackup install <spec> [flags]")]))
+  (if (ormap help-flag? rest)
+      (show-command-help 'install)
+      (let-values ([(spec opts) (split-install-command-args rest)])
+        (void (install-toolchain! spec opts)))))
 
 (define (cmd-prompt rest)
   (define mode

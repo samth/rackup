@@ -1,6 +1,7 @@
 #lang racket/base
 
-(require racket/file
+(require racket/cmdline
+         racket/file
          racket/list
          racket/match
          racket/path
@@ -19,6 +20,7 @@
 (provide install-toolchain!
          link-toolchain!
          remove-toolchain!
+         run-linux-installer!
          enumerate-toolchain-executables
          doctor-report)
 
@@ -63,6 +65,16 @@
 (define (shell-exe)
   (or (find-executable-path "sh") (string->path "/bin/sh")))
 
+(define (legacy-interactive-linux-installer? installer-file)
+  (regexp-match? #px"(?:^|/)(?:racket(?:-textual)?|plt)-.+-bin-.+[.]sh$"
+                 (path->string* installer-file)))
+
+(define (legacy-installer-input-script dest)
+  ;; Old PLT/Racket installers (e.g. 5.2, 4.x/3xx) do not support --dest/--in-place.
+  ;; Answer prompts for a whole-directory install into the exact requested destination,
+  ;; then skip creating system links.
+  (format "n\n~a\n\n" (path->string* dest)))
+
 (define (run-linux-installer! installer-file install-root)
   ;; Use the same dest/in-place flow as setup-racket for Linux.
   (define installer (path->complete-path installer-file))
@@ -72,14 +84,26 @@
   (define (delete-log!)
     (with-handlers ([exn:fail? (lambda (_) (void))])
       (delete-file log-file)))
+  (define legacy? (legacy-interactive-linux-installer? installer))
   (define ok?
     (call-with-output-file*
      log-file
      #:exists 'truncate/replace
      (lambda (combined)
+       (define (run-modern)
+         (system* (shell-exe) installer "--create-dir" "--in-place" "--dest" dest))
+       (define (run-legacy)
+         (define scripted-in (open-input-string (legacy-installer-input-script dest)))
+         (dynamic-wind void
+                       (lambda ()
+                         (parameterize ([current-input-port scripted-in])
+                           (system* (shell-exe) installer)))
+                       (lambda () (close-input-port scripted-in))))
        (parameterize ([current-output-port combined]
                       [current-error-port combined])
-         (system* (shell-exe) installer "--create-dir" "--in-place" "--dest" dest)))))
+         (if legacy?
+             (run-legacy)
+             (run-modern))))))
   (unless ok?
     (define details
       (with-handlers ([exn:fail? (lambda (_) "")])
@@ -393,45 +417,31 @@
   (define set-default? #f)
   (define force? #f)
   (define no-cache? #f)
-  (let loop ([rest opts])
-    (match rest
-      ['()
-       (hash 'variant
-             variant
-             'distribution
-             distribution
-             'snapshot-site
-             snapshot-site
-             'arch
-             arch
-             'set-default?
-             set-default?
-             'force?
-             force?
-             'no-cache?
-             no-cache?)]
-      [(list "--variant" v more ...)
-       (set! variant v)
-       (loop more)]
-      [(list "--distribution" d more ...)
-       (set! distribution d)
-       (loop more)]
-      [(list "--snapshot-site" s more ...)
-       (set! snapshot-site (string->symbol s))
-       (loop more)]
-      [(list "--arch" a more ...)
-       (set! arch (arch-token->normalized a))
-       (loop more)]
-      [(list "--set-default" more ...)
-       (set! set-default? #t)
-       (loop more)]
-      [(list "--force" more ...)
-       (set! force? #t)
-       (loop more)]
-      [(list "--no-cache" more ...)
-       (set! no-cache? #t)
-       (loop more)]
-      [(list flag _ ...) (rackup-error "unknown install flag: ~a" flag)])))
+  (command-line #:program "rackup install"
+                #:argv opts
+                #:once-each [("--variant") v "VM variant" (set! variant v)]
+                [("--distribution") d "Distribution" (set! distribution d)]
+                [("--snapshot-site") s "Snapshot mirror" (set! snapshot-site (string->symbol s))]
+                [("--arch") a "Target architecture" (set! arch (arch-token->normalized a))]
+                [("--set-default") "Set installed toolchain as default" (set! set-default? #t)]
+                [("--force") "Reinstall existing canonical toolchain" (set! force? #t)]
+                [("--no-cache") "Redownload installer instead of using cache" (set! no-cache? #t)]
+                #:args ()
+                (void))
+  (hash 'variant
+        variant
+        'distribution
+        distribution
+        'snapshot-site
+        snapshot-site
+        'arch
+        arch
+        'set-default?
+        set-default?
+        'force?
+        force?
+        'no-cache?
+        no-cache?))
 
 (define (parse-link-options opts)
   (define set-default? #f)

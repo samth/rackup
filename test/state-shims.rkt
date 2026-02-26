@@ -297,6 +297,47 @@
   (check-false changed?)
   (check-equal? unchanged "export PATH=/usr/bin\n")
 
+  (let-values ([(spec opts)
+                (split-install-command-args '("--distribution" "minimal" "stable"))])
+    (check-equal? spec "stable")
+    (check-equal? opts '("--distribution" "minimal")))
+  (let-values ([(spec opts)
+                (split-install-command-args '("stable" "--distribution" "minimal" "--force"))])
+    (check-equal? spec "stable")
+    (check-equal? opts '("--distribution" "minimal" "--force")))
+  (check-exn exn:fail?
+             (lambda () (split-install-command-args '("stable" "8.18"))))
+
+  (with-temp-rackup-home
+   (lambda (tmp)
+     (define installer (build-path tmp "racket-textual-5.2-bin-x86_64-linux-fake.sh"))
+     (define dest (build-path tmp "legacy-install"))
+     (write-string-file
+      installer
+      @~a{#!/bin/sh
+          set -eu
+          if [ "$#" -ne 0 ]; then
+            echo "unexpected args: $*" >&2
+            exit 7
+          fi
+          read unixstyle || unixstyle=""
+          read where || where=""
+          read sysdir || sysdir=""
+          if [ -z "$where" ]; then
+            echo "missing destination" >&2
+            exit 8
+          fi
+          mkdir -p "$where/bin" "$where/collects"
+          printf '#!/bin/sh\nexit 0\n' > "$where/bin/racket"
+          chmod +x "$where/bin/racket"
+          exit 0
+          })
+     (file-or-directory-permissions installer #o755)
+     (run-linux-installer! installer dest)
+     (check-true (directory-exists? (build-path dest "bin")))
+     (check-true (directory-exists? (build-path dest "collects")))
+     (check-true (file-exists? (build-path dest "bin" "racket")))))
+
   (check-equal? (run-main/stdout '("install" "--help"))
                 (run-main/stdout '("help" "install")))
   (expect (display (run-main/stdout '("install" "--help")))
