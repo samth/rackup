@@ -8,6 +8,7 @@ ARCHIVE_URL_OVERRIDE="${RACKUP_ARCHIVE_URL:-}"
 YES=0
 INIT_SHELL=""
 FROM_LOCAL=""
+NO_INIT=0
 do_init=0
 
 is_tty_stdout() {
@@ -49,11 +50,12 @@ usage() {
 rackup bootstrap installer
 
 Usage:
-  install.sh [-y] [--prefix DIR] [--repo owner/name] [--ref REF] [--archive-url URL] [--shell bash|zsh] [--from-local PATH]
+  install.sh [-y] [--no-init] [--prefix DIR] [--repo owner/name] [--ref REF] [--archive-url URL] [--shell bash|zsh] [--from-local PATH]
 
 Behavior:
   - Prompts before editing shell config by default.
   - With -y, accepts defaults (including shell init).
+  - With --no-init, skips shell init changes even with -y.
   - Installs files under ~/.rackup unless --prefix or RACKUP_HOME is set.
   - Installs a hidden internal Racket runtime for rackup itself.
   - For the default samth/rackup bootstrap, downloads a public source bundle from GitHub Pages.
@@ -68,6 +70,10 @@ while [ "$#" -gt 0 ]; do
   case "$1" in
     -y|--yes)
       YES=1
+      shift
+      ;;
+    --no-init)
+      NO_INIT=1
       shift
       ;;
     --prefix)
@@ -179,7 +185,9 @@ else
   shell_to_init="bash"
 fi
 
-if [ "$YES" -eq 1 ]; then
+if [ "$NO_INIT" -eq 1 ]; then
+  do_init=0
+elif [ "$YES" -eq 1 ]; then
   do_init=1
 else
   if [ -r /dev/tty ] && [ -w /dev/tty ]; then

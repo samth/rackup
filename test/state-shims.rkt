@@ -1,12 +1,15 @@
-#lang racket/base
+#lang at-exp racket/base
 
 (require rackunit
+         recspecs
          racket/file
+         racket/format
          racket/port
          racket/path
          racket/string
          racket/system
          "../libexec/rackup/install.rkt"
+         "../libexec/rackup/main.rkt"
          "../libexec/rackup/paths.rkt"
          "../libexec/rackup/rktd-io.rkt"
          "../libexec/rackup/runtime.rkt"
@@ -24,6 +27,19 @@
                       (putenv "RACKUP_HOME" old-home)
                       (putenv "RACKUP_HOME" ""))
                   (delete-directory/files tmp #:must-exist? #f))))
+
+(define (run-main/capture args)
+  (define out (open-output-string))
+  (define err (open-output-string))
+  (parameterize ([current-command-line-arguments (list->vector args)]
+                 [current-output-port out]
+                 [current-error-port err])
+    (main))
+  (values (get-output-string out) (get-output-string err)))
+
+(define (run-main/stdout args)
+  (define-values (out _err) (run-main/capture args))
+  out)
 
 (module+ test
   (with-temp-rackup-home (lambda (tmp)
@@ -109,28 +125,31 @@
        p)
 
      (write-exe "racket"
-                (string-append "#!/usr/bin/env bash\n"
-                               "set -euo pipefail\n"
-                               "if [[ \"$#\" -ge 2 && \"$1\" == \"-e\" ]]; then\n"
-                               "  case \"$2\" in\n"
-                               "    *\"(version)\"*) printf '9.99-local'; exit 0 ;;\n"
-                               "    *\"system-type 'vm\"*) printf 'cs'; exit 0 ;;\n"
-                               "  esac\n"
-                               "fi\n"
-                               "printf 'PLTHOME=%s\\n' \"${PLTHOME:-}\"\n"
-                               "printf 'PLTCOLLECTS=%s\\n' \"${PLTCOLLECTS:-}\"\n"
-                               "printf 'PLTADDONDIR=%s\\n' \"${PLTADDONDIR:-}\"\n"
-                               "printf 'ARGS=%s\\n' \"$*\"\n"))
+                @~a{#!/usr/bin/env bash
+                    set -euo pipefail
+                    if [[ "$#" -ge 2 && "$1" == "-e" ]]; then
+                      case "$2" in
+                        *"(version)"*) printf '9.99-local'; exit 0 ;;
+                        *"system-type 'vm"*) printf 'cs'; exit 0 ;;
+                      esac
+                    fi
+                    printf 'PLTHOME=%s\n' "${PLTHOME:-}"
+                    printf 'PLTCOLLECTS=%s\n' "${PLTCOLLECTS:-}"
+                    printf 'PLTADDONDIR=%s\n' "${PLTADDONDIR:-}"
+                    printf 'ARGS=%s\n' "$*"
+                    })
      (write-exe "raco"
-                (string-append "#!/usr/bin/env bash\n" "set -euo pipefail\n" "printf 'raco-ok\\n'\n"))
+                @~a{#!/usr/bin/env bash
+                    set -euo pipefail
+                    printf 'raco-ok\n'
+                    })
      (for ([name '("scheme" "petite")])
        (define p (build-path chez-bin-dir name))
        (write-string-file p
-                          (string-append "#!/usr/bin/env bash\n"
-                                         "set -euo pipefail\n"
-                                         "printf '"
-                                         name
-                                         "-ok %s\\n' \"$*\"\n"))
+                          @~a{#!/usr/bin/env bash
+                              set -euo pipefail
+                              printf '@|name|-ok %s\n' "$*"
+                              })
        (file-or-directory-permissions p #o755))
 
      (define linked-id (link-toolchain! "devsrc" (path->string src-root) '("--set-default")))
@@ -262,11 +281,13 @@
      (check-true (string-contains? doctor-out "runtime-present: #t"))
      (check-true (string-contains? doctor-out (format "runtime-id: ~a" runtime-id)))))
 
-  (let* ([rc-before (string-append "export FOO=1\n"
-                                   "# >>> rackup initialize >>>\n"
-                                   "export PATH=\"$HOME/.rackup/shims:$PATH\"\n"
-                                   "# <<< rackup initialize <<<\n"
-                                   "export BAR=2\n")]
+  (let* ([rc-before (format "~a\n"
+                            @~a{export FOO=1
+                                # >>> rackup initialize >>>
+                                export PATH="$HOME/.rackup/shims:$PATH"
+                                # <<< rackup initialize <<<
+                                export BAR=2
+                                })]
          [expected-after "export FOO=1\nexport BAR=2\n"])
     (define-values (rc-after changed?) (strip-managed-block rc-before))
     (check-true changed?)
@@ -274,4 +295,98 @@
 
   (define-values (unchanged changed?) (strip-managed-block "export PATH=/usr/bin\n"))
   (check-false changed?)
-  (check-equal? unchanged "export PATH=/usr/bin\n"))
+  (check-equal? unchanged "export PATH=/usr/bin\n")
+
+  (check-equal? (run-main/stdout '("install" "--help"))
+                (run-main/stdout '("help" "install")))
+  (expect (display (run-main/stdout '("install" "--help")))
+          @~a{
+            Usage: rackup install <spec> [flags]
+
+            Install a Racket toolchain from official release, pre-release, or snapshot installers.
+
+            Specs:
+              stable | pre-release | snapshot | snapshot:utah | snapshot:northwestern
+              <numeric version> (examples: 9.1, 8.18, 7.9, 5.2)
+
+            Flags:
+              --variant cs|bc         Override VM variant (default depends on version).
+              --distribution full|minimal  Install full or minimal distribution (default: full).
+              --snapshot-site auto|utah|northwestern  Choose snapshot mirror (default: auto).
+              --arch <arch>           Override target architecture (default: host arch).
+              --set-default           Set installed toolchain as the global default.
+              --force                 Reinstall if the same canonical toolchain is already installed.
+              --no-cache              Redownload installer instead of using cache.
+
+            Examples:
+              rackup install stable
+              rackup install 8.18 --variant cs
+              rackup install snapshot --snapshot-site utah
+          })
+  (expect (display (run-main/stdout '("runtime" "--help")))
+          @~a{
+            Usage: rackup runtime status|install|upgrade
+
+            Manage rackup's hidden internal runtime used to run rackup itself.
+
+            Subcommands:
+              status                  Show whether the hidden runtime is present and its metadata.
+              install                 Install the hidden runtime if missing (or adopt existing).
+              upgrade                 Install a newer hidden runtime if one is available.
+          })
+  (check-equal? (run-main/stdout '("self-upgrade" "--help"))
+                (run-main/stdout '("help" "self-upgrade")))
+  (expect (display (run-main/stdout '("self-upgrade" "--help")))
+          @~a{
+            Usage: rackup self-upgrade [--with-init]
+
+            Upgrade rackup's code by rerunning the bootstrap installer into the current RACKUP_HOME.
+            By default this skips shell init edits and keeps your current shell config unchanged.
+
+            Options:
+              --with-init             Allow the installer to run shell init updates (-y without --no-init).
+
+            Environment overrides (advanced):
+              RACKUP_SELF_UPGRADE_INSTALL_SH  Path or URL to install.sh (test/dev override).
+          })
+
+  (with-temp-rackup-home
+   (lambda (_tmp)
+     (ensure-index!)
+     (define orphan-id "release-5.2-bc-x86_64-linux-full")
+     (define tc-dir (rackup-toolchain-dir orphan-id))
+     (define addon-dir (rackup-addon-dir orphan-id))
+     (make-directory* (build-path tc-dir "install"))
+     (write-string-file (build-path tc-dir "partial.txt") "leftover")
+     (make-directory* addon-dir)
+     (expect (display (run-main/stdout '("remove" "5.2")))
+       (format "Removed orphan/partial toolchain directory ~a\n" orphan-id))
+     (check-false (directory-exists? tc-dir))
+     (check-false (directory-exists? addon-dir))
+     (void))))
+
+  (with-temp-rackup-home
+   (lambda (tmp)
+     (ensure-index!)
+     (define fake-installer (build-path tmp "fake-install.sh"))
+     (define args-log (build-path tmp "self-upgrade-args.log"))
+     (write-string-file
+      fake-installer
+      (format "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$@\" > ~s\nexit 0\n" (path->string args-log)))
+     (file-or-directory-permissions fake-installer #o755)
+     (define old-override (getenv "RACKUP_SELF_UPGRADE_INSTALL_SH"))
+     (dynamic-wind
+      (lambda () (putenv "RACKUP_SELF_UPGRADE_INSTALL_SH" (path->string fake-installer)))
+      (lambda ()
+        (expect (display (run-main/stdout '("self-upgrade")))
+                (format "Upgrading rackup code in ~a\nrackup code upgrade complete.\n"
+                        (path->string (rackup-home))))
+        (define args-lines
+          (call-with-input-file args-log
+            (lambda (in) (filter (lambda (s) (not (string=? s ""))) (port->lines in)))))
+        (check-equal? args-lines
+                      (list "-y" "--no-init" "--prefix" (path->string (rackup-home)))))
+      (lambda ()
+        (if old-override
+            (putenv "RACKUP_SELF_UPGRADE_INSTALL_SH" old-override)
+            (putenv "RACKUP_SELF_UPGRADE_INSTALL_SH" ""))))))

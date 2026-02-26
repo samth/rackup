@@ -1,6 +1,7 @@
-#lang racket/base
+#lang at-exp racket/base
 
 (require rackunit
+         racket/format
          "../libexec/rackup/remote.rkt")
 
 (module+ test
@@ -75,25 +76,23 @@
                 "racket-minimal-current-x86_64-linux-cs.sh")
 
   (define fake-all-versions-html
-    (string-append "<html><body>\n"
-                   "<a href=\"/releases/9.1/\">9.1</a>\n"
-                   "<a href=\"/installers/8.18/\">8.18</a>\n"
-                   "<a href=\"https://download.racket-lang.org/releases/7.9/\">7.9</a>\n"
-                   "<a href=\"/releases/9.1/\">9.1</a>\n"
-                   "<a href=\"/misc/2026/\">2026</a>\n"
-                   "</body></html>\n"))
+    @~a{<html><body>
+        <a href="/releases/9.1/">9.1</a>
+        <a href="/installers/8.18/">8.18</a>
+        <a href="https://download.racket-lang.org/releases/7.9/">7.9</a>
+        <a href="/releases/9.1/">9.1</a>
+        <a href="/misc/2026/">2026</a>
+        </body></html>
+        })
   (check-equal? (parse-all-versions-html fake-all-versions-html) '("9.1" "8.18" "7.9"))
 
   (define fake-all-versions-html-fallback "<a class=\"v\">8.16.0.4</a> <a class=\"v\">8.15</a>")
   (check-equal? (parse-all-versions-html fake-all-versions-html-fallback) '("8.16.0.4" "8.15"))
 
   (define legacy-index-html
-    (string-append "<html><body>"
-                   "<a href=\"racket-5.2-bin-x86_64-linux-debian-squeeze.sh\">x</a>"
-                   "<a href=\"racket-5.2-bin-x86_64-linux-f14.sh\">x</a>"
-                   "<a href=\"racket-5.2-src-unix.tgz\">src</a>"
-                   "<a href=\"racket-5.2-bin-x86_64-linux-debian-squeeze.sh\">dup</a>"
-                   "</body></html>"))
+    @~a{<html><body><a href="racket-5.2-bin-x86_64-linux-debian-squeeze.sh">x</a><a
+        href="racket-5.2-bin-x86_64-linux-f14.sh">x</a><a href="racket-5.2-src-unix.tgz">src</a><a
+        href="racket-5.2-bin-x86_64-linux-debian-squeeze.sh">dup</a></body></html>})
   (check-equal? (parse-legacy-installers-index-html legacy-index-html)
                 '("racket-5.2-bin-x86_64-linux-debian-squeeze.sh"
                   "racket-5.2-bin-x86_64-linux-f14.sh"))
@@ -103,4 +102,49 @@
                                      #:version-token "5.2"
                                      #:distribution 'full
                                      #:arch "x86_64")
-   "racket-5.2-bin-x86_64-linux-debian-squeeze.sh"))
+   "racket-5.2-bin-x86_64-linux-debian-squeeze.sh")
+
+  (define plt-version-page-html
+    @~a{<select><option value="http://download.plt-scheme.org/plt-4-0-bin-x86_64-linux-f7-sh.html">Linux
+        x86_64</option><option
+        value="http://download.plt-scheme.org/plt-4-0-bin-i386-linux-f9-sh.html">Linux i386</option><option
+        value="http://download.plt-scheme.org/plt-4-0-bin-i386-win32-exe.html">Windows</option></select>})
+  (check-equal?
+   (parse-plt-version-page-html plt-version-page-html)
+   '("http://download.plt-scheme.org/plt-4-0-bin-x86_64-linux-f7-sh.html"
+     "http://download.plt-scheme.org/plt-4-0-bin-i386-linux-f9-sh.html"
+     "http://download.plt-scheme.org/plt-4-0-bin-i386-win32-exe.html"))
+  (check-equal?
+   (select-plt-generated-page-url (parse-plt-version-page-html plt-version-page-html)
+                                  #:version "4.0"
+                                  #:arch "x86_64")
+   "http://download.plt-scheme.org/plt-4-0-bin-x86_64-linux-f7-sh.html")
+  (check-equal?
+   (plt-generated-page-url->installer-filename
+    "http://download.plt-scheme.org/plt-4-0-bin-x86_64-linux-f7-sh.html"
+    "4.0")
+   "plt-4.0-bin-x86_64-linux-f7.sh")
+
+  (define plt-version-page-html-352
+    @~a{<select><option value="http://download.plt-scheme.org/plt-352-bin-i386-linux-sh.html">Linux
+        i386</option><option
+        value="http://download.plt-scheme.org/plt-352-bin-i386-linux-ubuntu-sh.html">Linux Ubuntu
+        i386</option></select>})
+  (check-equal?
+   (select-plt-generated-page-url (parse-plt-version-page-html plt-version-page-html-352)
+                                  #:version "352"
+                                  #:arch "i386")
+   "http://download.plt-scheme.org/plt-352-bin-i386-linux-sh.html")
+  (check-equal?
+   (plt-generated-page-url->installer-filename
+    "http://download.plt-scheme.org/plt-352-bin-i386-linux-sh.html"
+    "352")
+   "plt-352-bin-i386-linux.sh")
+
+  (define plt-version-page-html-209
+    "<option value=\"http://download.plt-scheme.org/plt-209-bin-i386-linux-gcc2-sh.html\">Linux i386 old gcc2</option>")
+  (check-equal?
+   (plt-generated-page-url->installer-filename
+    "http://download.plt-scheme.org/plt-209-bin-i386-linux-gcc2-sh.html"
+    "209")
+   "plt-209-bin-i386-linux-gcc2.sh"))

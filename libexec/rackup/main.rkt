@@ -45,18 +45,247 @@
   (usage-line "init [--shell bash|zsh]" "Install/update shell integration in ~/.bashrc or ~/.zshrc.")
   (usage-line "uninstall [--yes]"
               "Remove rackup, its toolchains/runtime, and shell init blocks (destructive).")
+  (usage-line "self-upgrade [--with-init]"
+              "Upgrade rackup's code by rerunning the installer into the current RACKUP_HOME.")
   (usage-line "runtime status|install|upgrade"
               "Manage rackup's hidden internal runtime used to run rackup itself.")
   (usage-line "doctor" "Print diagnostics for paths, runtime, and installed toolchains.")
-  (usage-line "help" "Show this help text.")
+  (usage-line "help [command]" "Show global help or help for a specific command.")
   (displayln "")
-  (displayln "Use `rackup <command>` for the command, and `rackup help` for this summary."))
+  (displayln "Use `rackup <command> --help` or `rackup help <command>` for command help."))
+
+(define (help-flag? s)
+  (and (string? s) (or (equal? s "--help") (equal? s "-h"))))
+
+(define (help-usage usage-line-text)
+  (printf "Usage: rackup ~a\n" usage-line-text))
+
+(define (help-option-line flag desc)
+  (printf "  ~a~a~a\n" flag (make-string (max 2 (- 24 (string-length flag))) #\space) desc))
+
+(define (show-command-help cmd)
+  (define c
+    (if (symbol? cmd)
+        (symbol->string cmd)
+        (format "~a" cmd)))
+  (case (string->symbol c)
+    [(available)
+     (help-usage "available [--all|--limit N]")
+     (displayln "")
+     (displayln "List install aliases (stable, pre-release, snapshot) and numeric release versions.")
+     (displayln "")
+     (displayln "Options:")
+     (help-option-line "--all" "Show all parsed release versions.")
+     (help-option-line "--limit N" "Show at most N release versions (default: 20).")
+     (displayln "")
+     (displayln "Examples:")
+     (displayln "  rackup available")
+     (displayln "  rackup available --limit 50")
+     (displayln "  rackup available --all")
+     #t]
+    [(install)
+     (help-usage "install <spec> [flags]")
+     (displayln "")
+     (displayln
+      "Install a Racket toolchain from official release, pre-release, or snapshot installers.")
+     (displayln "")
+     (displayln "Specs:")
+     (displayln "  stable | pre-release | snapshot | snapshot:utah | snapshot:northwestern")
+     (displayln "  <numeric version> (examples: 9.1, 8.18, 7.9, 5.2)")
+     (displayln "")
+     (displayln "Flags:")
+     (help-option-line "--variant cs|bc" "Override VM variant (default depends on version).")
+     (help-option-line "--distribution full|minimal"
+                       "Install full or minimal distribution (default: full).")
+     (help-option-line "--snapshot-site auto|utah|northwestern"
+                       "Choose snapshot mirror (default: auto).")
+     (help-option-line "--arch <arch>" "Override target architecture (default: host arch).")
+     (help-option-line "--set-default" "Set installed toolchain as the global default.")
+     (help-option-line "--force" "Reinstall if the same canonical toolchain is already installed.")
+     (help-option-line "--no-cache" "Redownload installer instead of using cache.")
+     (displayln "")
+     (displayln "Examples:")
+     (displayln "  rackup install stable")
+     (displayln "  rackup install 8.18 --variant cs")
+     (displayln "  rackup install snapshot --snapshot-site utah")
+     #t]
+    [(link)
+     (help-usage "link <name> <path> [--set-default] [--force]")
+     (displayln "")
+     (displayln "Link an in-place/local Racket build as a managed toolchain.")
+     (displayln "")
+     (displayln "Accepted paths:")
+     (displayln "  - source checkout root containing racket/bin and racket/collects")
+     (displayln "  - PLTHOME directory containing bin and collects")
+     (displayln "")
+     (displayln "Flags:")
+     (help-option-line "--set-default" "Set the linked toolchain as the global default.")
+     (help-option-line "--force" "Replace an existing link with the same local name.")
+     (displayln "")
+     (displayln "Example:")
+     (displayln "  rackup link dev ~/src/racket")
+     #t]
+    [(list)
+     (help-usage "list")
+     (displayln "")
+     (displayln "List installed toolchains and show default/active tags.")
+     #t]
+    [(default)
+     (help-usage "default [<toolchain>|--unset]")
+     (displayln "")
+     (displayln "Show, set, or clear the global default toolchain.")
+     (displayln
+      "If the requested toolchain spec is not installed, interactive shells are prompted to install it.")
+     (displayln "")
+     (displayln "Examples:")
+     (displayln "  rackup default")
+     (displayln "  rackup default stable")
+     (displayln "  rackup default --unset")
+     #t]
+    [(current)
+     (help-usage "current")
+     (displayln "")
+     (displayln
+      "Show the active toolchain and whether it comes from shell activation or global default.")
+     #t]
+    [(which)
+     (help-usage "which <exe> [--toolchain <toolchain>]")
+     (displayln "")
+     (displayln "Show the real executable path for a tool in a toolchain.")
+     #t]
+    [(shell)
+     (help-usage "shell <toolchain> | shell --deactivate")
+     (displayln "")
+     (displayln "Emit shell code to activate/deactivate a toolchain in the current shell.")
+     (displayln "This is normally wrapped by the shell function installed by `rackup init`.")
+     #t]
+    [(run)
+     (help-usage "run <toolchain> -- <command> [args...]")
+     (displayln "")
+     (displayln "Run a command under a specific toolchain without changing defaults.")
+     #t]
+    [(prompt)
+     (help-usage "prompt [--raw|--source]")
+     (displayln "")
+     (displayln "Print fast prompt information for PS1/PS2.")
+     (displayln "Handled by the shell wrapper without starting Racket when possible.")
+     (displayln "")
+     (displayln "Options:")
+     (help-option-line "--raw" "Print only the active toolchain id.")
+     (help-option-line "--source" "Print \"<id><TAB><env|default>\".")
+     #t]
+    [(remove)
+     (help-usage "remove <toolchain>")
+     (displayln "")
+     (displayln "Remove one installed or linked toolchain and its addon directory.")
+     #t]
+    [(reshim)
+     (help-usage "reshim")
+     (displayln "")
+     (displayln "Rebuild shim executables from the union of installed toolchain executables.")
+     #t]
+    [(init)
+     (help-usage "init [--shell bash|zsh]")
+     (displayln "")
+     (displayln "Install or update shell integration in ~/.bashrc or ~/.zshrc.")
+     (displayln "Writes a managed block that sources ~/.rackup/shell/rackup.<shell>.")
+     #t]
+    [(uninstall)
+     (help-usage "uninstall [--yes]")
+     (displayln "")
+     (displayln "Remove rackup-managed data and shell init blocks (destructive).")
+     (displayln "")
+     (displayln "Options:")
+     (help-option-line "--yes" "Skip interactive DELETE confirmation.")
+     #t]
+    [(self-upgrade)
+     (help-usage "self-upgrade [--with-init]")
+     (displayln "")
+     (displayln
+      "Upgrade rackup's code by rerunning the bootstrap installer into the current RACKUP_HOME.")
+     (displayln
+      "By default this skips shell init edits and keeps your current shell config unchanged.")
+     (displayln "")
+     (displayln "Options:")
+     (help-option-line "--with-init"
+                       "Allow the installer to run shell init updates (-y without --no-init).")
+     (displayln "")
+     (displayln "Environment overrides (advanced):")
+     (help-option-line "RACKUP_SELF_UPGRADE_INSTALL_SH"
+                       "Path or URL to install.sh (test/dev override).")
+     #t]
+    [(runtime)
+     (help-usage "runtime status|install|upgrade")
+     (displayln "")
+     (displayln "Manage rackup's hidden internal runtime used to run rackup itself.")
+     (displayln "")
+     (displayln "Subcommands:")
+     (help-option-line "status" "Show whether the hidden runtime is present and its metadata.")
+     (help-option-line "install" "Install the hidden runtime if missing (or adopt existing).")
+     (help-option-line "upgrade" "Install a newer hidden runtime if one is available.")
+     #t]
+    [(doctor)
+     (help-usage "doctor")
+     (displayln "")
+     (displayln "Print diagnostics for rackup paths, hidden runtime, and installed toolchains.")
+     #t]
+    [(help)
+     (help-usage "help [command]")
+     (displayln "")
+     (displayln "Show the global command summary or help for a specific command.")
+     (displayln "")
+     (displayln "Examples:")
+     (displayln "  rackup help")
+     (displayln "  rackup help install")
+     #t]
+    [else #f]))
 
 (define (resolve-toolchain-or-die spec)
   (define id (find-local-toolchain spec))
   (unless id
     (rackup-error "no matching installed toolchain: ~a" spec))
   id)
+
+(define (toolchain-dir-ids/safe)
+  (with-handlers ([exn:fail? (lambda (_) null)])
+    (if (directory-exists? (rackup-toolchains-dir))
+        (sort (for/list ([p (in-list (directory-list (rackup-toolchains-dir) #:build? #t))]
+                         #:when (directory-exists? p))
+                (path-basename-string p))
+              string<?)
+        null)))
+
+(define (find-orphan-toolchain-id spec)
+  (define idx (load-index))
+  (define registered (installed-toolchain-ids idx))
+  (define orphan-ids (filter (lambda (id) (not (member id registered))) (toolchain-dir-ids/safe)))
+  (define (unique xs)
+    (and (= (length xs) 1) (car xs)))
+  (define (ambiguous xs)
+    (and (> (length xs) 1)
+         (rackup-error "multiple orphan/partial toolchain directories match '~a': ~a"
+                       spec
+                       (string-join xs ", "))))
+  (or (and (member spec orphan-ids) spec)
+      (let ([xs (filter (lambda (id) (string-prefix? id spec)) orphan-ids)])
+        (or (unique xs) (ambiguous xs)))
+      (let* ([quoted (regexp-quote spec)]
+             [rx (pregexp (format "(^|-)~a([.-]|-|$)" quoted))]
+             [xs (filter (lambda (id) (regexp-match? rx id)) orphan-ids)])
+        (or (unique xs) (ambiguous xs)))
+      #f))
+
+(define (remove-orphan-toolchain! id)
+  (define tc-dir (rackup-toolchain-dir id))
+  (define addon (rackup-addon-dir id))
+  (unless (directory-exists? tc-dir)
+    (rackup-error "orphan toolchain directory not found: ~a" id))
+  (delete-directory/files tc-dir)
+  (when (directory-exists? addon)
+    (delete-directory/files addon))
+  (with-handlers ([exn:fail? (lambda (_) (void))])
+    (reshim!))
+  (displayln (format "Removed orphan/partial toolchain directory ~a" id)))
 
 (define (yes?/default-yes s)
   (define a
@@ -211,7 +440,15 @@
 
 (define (cmd-remove rest)
   (match rest
-    [(list spec) (remove-toolchain! (resolve-toolchain-or-die spec))]
+    [(list spec)
+     (define installed-id (find-local-toolchain spec))
+     (cond
+       [installed-id (remove-toolchain! installed-id)]
+       [else
+        (define orphan-id (find-orphan-toolchain-id spec))
+        (if orphan-id
+            (remove-orphan-toolchain! orphan-id)
+            (rackup-error "no matching installed toolchain: ~a" spec))])]
     [_ (rackup-error "usage: rackup remove <toolchain>")]))
 
 (define (cmd-reshim)
@@ -404,6 +641,57 @@
   (displayln
    "Your current shell may still have rackup-related PATH/env changes until you start a new shell."))
 
+(define (self-upgrade-script-source)
+  (or (getenv "RACKUP_SELF_UPGRADE_INSTALL_SH") "https://samth.github.io/rackup/install.sh"))
+
+(define (url-like? s)
+  (and (string? s) (regexp-match? #px"^[a-zA-Z][a-zA-Z0-9+.-]*://" s)))
+
+(define (parse-self-upgrade-options rest)
+  (define with-init? #f)
+  (let loop ([xs rest])
+    (match xs
+      ['() (hash 'with-init? with-init?)]
+      [(list "--with-init" more ...)
+       (set! with-init? #t)
+       (loop more)]
+      [(list flag _ ...)
+       (rackup-error "usage: rackup self-upgrade [--with-init] (unknown flag ~a)" flag)])))
+
+(define (shell-exe/path)
+  (or (find-executable-path "sh") (string->path "/bin/sh")))
+
+(define (cmd-self-upgrade rest)
+  (define opts (parse-self-upgrade-options rest))
+  (define source (self-upgrade-script-source))
+  (define script-path
+    (cond
+      [(url-like? source)
+       (define p (make-temporary-file "rackup-self-upgrade-~a.sh"))
+       (download-url->file source p)
+       (file-or-directory-permissions p #o755)
+       p]
+      [else (string->path source)]))
+  (unless (file-exists? script-path)
+    (rackup-error "self-upgrade installer script not found: ~a" source))
+  (define home-str (path->string (rackup-home)))
+  (printf "Upgrading rackup code in ~a\n" home-str)
+  (when (url-like? source)
+    (printf "Using installer script: ~a\n" source))
+  (define args
+    (append (list "-y")
+            (if (hash-ref opts 'with-init? #f)
+                null
+                (list "--no-init"))
+            (list "--prefix" home-str)))
+  (define ok? (apply system* (shell-exe/path) script-path args))
+  (when (and (url-like? source) (file-exists? script-path))
+    (with-handlers ([exn:fail? (lambda (_) (void))])
+      (delete-file script-path)))
+  (unless ok?
+    (rackup-error "self-upgrade failed"))
+  (displayln "rackup code upgrade complete."))
+
 (define (cmd-doctor)
   (doctor-report))
 
@@ -415,25 +703,38 @@
                                (eprintf "rackup: internal error: ~a\n" (exn-message e))
                                (exit 1))])
     (define args (vector->list (current-command-line-arguments)))
-    (match args
-      ['() (usage)]
-      [(or (list "help" _ ...) (list "--help") (list "-h")) (usage)]
-      [(list "available" rest ...) (cmd-available rest)]
-      [(list "install" rest ...) (cmd-install rest)]
-      [(list "link" rest ...) (cmd-link rest)]
-      [(list "list") (cmd-list)]
-      [(list "default" rest ...) (cmd-default rest)]
-      [(list "current") (cmd-current)]
-      [(list "prompt" rest ...) (cmd-prompt rest)]
-      [(list "which" rest ...) (cmd-which rest)]
-      [(list "shell" rest ...) (cmd-shell rest)]
-      [(list "run" rest ...) (cmd-run rest)]
-      [(list "remove" rest ...) (cmd-remove rest)]
-      [(list "reshim") (cmd-reshim)]
-      [(list "init" rest ...) (cmd-init rest)]
-      [(list "uninstall" rest ...) (cmd-uninstall rest)]
-      [(list "runtime" rest ...) (cmd-runtime rest)]
-      [(list "doctor") (cmd-doctor)]
-      [_
-       (usage)
-       (exit 2)])))
+    (cond
+      [(and (= (length args) 2) (help-flag? (second args)))
+       (unless (show-command-help (first args))
+         (usage)
+         (exit 2))]
+      [else
+       (match args
+         ['() (usage)]
+         [(or (list "--help") (list "-h")) (usage)]
+         [(list "help") (usage)]
+         [(list "help" cmd)
+          (unless (show-command-help cmd)
+            (usage)
+            (exit 2))]
+         [(list "help" _ ...) (rackup-error "usage: rackup help [command]")]
+         [(list "available" rest ...) (cmd-available rest)]
+         [(list "install" rest ...) (cmd-install rest)]
+         [(list "link" rest ...) (cmd-link rest)]
+         [(list "list") (cmd-list)]
+         [(list "default" rest ...) (cmd-default rest)]
+         [(list "current") (cmd-current)]
+         [(list "prompt" rest ...) (cmd-prompt rest)]
+         [(list "which" rest ...) (cmd-which rest)]
+         [(list "shell" rest ...) (cmd-shell rest)]
+         [(list "run" rest ...) (cmd-run rest)]
+         [(list "remove" rest ...) (cmd-remove rest)]
+         [(list "reshim") (cmd-reshim)]
+         [(list "init" rest ...) (cmd-init rest)]
+         [(list "uninstall" rest ...) (cmd-uninstall rest)]
+         [(list "self-upgrade" rest ...) (cmd-self-upgrade rest)]
+         [(list "runtime" rest ...) (cmd-runtime rest)]
+         [(list "doctor") (cmd-doctor)]
+         [_
+          (usage)
+          (exit 2)])])))

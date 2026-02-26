@@ -19,14 +19,18 @@
          parse-installer-filename
          parse-legacy-installer-filename
          parse-legacy-installers-index-html
+         parse-plt-version-page-html
          select-installer-filename
          select-legacy-installer-filename
+         select-plt-generated-page-url
+         plt-generated-page-url->installer-filename
          resolve-install-request
          download-url->file)
 
 (define release-version-url "https://download.racket-lang.org/version.txt")
 (define all-versions-url "https://download.racket-lang.org/all-versions.html")
 (define pre-release-installers-base "https://pre-release.racket-lang.org/installers/")
+(define plt-scheme-download-base "http://download.plt-scheme.org/")
 (define snapshot-sites
   (hash 'utah "https://users.cs.utah.edu/plt" 'northwestern "https://plt.cs.northwestern.edu"))
 
@@ -79,7 +83,7 @@
 
 (define (external-http-get-string url-str)
   (match (http-external-tool)
-    [(cons 'curl exe) (system*/capture 'curl exe "-fsSL" url-str)]
+    [(cons 'curl exe) (system*/capture 'curl exe "-fsSL" "--compressed" url-str)]
     [(cons 'wget exe) (system*/capture 'wget exe "-qO-" url-str)]
     [_ #f]))
 
@@ -171,6 +175,9 @@
       [(minimal) "racket-textual"]
       [else (rackup-error "unsupported legacy distribution: ~a" distribution)]))
   (format "https://download.racket-lang.org/installers/~a/~a/" version subdir))
+
+(define (plt-version-page-url version)
+  (format "~av~a.html" plt-scheme-download-base version))
 
 (define (fetch-table-rktd installers-base)
   (http-get-rktd (string-append installers-base "table.rktd")))
@@ -289,6 +296,15 @@
              (and (string? h) (regexp-match? #px"^(?:racket|racket-textual)-.+\\.sh$" h) h)))
    string=?))
 
+(define (parse-plt-version-page-html html)
+  (remove-duplicates
+   (for/list ([m (in-list (regexp-match*
+                           #px"<option[^>]*value=\"(https?://download[.]plt-scheme[.]org/[^\"]+)\""
+                           html
+                           #:match-select cdr))])
+     (car m))
+   string=?))
+
 (define (table-filenames table)
   (cond
     [(hash? table)
@@ -337,6 +353,67 @@
                    arch
                    platform
                    ext)]))
+
+(define (plt-version->hyphenated version)
+  (regexp-replace* #px"[.]" version "-"))
+
+(define (select-plt-generated-page-url urls
+                                       #:version version
+                                       #:arch arch
+                                       #:platform [platform "linux"])
+  (define version* (plt-version->hyphenated version))
+  (define (base-name u)
+    (path-basename-string (string->path (path->string* u))))
+  (define (candidate-for-platform? base)
+    (and (string-prefix? base (format "plt-~a-bin-" version*))
+         (string-contains? base (format "-~a-" platform))
+         (string-suffix? base "-sh.html")))
+  (define matches
+    (for/list ([u (in-list urls)]
+               #:when (let ([base (base-name u)])
+                        (and (candidate-for-platform? base)
+                             (string-contains? base (format "-~a-" arch)))))
+      (path->string* u)))
+  (cond
+    [(pair? matches) (car (sort matches string<?))]
+    [else
+     (define platform-urls
+       (for/list ([u (in-list urls)]
+                  #:when (candidate-for-platform? (base-name u)))
+         (path->string* u)))
+     (define hint
+       (cond
+         [(and (equal? platform "linux")
+               (equal? arch "x86_64")
+               (for/or ([u (in-list platform-urls)])
+                 (string-contains? (base-name u) "-i386-")))
+          " (this PLT Scheme version appears to have only i386 Linux installers; try --arch i386)"]
+         [else ""]))
+     (rackup-error "no PLT Scheme installer page found for version=~a arch=~a platform=~a~a"
+                   version
+                   arch
+                   platform
+                   hint)]))
+
+(define (plt-generated-page-url->installer-filename page-url version)
+  (define base (path-basename-string (string->path (path->string* page-url))))
+  (define version* (plt-version->hyphenated version))
+  (match (regexp-match (pregexp (format "^plt-~a-bin-(.+)-sh[.]html$" (regexp-quote version*))) base)
+    [(list _ platform-token) (format "plt-~a-bin-~a.sh" version platform-token)]
+    [_ (rackup-error "unexpected PLT Scheme generated page URL: ~a" page-url)]))
+
+(define (fetch-plt-scheme-installer-filename version
+                                             #:distribution distribution
+                                             #:arch arch
+                                             #:platform [platform "linux"])
+  (unless (eq? distribution 'full)
+    (rackup-error "PLT Scheme releases (~a) do not support --distribution ~a" version distribution))
+  (define page-html (http-get-string (plt-version-page-url version)))
+  (define generated-urls (parse-plt-version-page-html page-html))
+  (define generated-url
+    (select-plt-generated-page-url generated-urls #:version version #:arch arch #:platform platform))
+  (define filename (plt-generated-page-url->installer-filename generated-url version))
+  (values (format "~abundles/~a/plt/" plt-scheme-download-base version) filename))
 
 (define (fetch-legacy-installer-filename version
                                          #:distribution distribution
@@ -391,6 +468,9 @@
 (define (exn-message-looks-like-404? e)
   (regexp-match? #px"\\b404\\b" (exn-message e)))
 
+(define (version-maybe-plt-scheme? v)
+  (and (string? v) (or (regexp-match? #px"^4(?:\\.|$)" v) (regexp-match? #px"^[0-9]{3,}$" v))))
+
 (define (resolve-release-request/fallback requested-spec
                                           resolved-version
                                           variant
@@ -424,20 +504,36 @@
                            base
                            filename)]
     [else
-     ;; Older releases (e.g. 5.2) predate table.rktd and use Apache index listings.
-     (define-values (legacy-base filename)
-       (fetch-legacy-installer-filename resolved-version
-                                        #:distribution distribution*
-                                        #:arch arch
-                                        #:platform platform))
+     ;; Older releases may use Apache index listings (e.g. 5.2) or PLT Scheme pages (e.g. 4.0).
+     (define legacy-result
+       (with-handlers ([exn:fail? (lambda (e)
+                                    (if (and (version-maybe-plt-scheme? resolved-version)
+                                             (or (exn-message-looks-like-404? e)
+                                                 (regexp-match? #px"no legacy installer found"
+                                                                (exn-message e))))
+                                        #f
+                                        (raise e)))])
+         (call-with-values (lambda ()
+                             (fetch-legacy-installer-filename resolved-version
+                                                              #:distribution distribution*
+                                                              #:arch arch
+                                                              #:platform platform))
+                           list)))
+     (define-values (base* filename*)
+       (if legacy-result
+           (values (first legacy-result) (second legacy-result))
+           (fetch-plt-scheme-installer-filename resolved-version
+                                                #:distribution distribution*
+                                                #:arch arch
+                                                #:platform platform)))
      (release-request-hash requested-spec
                            resolved-version
                            variant
                            distribution*
                            arch
                            platform
-                           legacy-base
-                           filename)]))
+                           base*
+                           filename*)]))
 
 (define (select-installer-filename table
                                    #:version-token version-token
@@ -588,11 +684,16 @@
   (define requested-spec (hash-ref spec* 'input ""))
   (define platform "linux")
   (define (variant-for version)
+    (define legacy-plt? (version-maybe-plt-scheme? version))
     (define v
       (if variant-override
           (parse-variant variant-override)
-          (default-variant-for-version version)))
-    (when (and (equal? v 'cs) (not (cs-supported? version)))
+          (if legacy-plt?
+              'bc
+              (default-variant-for-version version))))
+    (when (and legacy-plt? (equal? v 'cs))
+      (rackup-error "Racket CS is not available for PLT Scheme version ~a" version))
+    (when (and (not legacy-plt?) (equal? v 'cs) (not (cs-supported? version)))
       (rackup-error "Racket CS is not available for version ~a" version))
     v)
   (match kind

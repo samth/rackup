@@ -68,19 +68,30 @@
   (define installer (path->complete-path installer-file))
   (define dest (path->complete-path install-root))
   (install-info "Installing into ~a" (path->string dest))
-  (define combined (open-output-string))
+  (define log-file (make-temporary-file "rackup-installer-~a.log"))
+  (define (delete-log!)
+    (with-handlers ([exn:fail? (lambda (_) (void))])
+      (delete-file log-file)))
   (define ok?
-    (parameterize ([current-output-port combined]
-                   [current-error-port combined])
-      (system* (shell-exe) installer "--create-dir" "--in-place" "--dest" dest)))
+    (call-with-output-file*
+     log-file
+     #:exists 'truncate/replace
+     (lambda (combined)
+       (parameterize ([current-output-port combined]
+                      [current-error-port combined])
+         (system* (shell-exe) installer "--create-dir" "--in-place" "--dest" dest)))))
   (unless ok?
-    (define details (string-trim (get-output-string combined)))
+    (define details
+      (with-handlers ([exn:fail? (lambda (_) "")])
+        (call-with-input-file* log-file (lambda (in) (string-trim (port->string in))))))
     (install-warn "Installer script failed.")
     (unless (string-blank? details)
       (eprintf "%s\n" (truncate-lines details)))
+    (delete-log!)
     (rackup-error "linux-installer failed: ~a --create-dir --in-place --dest ~a"
                   (path->string* installer)
-                  (path->string* dest))))
+                  (path->string* dest)))
+  (delete-log!))
 
 (define (detect-bin-dir install-root)
   (define p1 (build-path install-root "bin"))
