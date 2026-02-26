@@ -6,6 +6,7 @@ BUILD=1
 UNIT_TESTS=0
 MODE="direct"
 SPECS=("stable")
+CUSTOM_SPECS=0
 SNAPSHOT_SITE="${RACKUP_E2E_SNAPSHOT_SITE:-auto}"
 
 usage() {
@@ -50,8 +51,9 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --spec)
-      if [[ ${#SPECS[@]} -eq 1 && "${SPECS[0]}" == "stable" ]]; then
+      if [[ "$CUSTOM_SPECS" -eq 0 ]]; then
         SPECS=()
+        CUSTOM_SPECS=1
       fi
       SPECS+=("$2")
       shift 2

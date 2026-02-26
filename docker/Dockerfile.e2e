@@ -14,7 +14,8 @@ RUN apt-get update && \
       gzip \
       racket \
       tar \
-      xz-utils && \
+      xz-utils \
+      zsh && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /work

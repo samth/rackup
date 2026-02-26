@@ -129,10 +129,10 @@
      (or (unique (filter (lambda (id) (string-prefix? id name)) ids))
          (let ([matches
                 (for/list ([id ids]
-                           #:do [(define m (read-toolchain-meta id))]
-                           #:when (and (hash? m)
-                                       (or (equal? name (hash-ref m 'requested-spec #f))
-                                           (equal? name (hash-ref m 'resolved-version #f)))))
+                           #:when (let ([m (read-toolchain-meta id)])
+                                    (and (hash? m)
+                                         (or (equal? name (hash-ref m 'requested-spec #f))
+                                             (equal? name (hash-ref m 'resolved-version #f))))))
                   id)])
            (unique matches))
          #f)]))
