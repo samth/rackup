@@ -21,7 +21,6 @@
 
 (define release-version-url "https://download.racket-lang.org/version.txt")
 (define pre-release-installers-base "https://pre-release.racket-lang.org/installers/")
-(define pre-release-version-rktd-url "https://pre-release.racket-lang.org/installers/version.rktd")
 (define snapshot-sites
   (hash 'utah "https://users.cs.utah.edu/plt"
         'northwestern "https://plt.cs.northwestern.edu"))
@@ -120,6 +119,23 @@
      (filter string? table)]
     [else
      (rackup-error "unexpected table.rktd format: ~a" table)]))
+
+(define (table-version-tokens table)
+  (remove-duplicates
+   (for/list ([p (in-list (filter values (map parse-installer-filename
+                                             (table-filenames table))))])
+     (hash-ref p 'version-token))
+   string=?))
+
+(define (best-version-token-from-table table [default "current"])
+  (define tokens (table-version-tokens table))
+  (define numeric-tokens (filter numeric-version? tokens))
+  (cond
+    [(pair? numeric-tokens)
+     (car (sort numeric-tokens (lambda (a b) (> (cmp-versions a b) 0))))]
+    [(member "current" tokens) "current"]
+    [(pair? tokens) (car (sort tokens string<?))]
+    [else default]))
 
 (define (select-installer-filename table
                                    #:version-token version-token
@@ -305,17 +321,35 @@
            'installer-filename filename
            'installer-url (string-append base filename))]
     ['pre-release
-     (define version-rktd (fetch-version-rktd pre-release-installers-base))
-     (define resolved-version (resolved-version-from-version-rktd version-rktd "current"))
-     (define variant (variant-for resolved-version))
      (define table (fetch-table-rktd pre-release-installers-base))
-     (define filename (select-installer-filename table
-                                                 #:version-token "current"
-                                                 #:variant variant
-                                                 #:distribution distribution*
-                                                 #:arch arch
-                                                 #:platform platform
-                                                 #:ext "sh"))
+     ;; pre-release.racket-lang.org may not publish installers/version.rktd.
+     ;; Derive a usable version from table.rktd when that metadata is absent.
+     (define maybe-version-rktd
+       (with-handlers ([exn:fail? (lambda (_) #f)])
+         (fetch-version-rktd pre-release-installers-base)))
+     (define resolved-version
+       (let ([from-rktd (and maybe-version-rktd
+                             (resolved-version-from-version-rktd maybe-version-rktd #f))])
+         (cond
+           [(and (string? from-rktd) (not (equal? from-rktd "current"))) from-rktd]
+           [else (best-version-token-from-table table "current")])))
+     (define variant (variant-for resolved-version))
+     (define (select-pre-release token #:allow-prefix? [allow-prefix? #f])
+       (select-installer-filename table
+                                  #:version-token token
+                                  #:variant variant
+                                  #:distribution distribution*
+                                  #:arch arch
+                                  #:platform platform
+                                  #:ext "sh"
+                                  #:allow-version-prefix? allow-prefix?))
+     (define filename
+       (with-handlers ([exn:fail?
+                        (lambda (e)
+                          (if (numeric-version? resolved-version)
+                              (select-pre-release resolved-version #:allow-prefix? #t)
+                              (raise e)))])
+         (select-pre-release "current")))
      (hash 'kind 'pre-release
            'requested-spec requested-spec
            'resolved-version resolved-version

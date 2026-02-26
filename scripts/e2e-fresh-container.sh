@@ -5,6 +5,11 @@ MODE="${RACKUP_E2E_MODE:-direct}"
 SPECS_CSV="${RACKUP_E2E_SPECS:-stable}"
 SNAPSHOT_SITE="${RACKUP_E2E_SNAPSHOT_SITE:-auto}"
 UNIT_TESTS="${RACKUP_E2E_UNIT_TESTS:-0}"
+LOCAL_LINK_MODE="${RACKUP_E2E_LOCAL_LINK_MODE:-fake}"
+SOURCE_BUILD_REPO="${RACKUP_E2E_SOURCE_BUILD_REPO:-https://github.com/racket/racket.git}"
+SOURCE_BUILD_REF="${RACKUP_E2E_SOURCE_BUILD_REF:-v8.18}"
+SOURCE_BUILD_TARGET="${RACKUP_E2E_SOURCE_BUILD_TARGET:-base}"
+SOURCE_BUILD_JOBS="${RACKUP_E2E_SOURCE_BUILD_JOBS:-2}"
 
 WORKDIR="${WORKDIR:-/work}"
 TEST_HOME="${HOME:-/tmp/rackup-e2e-home}"
@@ -35,10 +40,23 @@ assert_contains() {
   [[ "$haystack" == *"$needle"* ]] || fail "$msg (needle='$needle' haystack='$haystack')"
 }
 
+assert_nonempty() {
+  local value="$1"
+  local msg="${2:-assert_nonempty failed}"
+  [[ -n "$value" ]] || fail "$msg"
+}
+
 echo "== Container environment =="
 echo "mode=$MODE"
 echo "specs=$SPECS_CSV"
 echo "snapshot_site=$SNAPSHOT_SITE"
+echo "local_link_mode=$LOCAL_LINK_MODE"
+if [[ "$LOCAL_LINK_MODE" == "build" ]]; then
+  echo "source_build_repo=$SOURCE_BUILD_REPO"
+  echo "source_build_ref=$SOURCE_BUILD_REF"
+  echo "source_build_target=$SOURCE_BUILD_TARGET"
+  echo "source_build_jobs=$SOURCE_BUILD_JOBS"
+fi
 echo "HOME=$HOME"
 echo "PWD=$(pwd)"
 echo "host-racket=$(command -v racket)"
@@ -146,6 +164,9 @@ if [[ "$#" -ge 2 && "$1" == "-e" ]]; then
   case "$2" in
     *"(version)"*) printf '9.99-local'; exit 0 ;;
     *"system-type 'vm"*) printf 'cs'; exit 0 ;;
+    *'getenv "PLTHOME"'*) printf '%s' "${PLTHOME:-}"; exit 0 ;;
+    *'getenv "PLTCOLLECTS"'*) printf '%s' "${PLTCOLLECTS:-}"; exit 0 ;;
+    *'getenv "PLTADDONDIR"'*) printf '%s' "${PLTADDONDIR:-}"; exit 0 ;;
   esac
 fi
 printf 'PLTHOME=%s\n' "${PLTHOME:-}"
@@ -159,6 +180,20 @@ set -euo pipefail
 printf 'FAKE-RACO %s\n' "$*"
 EOF
   chmod +x "$bin_dir/racket" "$bin_dir/raco"
+  echo "$root"
+}
+
+create_real_local_source_tree() {
+  local root="${TMPDIR}/rackup-e2e-real-local-src"
+  rm -rf "$root"
+  echo "Cloning Racket source: repo=$SOURCE_BUILD_REPO ref=$SOURCE_BUILD_REF" >&2
+  git clone --depth 1 --branch "$SOURCE_BUILD_REF" "$SOURCE_BUILD_REPO" "$root" >&2
+  echo "Building Racket from source in-place: target=$SOURCE_BUILD_TARGET jobs=$SOURCE_BUILD_JOBS" >&2
+  (
+    cd "$root"
+    make -j"$SOURCE_BUILD_JOBS" "$SOURCE_BUILD_TARGET" >&2
+  ) >&2
+  [[ -x "$root/racket/bin/racket" ]] || fail "expected built racket at $root/racket/bin/racket"
   echo "$root"
 }
 
@@ -357,17 +392,39 @@ shell_helper_function_test zsh "$shell_test_id" "$shell_test_prefix"
 
 echo
 echo "== Local in-place source build link smoke =="
-fake_src_root="$(create_fake_local_source_tree)"
-linked_id="$(run_rackup link localsrc "$fake_src_root" --set-default | tail -n 1)"
+case "$LOCAL_LINK_MODE" in
+  fake)
+    local_src_root="$(create_fake_local_source_tree)"
+    ;;
+  build)
+    local_src_root="$(create_real_local_source_tree)"
+    ;;
+  *)
+    fail "unsupported local link mode: $LOCAL_LINK_MODE"
+    ;;
+esac
+linked_id="$(run_rackup link localsrc "$local_src_root" --set-default | tail -n 1)"
 assert_eq "local-localsrc" "$linked_id" "unexpected linked toolchain id"
 run_rackup which racket --toolchain localsrc
 run_rackup which raco --toolchain localsrc
-link_shim_out="$(shim_racket)"
-assert_contains "PLTHOME=${fake_src_root}/racket" "$link_shim_out" "linked shim should export PLTHOME"
-assert_contains "PLTCOLLECTS=${fake_src_root}/racket/collects:${fake_src_root}/pkgs" "$link_shim_out" "linked shim should export PLTCOLLECTS"
-assert_contains "PLTADDONDIR=${RACKUP_HOME}/addons/${linked_id}" "$link_shim_out" "linked shim should export PLTADDONDIR"
-link_run_out="$(run_rackup run localsrc -- racket)"
-assert_contains "PLTHOME=${fake_src_root}/racket" "$link_run_out" "rackup run should apply linked toolchain env"
+linked_version="$(shim_racket -e '(display (version))')"
+if [[ "$LOCAL_LINK_MODE" == "fake" ]]; then
+  assert_contains "9.99-local" "$linked_version" "linked fake source tree should report fake version"
+else
+  assert_nonempty "$linked_version" "linked source-built racket should report a version"
+fi
+linked_plthome="$(shim_racket -e '(display (or (getenv "PLTHOME") ""))')"
+assert_eq "${local_src_root}/racket" "$linked_plthome" "linked shim should export PLTHOME"
+linked_collects="$(shim_racket -e '(display (or (getenv "PLTCOLLECTS") ""))')"
+assert_contains "${local_src_root}/racket/collects" "$linked_collects" "linked shim should export PLTCOLLECTS"
+linked_addon="$(shim_racket -e '(display (or (getenv "PLTADDONDIR") ""))')"
+assert_eq "${RACKUP_HOME}/addons/${linked_id}" "$linked_addon" "linked shim should export PLTADDONDIR"
+link_run_plthome="$(run_rackup run localsrc -- racket -e '(display (or (getenv "PLTHOME") ""))')"
+assert_eq "${local_src_root}/racket" "$link_run_plthome" "rackup run should apply linked toolchain env"
+if [[ "$LOCAL_LINK_MODE" == "build" ]]; then
+  run_rackup run localsrc -- raco help >/dev/null
+  run_rackup run localsrc -- racket -e '(display "ok")' >/dev/null
+fi
 run_rackup default "$primary_id"
 
 echo

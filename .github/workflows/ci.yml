@@ -33,6 +33,16 @@ jobs:
         run: |
           scripts/docker-test-fresh-install.sh --spec stable --spec 8.18 --spec 7.9
 
+  docker-e2e-prerelease:
+    name: Docker E2E (pre-release.racket-lang.org)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Docker pre-release fresh-container install
+        run: |
+          scripts/docker-test-fresh-install.sh --spec pre-release
+
   docker-e2e-bootstrap:
     name: Docker E2E (bootstrap + local link)
     runs-on: ubuntu-latest
@@ -42,3 +52,18 @@ jobs:
       - name: Docker bootstrap fresh-container install and local-link smoke
         run: |
           scripts/docker-test-fresh-install.sh --mode bootstrap --spec stable
+
+  docker-e2e-source-build-link:
+    name: Docker E2E (real source build local link)
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - name: Docker source-build local-link smoke
+        run: |
+          scripts/docker-test-fresh-install.sh \
+            --spec stable \
+            --local-link-mode build \
+            --source-build-ref v8.18 \
+            --source-build-target base \
+            --source-build-jobs 2

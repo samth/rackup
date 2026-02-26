@@ -8,6 +8,11 @@ MODE="direct"
 SPECS=("stable")
 CUSTOM_SPECS=0
 SNAPSHOT_SITE="${RACKUP_E2E_SNAPSHOT_SITE:-auto}"
+LOCAL_LINK_MODE="${RACKUP_E2E_LOCAL_LINK_MODE:-fake}"
+SOURCE_BUILD_REPO="${RACKUP_E2E_SOURCE_BUILD_REPO:-https://github.com/racket/racket.git}"
+SOURCE_BUILD_REF="${RACKUP_E2E_SOURCE_BUILD_REF:-v8.18}"
+SOURCE_BUILD_TARGET="${RACKUP_E2E_SOURCE_BUILD_TARGET:-base}"
+SOURCE_BUILD_JOBS="${RACKUP_E2E_SOURCE_BUILD_JOBS:-2}"
 
 usage() {
   cat <<'USAGE'
@@ -26,6 +31,11 @@ Options:
   --mode direct|bootstrap Test repo directly or via scripts/install.sh (default: direct)
   --spec SPEC             Toolchain spec to install (repeatable; default: stable)
   --snapshot-site SITE    auto|utah|northwestern (only used for snapshot specs)
+  --local-link-mode MODE  fake|build (default: fake)
+  --source-build-repo URL Racket source repo to clone for local-link build mode
+  --source-build-ref REF  Git ref/tag for source-build local-link mode (default: v8.18)
+  --source-build-target T make target for source-build local-link mode (default: base)
+  --source-build-jobs N   Parallel jobs for source-build local-link mode (default: 2)
   --unit-tests            Also run repo unit tests in container before install smoke test
   -h, --help              Show help
 
@@ -33,6 +43,7 @@ Examples:
   scripts/docker-test-fresh-install.sh
   scripts/docker-test-fresh-install.sh --mode bootstrap --spec stable
   scripts/docker-test-fresh-install.sh --spec stable --spec pre-release
+  scripts/docker-test-fresh-install.sh --spec stable --local-link-mode build --source-build-ref v8.18
 USAGE
 }
 
@@ -60,6 +71,26 @@ while [[ $# -gt 0 ]]; do
       ;;
     --snapshot-site)
       SNAPSHOT_SITE="$2"
+      shift 2
+      ;;
+    --local-link-mode)
+      LOCAL_LINK_MODE="$2"
+      shift 2
+      ;;
+    --source-build-repo)
+      SOURCE_BUILD_REPO="$2"
+      shift 2
+      ;;
+    --source-build-ref)
+      SOURCE_BUILD_REF="$2"
+      shift 2
+      ;;
+    --source-build-target)
+      SOURCE_BUILD_TARGET="$2"
+      shift 2
+      ;;
+    --source-build-jobs)
+      SOURCE_BUILD_JOBS="$2"
       shift 2
       ;;
     --unit-tests)
@@ -94,6 +125,14 @@ case "$SNAPSHOT_SITE" in
     ;;
 esac
 
+case "$LOCAL_LINK_MODE" in
+  fake|build) ;;
+  *)
+    echo "Invalid local-link mode: $LOCAL_LINK_MODE (expected fake|build)" >&2
+    exit 2
+    ;;
+esac
+
 ROOT_DIR="$(cd -P "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 if [[ "$BUILD" -eq 1 ]]; then
@@ -119,6 +158,11 @@ docker run --rm \
   -e RACKUP_E2E_MODE="$MODE" \
   -e RACKUP_E2E_SPECS="$speclist" \
   -e RACKUP_E2E_SNAPSHOT_SITE="$SNAPSHOT_SITE" \
+  -e RACKUP_E2E_LOCAL_LINK_MODE="$LOCAL_LINK_MODE" \
+  -e RACKUP_E2E_SOURCE_BUILD_REPO="$SOURCE_BUILD_REPO" \
+  -e RACKUP_E2E_SOURCE_BUILD_REF="$SOURCE_BUILD_REF" \
+  -e RACKUP_E2E_SOURCE_BUILD_TARGET="$SOURCE_BUILD_TARGET" \
+  -e RACKUP_E2E_SOURCE_BUILD_JOBS="$SOURCE_BUILD_JOBS" \
   -e RACKUP_E2E_UNIT_TESTS="$UNIT_TESTS" \
   -v "$ROOT_DIR:/work" \
   -w /work \
