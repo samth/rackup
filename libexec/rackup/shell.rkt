@@ -21,6 +21,7 @@
 
 (define (shell-helper-script)
   (string-append "# rackup shell helper\n"
+                 (emit-path-prepend)
                  "rackup() {\n"
                  "  local _rackup_bin=\"${RACKUP_HOME:-$HOME/.rackup}/bin/rackup\"\n"
                  "  if [ \"$#\" -gt 0 ] && [ \"$1\" = \"shell\" ]; then\n"
@@ -36,18 +37,6 @@
   (define shell-script (format "~a/shell/rackup.~a" base shell-name))
   (string-append start-marker
                  "\n"
-                 "if [ -d \""
-                 base
-                 "/shims\" ]; then\n"
-                 "  case \":$PATH:\" in\n"
-                 "    *\":"
-                 base
-                 "/shims:\"*) ;;\n"
-                 "    *) export PATH=\""
-                 base
-                 "/shims:$PATH\" ;;\n"
-                 "  esac\n"
-                 "fi\n"
                  "[ -f \""
                  shell-script
                  "\" ] && . \""
