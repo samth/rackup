@@ -8,6 +8,41 @@ ARCHIVE_URL_OVERRIDE="${RACKUP_ARCHIVE_URL:-}"
 YES=0
 INIT_SHELL=""
 FROM_LOCAL=""
+do_init=0
+
+is_tty_stdout() {
+  [ -t 1 ]
+}
+
+supports_color() {
+  [ -z "${NO_COLOR:-}" ] && is_tty_stdout
+}
+
+if supports_color; then
+  C_RESET="$(printf '\033[0m')"
+  C_BOLD="$(printf '\033[1m')"
+  C_GREEN="$(printf '\033[32m')"
+  C_YELLOW="$(printf '\033[33m')"
+  C_BLUE="$(printf '\033[34m')"
+else
+  C_RESET=""
+  C_BOLD=""
+  C_GREEN=""
+  C_YELLOW=""
+  C_BLUE=""
+fi
+
+info() {
+  printf '%s\n' "${C_BLUE}$*${C_RESET}"
+}
+
+warn() {
+  printf '%s\n' "${C_YELLOW}$*${C_RESET}" >&2
+}
+
+ok() {
+  printf '%s\n' "${C_GREEN}$*${C_RESET}"
+}
 
 usage() {
   cat <<'USAGE'
@@ -89,13 +124,13 @@ else
   else
     ARCHIVE_URL="https://github.com/${REPO}/archive/refs/heads/${REF}.tar.gz"
   fi
-  echo "Downloading rackup sources from ${ARCHIVE_URL}"
+  info "Downloading rackup sources from ${ARCHIVE_URL}"
   if command -v curl >/dev/null 2>&1; then
     curl -fsSL "$ARCHIVE_URL" -o "$TMPDIR_INSTALL/rackup.tar.gz"
   elif command -v wget >/dev/null 2>&1; then
     wget -qO "$TMPDIR_INSTALL/rackup.tar.gz" "$ARCHIVE_URL"
   else
-    echo "Error: need curl or wget to download rackup sources." >&2
+    warn "Error: need curl or wget to download rackup sources."
     exit 1
   fi
   mkdir -p "$TMPDIR_INSTALL/src"
@@ -104,23 +139,23 @@ else
 fi
 
 if [ -z "$SRC_DIR" ] || [ ! -d "$SRC_DIR" ]; then
-  echo "Error: failed to locate source directory." >&2
+  warn "Error: failed to locate source directory."
   exit 1
 fi
 
 mkdir -p "$PREFIX"
 mkdir -p "$PREFIX/bin" "$PREFIX/libexec"
 
-echo "Installing rackup into $PREFIX"
+info "Installing rackup into $PREFIX"
 cp -R "$SRC_DIR/bin/." "$PREFIX/bin/"
 cp -R "$SRC_DIR/libexec/." "$PREFIX/libexec/"
 chmod +x "$PREFIX/bin/rackup"
 chmod +x "$PREFIX/libexec/rackup-bootstrap.sh" 2>/dev/null || true
 
-echo "Installed: $PREFIX/bin/rackup"
+ok "Installed: $PREFIX/bin/rackup"
 
 if [ ! -r "$PREFIX/libexec/rackup-bootstrap.sh" ]; then
-  echo "Error: missing bootstrap helper after install." >&2
+  warn "Error: missing bootstrap helper after install."
   exit 1
 fi
 
@@ -128,10 +163,10 @@ RACKUP_HOME="$PREFIX"
 export RACKUP_HOME
 . "$PREFIX/libexec/rackup-bootstrap.sh"
 
-echo "Ensuring hidden runtime is installed..."
+info "Ensuring hidden runtime is installed..."
 rackup_hidden_runtime_install_if_missing
 
-echo "Registering/validating hidden runtime..."
+info "Registering/validating hidden runtime..."
 "$PREFIX/bin/rackup" runtime install >/dev/null
 
 default_shell="$(basename "${SHELL:-bash}")"
@@ -143,7 +178,6 @@ else
   shell_to_init="bash"
 fi
 
-do_init=0
 if [ "$YES" -eq 1 ]; then
   do_init=1
 else
@@ -160,24 +194,36 @@ else
         ;;
     esac
   else
-    echo "No interactive TTY detected; skipping shell init (rerun with -y to accept defaults)." >&2
+    warn "No interactive TTY detected; skipping shell init (rerun with -y to accept defaults)."
     do_init=0
   fi
 fi
 
 if [ "$do_init" -eq 1 ]; then
-  echo "Running rackup init --shell $shell_to_init"
+  info "Running rackup init --shell $shell_to_init"
   RACKUP_HOME="$PREFIX" "$PREFIX/bin/rackup" init --shell "$shell_to_init"
 else
-  echo "Skipping shell init."
+  warn "Skipping shell init."
 fi
-
-cat <<EOF
-
-rackup installed successfully.
-
-Next steps:
-  1. Ensure \${RACKUP_HOME:-$PREFIX}/shims is on PATH (or run 'rackup init').
-  2. Install your first toolchain:
-       $PREFIX/bin/rackup install stable --set-default
+printf '\n'
+ok "${C_BOLD}rackup installed successfully.${C_RESET}"
+printf '\n'
+printf '%s\n' "${C_BOLD}Next steps:${C_RESET}"
+if [ "$do_init" -eq 1 ]; then
+  if [ "$shell_to_init" = "zsh" ]; then
+    rc_file="$HOME/.zshrc"
+  else
+    rc_file="$HOME/.bashrc"
+  fi
+  cat <<EOF
+  1. Start a new shell (or run: . $rc_file) so rackup shims are added to PATH.
+  2. Install your first toolchain (the first install becomes the default automatically):
+       $PREFIX/bin/rackup install stable
 EOF
+else
+  cat <<EOF
+  1. Add \${RACKUP_HOME:-$PREFIX}/shims to PATH (or run '$PREFIX/bin/rackup init').
+  2. Install your first toolchain (the first install becomes the default automatically):
+       $PREFIX/bin/rackup install stable
+EOF
+fi
