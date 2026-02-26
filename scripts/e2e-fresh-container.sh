@@ -100,6 +100,38 @@ if [[ "$MODE" == "bootstrap" ]]; then
   rm -rf "$RACKUP_HOME"
   bash "$RUN_SRC/scripts/install.sh" -y --from-local "$RUN_SRC"
   RACKUP_BIN="$RACKUP_HOME/bin/rackup"
+elif [[ "$MODE" == "bootstrap-curl" ]]; then
+  echo
+  echo "== Installing rackup via curl | sh (local Pages server) =="
+  export RACKUP_HOME="$HOME/.rackup-bootstrap-curl"
+  rm -rf "$RACKUP_HOME"
+  PAGES_DIR="$TMPDIR/rackup-pages-site"
+  rm -rf "$PAGES_DIR"
+  sh "$RUN_SRC/scripts/build-pages-site.sh" "$PAGES_DIR"
+  PAGES_PORT="${RACKUP_E2E_PAGES_PORT:-18765}"
+  python3 -m http.server --bind 127.0.0.1 "$PAGES_PORT" --directory "$PAGES_DIR" >/tmp/rackup-e2e-pages.log 2>&1 &
+  PAGES_SERVER_PID=$!
+  cleanup_pages_server() {
+    if [[ -n "${PAGES_SERVER_PID:-}" ]]; then
+      kill "$PAGES_SERVER_PID" >/dev/null 2>&1 || true
+      wait "$PAGES_SERVER_PID" 2>/dev/null || true
+    fi
+  }
+  trap cleanup_pages_server EXIT
+  BOOT_URL="http://127.0.0.1:${PAGES_PORT}/install.sh"
+  ARCHIVE_URL="http://127.0.0.1:${PAGES_PORT}/rackup-src.tar.gz"
+  for _ in $(seq 1 30); do
+    if curl -fsS "http://127.0.0.1:${PAGES_PORT}/" >/dev/null 2>&1; then
+      break
+    fi
+    sleep 0.2
+  done
+  if ! curl -fsSL "$BOOT_URL" | sh -s -- -y --archive-url "$ARCHIVE_URL"; then
+    echo "Local Pages server log:" >&2
+    sed -n '1,200p' /tmp/rackup-e2e-pages.log >&2 || true
+    fail "curl | sh bootstrap failed"
+  fi
+  RACKUP_BIN="$RACKUP_HOME/bin/rackup"
 else
   echo
   echo "== Using repo rackup directly =="
@@ -296,7 +328,7 @@ echo "== rackup smoke =="
 run_rackup doctor
 runtime_status="$(run_rackup runtime status)"
 echo "$runtime_status"
-if [[ "$MODE" == "bootstrap" ]]; then
+if [[ "$MODE" == "bootstrap" || "$MODE" == "bootstrap-curl" ]]; then
   assert_contains "present: yes" "$runtime_status" "bootstrap should install hidden runtime"
 else
   assert_contains "present: " "$runtime_status" "runtime status output missing"

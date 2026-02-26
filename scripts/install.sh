@@ -4,6 +4,7 @@ set -eu
 PREFIX="${RACKUP_HOME:-$HOME/.rackup}"
 REPO="${RACKUP_GITHUB_REPO:-samth/rackup}"
 REF="${RACKUP_REF:-main}"
+ARCHIVE_URL_OVERRIDE="${RACKUP_ARCHIVE_URL:-}"
 YES=0
 INIT_SHELL=""
 FROM_LOCAL=""
@@ -13,13 +14,14 @@ usage() {
 rackup bootstrap installer
 
 Usage:
-  install.sh [-y] [--prefix DIR] [--repo owner/name] [--ref REF] [--shell bash|zsh] [--from-local PATH]
+  install.sh [-y] [--prefix DIR] [--repo owner/name] [--ref REF] [--archive-url URL] [--shell bash|zsh] [--from-local PATH]
 
 Behavior:
   - Prompts before editing shell config by default.
   - With -y, accepts defaults (including shell init).
   - Installs files under ~/.rackup unless --prefix or RACKUP_HOME is set.
   - Installs a hidden internal Racket runtime for rackup itself.
+  - For the default samth/rackup bootstrap, downloads a public source bundle from GitHub Pages.
 
 Examples:
   curl -fsSL https://samth.github.io/rackup/install.sh | sh
@@ -43,6 +45,10 @@ while [ "$#" -gt 0 ]; do
       ;;
     --ref)
       REF="$2"
+      shift 2
+      ;;
+    --archive-url)
+      ARCHIVE_URL_OVERRIDE="$2"
       shift 2
       ;;
     --shell)
@@ -76,7 +82,13 @@ SRC_DIR=""
 if [ -n "$FROM_LOCAL" ]; then
   SRC_DIR="$FROM_LOCAL"
 else
-  ARCHIVE_URL="https://github.com/${REPO}/archive/refs/heads/${REF}.tar.gz"
+  if [ -n "$ARCHIVE_URL_OVERRIDE" ]; then
+    ARCHIVE_URL="$ARCHIVE_URL_OVERRIDE"
+  elif [ "$REPO" = "samth/rackup" ] && [ "$REF" = "main" ]; then
+    ARCHIVE_URL="https://samth.github.io/rackup/rackup-src.tar.gz"
+  else
+    ARCHIVE_URL="https://github.com/${REPO}/archive/refs/heads/${REF}.tar.gz"
+  fi
   echo "Downloading rackup sources from ${ARCHIVE_URL}"
   if command -v curl >/dev/null 2>&1; then
     curl -fsSL "$ARCHIVE_URL" -o "$TMPDIR_INSTALL/rackup.tar.gz"

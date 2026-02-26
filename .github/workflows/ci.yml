@@ -67,6 +67,19 @@ jobs:
             --spec stable \
             --spec 8.18
 
+  docker-e2e-bootstrap-curl:
+    name: Docker E2E (curl | sh bootstrap in container)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Docker curl-pipe-sh bootstrap smoke (no host racket)
+        run: |
+          scripts/docker-test-fresh-install.sh \
+            --mode bootstrap-curl \
+            --host-racket absent \
+            --spec stable
+
   docker-e2e-source-build-link:
     name: Docker E2E (real source build local link)
     runs-on: ubuntu-latest

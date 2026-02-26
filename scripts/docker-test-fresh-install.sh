@@ -30,7 +30,8 @@ Usage:
 Options:
   --image TAG             Docker image tag (default: rackup-e2e:local)
   --no-build              Skip docker build and reuse existing image
-  --mode direct|bootstrap Test repo directly or via scripts/install.sh (default: direct)
+  --mode direct|bootstrap|bootstrap-curl
+                        Test repo directly, via local scripts/install.sh, or via curl|sh from a local Pages server (default: direct)
   --spec SPEC             Toolchain spec to install (repeatable; default: stable)
   --snapshot-site SITE    auto|utah|northwestern (only used for snapshot specs)
   --local-link-mode MODE  fake|build (default: fake)
@@ -45,6 +46,7 @@ Options:
 Examples:
   scripts/docker-test-fresh-install.sh
   scripts/docker-test-fresh-install.sh --mode bootstrap --spec stable
+  scripts/docker-test-fresh-install.sh --mode bootstrap-curl --host-racket absent --spec stable
   scripts/docker-test-fresh-install.sh --spec stable --spec pre-release
   scripts/docker-test-fresh-install.sh --spec stable --local-link-mode build --source-build-ref v8.18
   scripts/docker-test-fresh-install.sh --mode bootstrap --host-racket absent --spec stable
@@ -118,9 +120,9 @@ while [[ $# -gt 0 ]]; do
 done
 
 case "$MODE" in
-  direct|bootstrap) ;;
+  direct|bootstrap|bootstrap-curl) ;;
   *)
-    echo "Invalid mode: $MODE (expected direct|bootstrap)" >&2
+    echo "Invalid mode: $MODE (expected direct|bootstrap|bootstrap-curl)" >&2
     exit 2
     ;;
 esac
