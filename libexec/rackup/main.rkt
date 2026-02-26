@@ -2,7 +2,9 @@
 
 (require racket/list
          racket/match
+         racket/file
          racket/path
+         racket/port
          racket/string
          racket/system
          "install.rkt"
@@ -47,6 +49,8 @@
   (usage-line "reshim" "Rebuild executable shims from installed toolchains.")
   (usage-line "init [--shell bash|zsh]"
               "Install/update shell integration in ~/.bashrc or ~/.zshrc.")
+  (usage-line "uninstall [--yes]"
+              "Remove rackup, its toolchains/runtime, and shell init blocks (destructive).")
   (usage-line "runtime status|install|upgrade"
               "Manage rackup's hidden internal runtime used to run rackup itself.")
   (usage-line "doctor" "Print diagnostics for paths, runtime, and installed toolchains.")
@@ -280,6 +284,90 @@
      (displayln id)]
     [_ (rackup-error "usage: rackup link <name> <path> [--set-default] [--force]")]))
 
+(define (parse-uninstall-options rest)
+  (define yes? #f)
+  (let loop ([xs rest])
+    (match xs
+      ['() yes?]
+      [(list (or "-y" "--yes") more ...)
+       (set! yes? #t)
+       (loop more)]
+      [(list flag _ ...) (rackup-error "usage: rackup uninstall [--yes] (unknown flag ~a)" flag)])))
+
+(define (installed-toolchain-metas/safe)
+  (with-handlers ([exn:fail? (lambda (_) null)])
+    (for/list ([id (in-list (installed-toolchain-ids))])
+      (define m (read-toolchain-meta id))
+      (and (hash? m) m))))
+
+(define (linked-source-paths/safe)
+  (remove-duplicates
+   (filter values
+           (for/list ([m (in-list (installed-toolchain-metas/safe))])
+             (and (hash? m)
+                  (equal? (hash-ref m 'kind #f) 'local)
+                  (hash-ref m 'source-path #f))))
+   string=?))
+
+(define (warn-uninstall-summary home-path)
+  (define home-str (path->string home-path))
+  (define ids (with-handlers ([exn:fail? (lambda (_) null)]) (installed-toolchain-ids)))
+  (define linked-paths (linked-source-paths/safe))
+  (eprintf "WARNING: `rackup uninstall` is destructive.\n")
+  (eprintf "WARNING: This will permanently delete all rackup-managed data under:\n")
+  (eprintf "  ~a\n" home-str)
+  (eprintf "WARNING: This includes:\n")
+  (eprintf "  - hidden runtime used to run rackup\n")
+  (eprintf "  - installed toolchains and linked-toolchain metadata/overlays\n")
+  (eprintf "  - shims, caches, downloaded installers, and per-toolchain addon dirs/packages\n")
+  (eprintf "WARNING: This will also remove rackup-managed shell init blocks from ~~/.bashrc and ~~/.zshrc if present.\n")
+  (eprintf "WARNING: This cannot be undone.\n")
+  (eprintf "Detected installed toolchains: ~a\n" (length ids))
+  (when (pair? ids)
+    (for ([id (in-list ids)])
+      (eprintf "  - ~a\n" id)))
+  (when (pair? linked-paths)
+    (eprintf "WARNING: Linked local source trees will NOT be deleted (only rackup's links to them).\n")
+    (for ([p (in-list linked-paths)])
+      (eprintf "  - external source tree: ~a\n" p))))
+
+(define (confirm-uninstall! home-path yes?)
+  (unless yes?
+    (unless (terminal-port? (current-input-port))
+      (rackup-error "refusing to uninstall without interactive confirmation (rerun with --yes)"))
+    (displayln "")
+    (printf "Type DELETE to uninstall rackup and remove ~a: " (path->string home-path))
+    (flush-output)
+    (define answer (read-line))
+    (unless (and (string? answer) (equal? (string-trim answer) "DELETE"))
+      (rackup-error "uninstall aborted"))))
+
+(define (cmd-uninstall rest)
+  (define yes? (parse-uninstall-options rest))
+  (define home-path (rackup-home))
+  (warn-uninstall-summary home-path)
+  (confirm-uninstall! home-path yes?)
+  (define removed-rcs
+    (with-handlers ([exn:fail? (lambda (e)
+                                 (eprintf "rackup: warning: failed to clean shell init blocks: ~a\n"
+                                          (exn-message e))
+                                 null)])
+      (remove-shell-init-blocks!)))
+  (when (directory-exists? home-path)
+    (define sh (or (find-executable-path "sh") (string->path "/bin/sh")))
+    ;; Delete after this process exits, since we're running code from this directory.
+    (define cleanup-cmd
+      (format "sleep 1; rm -rf ~a >/dev/null 2>&1" (sh-single-quote (path->string home-path))))
+    (with-handlers ([exn:fail? (lambda (_e) (void))])
+      (void (system* sh "-c" (string-append cleanup-cmd " &")))))
+  (displayln "rackup uninstalled.")
+  (when (pair? removed-rcs)
+    (displayln "Removed rackup shell init blocks from:")
+    (for ([p (in-list removed-rcs)])
+      (printf "  ~a\n" (path->string p))))
+  (displayln "Final file deletion may complete shortly after this command exits.")
+  (displayln "Your current shell may still have rackup-related PATH/env changes until you start a new shell."))
+
 (define (cmd-doctor)
   (doctor-report))
 
@@ -306,6 +394,7 @@
       [(list "remove" rest ...) (cmd-remove rest)]
       [(list "reshim") (cmd-reshim)]
       [(list "init" rest ...) (cmd-init rest)]
+      [(list "uninstall" rest ...) (cmd-uninstall rest)]
       [(list "runtime" rest ...) (cmd-runtime rest)]
       [(list "doctor") (cmd-doctor)]
       [_

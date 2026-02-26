@@ -518,5 +518,37 @@ if [[ "$HOST_RACKET" == "absent" ]]; then
   assert_contains "install.sh" "$missing_err" "missing-runtime error should include recovery instructions"
 fi
 
+if [[ "$HOST_RACKET" != "absent" ]]; then
+  echo
+  echo "== rackup uninstall smoke =="
+  test -d "$RACKUP_HOME"
+  [[ -f "$HOME/.bashrc" ]] || fail "expected ~/.bashrc before uninstall"
+  [[ -f "$HOME/.zshrc" ]] || fail "expected ~/.zshrc before uninstall"
+  grep -q "rackup initialize" "$HOME/.bashrc" || fail "expected rackup init block in ~/.bashrc before uninstall"
+  grep -q "rackup initialize" "$HOME/.zshrc" || fail "expected rackup init block in ~/.zshrc before uninstall"
+  if ! uninstall_out="$(run_rackup uninstall --yes 2>&1)"; then
+    printf '%s\n' "$uninstall_out" >&2
+    fail "rackup uninstall --yes failed"
+  fi
+  assert_contains "WARNING:" "$uninstall_out" "uninstall should print warnings"
+  assert_contains "rackup uninstalled." "$uninstall_out" "uninstall should confirm success"
+  for _ in $(seq 1 20); do
+    [[ ! -e "$RACKUP_HOME" ]] && break
+    sleep 0.2
+  done
+  [[ ! -e "$RACKUP_HOME" ]] || fail "RACKUP_HOME should be removed by uninstall (after background cleanup)"
+  if grep -q "rackup initialize" "$HOME/.bashrc"; then
+    fail "rackup uninstall should remove ~/.bashrc managed block"
+  fi
+  if grep -q "rackup initialize" "$HOME/.zshrc"; then
+    fail "rackup uninstall should remove ~/.zshrc managed block"
+  fi
+  [[ -d "$local_src_root" ]] || fail "local linked source tree should not be deleted by uninstall"
+else
+  echo
+  echo "== rackup uninstall smoke =="
+  echo "Skipping uninstall in host-racket-absent mode (this scenario intentionally destroys the hidden runtime for recovery testing)."
+fi
+
 echo
 echo "Fresh-container install test PASSED"

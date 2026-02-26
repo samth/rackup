@@ -260,4 +260,18 @@
            (doctor-report)
            (get-output-string out))))
      (check-true (string-contains? doctor-out "runtime-present: #t"))
-     (check-true (string-contains? doctor-out (format "runtime-id: ~a" runtime-id))))))
+     (check-true (string-contains? doctor-out (format "runtime-id: ~a" runtime-id)))))
+
+  (let* ([rc-before (string-append "export FOO=1\n"
+                                   "# >>> rackup initialize >>>\n"
+                                   "export PATH=\"$HOME/.rackup/shims:$PATH\"\n"
+                                   "# <<< rackup initialize <<<\n"
+                                   "export BAR=2\n")]
+         [expected-after "export FOO=1\nexport BAR=2\n"])
+    (define-values (rc-after changed?) (strip-managed-block rc-before))
+    (check-true changed?)
+    (check-equal? rc-after expected-after))
+
+  (define-values (unchanged changed?) (strip-managed-block "export PATH=/usr/bin\n"))
+  (check-false changed?)
+  (check-equal? unchanged "export PATH=/usr/bin\n"))

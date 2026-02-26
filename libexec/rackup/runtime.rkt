@@ -204,21 +204,44 @@
 (define (rackup-core-source-path)
   (build-path (rackup-libexec-dir) "rackup-core.rkt"))
 
+(define (run-quiet-program exe . args)
+  (define out (open-output-nowhere))
+  (define err (open-output-string))
+  (define ok?
+    (parameterize ([current-output-port out]
+                   [current-error-port err])
+      (apply system* exe args)))
+  (values ok? (string-trim (get-output-string err))))
+
 (define (precompile-rackup-sources!)
   (define raco-exe (hidden-runtime-raco-path))
+  (define racket-exe (hidden-runtime-racket-path))
   (define core (rackup-core-source-path))
-  (when (and raco-exe (file-exists? core))
-    (define out (open-output-nowhere))
-    (define err (open-output-string))
-    (define ok?
-      (parameterize ([current-output-port out]
-                     [current-error-port err])
-        (system* raco-exe "make" core)))
-    (unless ok?
-      (define details (string-trim (get-output-string err)))
-      (eprintf "rackup: warning: failed to precompile rackup sources with raco make\n")
+  (when (file-exists? core)
+    (define (warn-precompile step details)
+      (eprintf "rackup: warning: failed to precompile rackup sources via ~a\n" step)
       (unless (string-blank? details)
-        (eprintf "~a\n" details)))))
+        (eprintf "~a\n" details)))
+    (define (try-racket-make-flag)
+      (and racket-exe
+           (let-values ([(ok? details) (run-quiet-program racket-exe "-y" core "--help")])
+             (unless ok?
+               (warn-precompile "`racket -y`" details))
+             ok?)))
+    (cond
+      [raco-exe
+       (let-values ([(ok? details) (run-quiet-program raco-exe "make" core)])
+         (cond
+           [ok? (void)]
+           [(regexp-match? #px"Unrecognized command:\\s*make" details)
+            ;; Minimal hidden runtimes may not include the `raco make` command.
+            (unless (try-racket-make-flag)
+              (void))]
+           [else
+            (warn-precompile "`raco make`" details)]))]
+      [else
+       (unless (try-racket-make-flag)
+         (void))])))
 
 (define (with-runtime-lock thunk)
   (ensure-rackup-layout!)

@@ -12,7 +12,9 @@
 
 (provide emit-shell-activation
          emit-shell-deactivation
-         init-shell!)
+         init-shell!
+         strip-managed-block
+         remove-shell-init-blocks!)
 
 (define start-marker "# >>> rackup initialize >>>")
 (define end-marker "# <<< rackup initialize <<<")
@@ -126,6 +128,42 @@
                         ""
                         (string-append existing "\n"))
                     new-block)]))
+
+(define (strip-managed-block existing)
+  (define start-match (regexp-match-positions (regexp (regexp-quote start-marker)) existing))
+  (cond
+    [(not start-match) (values existing #f)]
+    [else
+     (define start-pos (caar start-match))
+     (define after-start (substring existing start-pos))
+     (define end-match (regexp-match-positions (regexp (regexp-quote end-marker)) after-start))
+     (cond
+       [(not end-match) (values existing #f)]
+       [else
+        (define end-pos-rel (cdar end-match))
+        (define end-pos (+ start-pos end-pos-rel))
+        (define after-end (substring existing end-pos))
+        (define after-end*
+          (if (and (positive? (string-length after-end))
+                   (char=? (string-ref after-end 0) #\newline))
+              (substring after-end 1)
+              after-end))
+        (define prefix (substring existing 0 start-pos))
+        (define combined (string-append prefix after-end*))
+        (define trimmed (string-trim combined))
+        (values (if (string-blank? trimmed) "" combined) #t)])]))
+
+(define (remove-shell-init-blocks!)
+  (define removed null)
+  (for ([shell* '("bash" "zsh")])
+    (define rc (rc-path shell*))
+    (when (file-exists? rc)
+      (define existing (read-string-file rc ""))
+      (define-values (updated changed?) (strip-managed-block existing))
+      (when changed?
+        (write-string-file rc updated)
+        (set! removed (cons rc removed)))))
+  (reverse removed))
 
 (define (init-shell! [shell-name #f])
   (ensure-rackup-layout!)
