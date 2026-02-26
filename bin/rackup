@@ -13,5 +13,11 @@ fi
 
 . "$BOOTSTRAP_SH"
 
+if [ "${1:-}" = "prompt" ]; then
+  shift
+  rackup_prompt_shell "${1:-}"
+  exit 0
+fi
+
 RACKET_EXE="$(rackup_select_runtime_racket_or_fail)" || exit 1
 exec "$RACKET_EXE" "$CORE" "$@"

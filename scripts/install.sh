@@ -134,7 +134,8 @@ else
     exit 1
   fi
   mkdir -p "$TMPDIR_INSTALL/src"
-  tar -xzf "$TMPDIR_INSTALL/rackup.tar.gz" -C "$TMPDIR_INSTALL/src"
+  # Use -m so future mtimes in the archive do not produce noisy warnings on skewed clocks.
+  tar -xzmf "$TMPDIR_INSTALL/rackup.tar.gz" -C "$TMPDIR_INSTALL/src"
   SRC_DIR="$(find "$TMPDIR_INSTALL/src" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
 fi
 

@@ -36,6 +36,43 @@ rackup_runtime_cache_dir() {
   printf '%s\n' "$(rackup_home)/cache/downloads"
 }
 
+rackup_default_toolchain_file() {
+  printf '%s\n' "$(rackup_home)/state/default-toolchain"
+}
+
+rackup_read_default_toolchain_shell() {
+  f="$(rackup_default_toolchain_file)"
+  if [ -f "$f" ]; then
+    tr -d '\r\n' < "$f"
+  fi
+}
+
+rackup_prompt_shell() {
+  mode="${1:-}"
+  active="${RACKUP_TOOLCHAIN:-}"
+  source_kind=""
+  if [ -n "$active" ]; then
+    source_kind="env"
+  else
+    active="$(rackup_read_default_toolchain_shell)"
+    if [ -n "$active" ]; then
+      source_kind="default"
+    fi
+  fi
+  [ -n "$active" ] || return 0
+  case "$mode" in
+    --raw)
+      printf '%s\n' "$active"
+      ;;
+    --source)
+      printf '%s\t%s\n' "$active" "$source_kind"
+      ;;
+    *)
+      printf '[rk:%s]\n' "$active"
+      ;;
+  esac
+}
+
 rackup_mkdir_p() {
   mkdir -p "$1"
 }

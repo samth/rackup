@@ -133,8 +133,7 @@
         (define end-pos (+ start-pos end-pos-rel))
         (define after-end (substring existing end-pos))
         (define after-end*
-          (if (and (positive? (string-length after-end))
-                   (char=? (string-ref after-end 0) #\newline))
+          (if (and (positive? (string-length after-end)) (char=? (string-ref after-end 0) #\newline))
               (substring after-end 1)
               after-end))
         (define prefix (substring existing 0 start-pos))

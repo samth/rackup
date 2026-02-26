@@ -19,24 +19,18 @@
 (provide main)
 
 (define (usage-line cmd desc)
-  (printf "  ~a~a~a\n"
-          cmd
-          (make-string (max 2 (- 22 (string-length cmd))) #\space)
-          desc))
+  (printf "  ~a~a~a\n" cmd (make-string (max 2 (- 22 (string-length cmd))) #\space) desc))
 
 (define (usage)
   (displayln "rackup - Racket toolchain manager")
   (displayln "")
   (displayln "Commands:")
-  (usage-line "available [--all|--limit N]"
-              "List remote install specs and recent release versions.")
-  (usage-line "install <spec> [flags]"
-              "Install a Racket toolchain (release, pre-release, snapshot).")
+  (usage-line "available [--all|--limit N]" "List remote install specs and recent release versions.")
+  (usage-line "install <spec> [flags]" "Install a Racket toolchain (release, pre-release, snapshot).")
   (usage-line "link <name> <path> [flags]"
               "Link an in-place/local Racket build as a managed toolchain.")
   (usage-line "list" "List installed toolchains (shows default/active tags).")
-  (usage-line "default [<toolchain>|--unset]"
-              "Show, set, or clear the global default toolchain.")
+  (usage-line "default [<toolchain>|--unset]" "Show, set, or clear the global default toolchain.")
   (usage-line "current" "Show the active toolchain and whether it is shell/global.")
   (usage-line "which <exe> [--toolchain <toolchain>]"
               "Show the real executable path for a tool in a toolchain.")
@@ -44,11 +38,11 @@
               "Emit shell code to activate/deactivate a toolchain in this shell.")
   (usage-line "run <toolchain> -- <command> [args...]"
               "Run a command using a specific toolchain without changing defaults.")
-  (usage-line "remove <toolchain>"
-              "Remove an installed or linked toolchain and its addon dir.")
+  (usage-line "prompt [--raw|--source]"
+              "Print fast prompt info for PS1 (wrapper handles this without Racket startup).")
+  (usage-line "remove <toolchain>" "Remove an installed or linked toolchain and its addon dir.")
   (usage-line "reshim" "Rebuild executable shims from installed toolchains.")
-  (usage-line "init [--shell bash|zsh]"
-              "Install/update shell integration in ~/.bashrc or ~/.zshrc.")
+  (usage-line "init [--shell bash|zsh]" "Install/update shell integration in ~/.bashrc or ~/.zshrc.")
   (usage-line "uninstall [--yes]"
               "Remove rackup, its toolchains/runtime, and shell init blocks (destructive).")
   (usage-line "runtime status|install|upgrade"
@@ -63,6 +57,29 @@
   (unless id
     (rackup-error "no matching installed toolchain: ~a" spec))
   id)
+
+(define (yes?/default-yes s)
+  (define a
+    (if (string? s)
+        (string-downcase (string-trim s))
+        "__no__"))
+  (or (string=? a "") (member a '("y" "yes"))))
+
+(define (resolve-toolchain-or-offer-install spec)
+  (define id (find-local-toolchain spec))
+  (cond
+    [id id]
+    [(not (terminal-port? (current-input-port)))
+     (rackup-error "no matching installed toolchain: ~a\nHint: run `rackup install ~a` first"
+                   spec
+                   spec)]
+    [else
+     (printf "Toolchain '~a' is not installed. Install it now? [Y/n] " spec)
+     (flush-output)
+     (define answer (read-line))
+     (unless (yes?/default-yes answer)
+       (rackup-error "toolchain not installed: ~a" spec))
+     (install-toolchain! spec '())]))
 
 (define (cmd-list)
   (ensure-index!)
@@ -98,7 +115,7 @@
      (clear-default-toolchain!)
      (displayln "Cleared default toolchain.")]
     [(list spec)
-     (define id (resolve-toolchain-or-die spec))
+     (define id (resolve-toolchain-or-offer-install spec))
      (set-default-toolchain! id)
      (reshim!)
      (displayln (format "Default toolchain: ~a" id))]
@@ -204,10 +221,23 @@
 
 (define (cmd-install rest)
   (match rest
-    [(list spec more ...)
-     (define id (install-toolchain! spec more))
-     (displayln id)]
+    [(list spec more ...) (void (install-toolchain! spec more))]
     [_ (rackup-error "usage: rackup install <spec> [flags]")]))
+
+(define (cmd-prompt rest)
+  (define mode
+    (match rest
+      ['() 'default]
+      [(list "--raw") 'raw]
+      [(list "--source") 'source]
+      [_ (rackup-error "usage: rackup prompt [--raw|--source]")]))
+  (define id (resolve-active-toolchain-id))
+  (define src (current-toolchain-source))
+  (when id
+    (match mode
+      ['raw (displayln id)]
+      ['source (printf "~a\t~a\n" id (or src 'unknown))]
+      [_ (printf "[rk:~a]\n" id)])))
 
 (define (parse-available-options rest)
   (define limit 20)
@@ -221,8 +251,8 @@
          (rackup-error "invalid --limit value: ~a (expected positive integer)" n))
        (set! limit k)
        (loop more)]
-      [(list flag _ ...) (rackup-error "usage: rackup available [--all|--limit N] (unknown flag ~a)"
-                                       flag)])))
+      [(list flag _ ...)
+       (rackup-error "usage: rackup available [--all|--limit N] (unknown flag ~a)" flag)])))
 
 (define (fmt-req-summary req)
   (define kind (hash-ref req 'kind #f))
@@ -261,7 +291,10 @@
     (with-handlers ([exn:fail? (lambda (e)
                                  (rackup-error "failed to fetch release list: ~a" (exn-message e)))])
       (fetch-all-release-versions)))
-  (define shown (if (and limit (> (length versions) limit)) (take versions limit) versions))
+  (define shown
+    (if (and limit (> (length versions) limit))
+        (take versions limit)
+        versions))
   (printf "Release versions (~a):\n"
           (if limit
               (format "showing ~a of ~a" (length shown) (length versions))
@@ -304,14 +337,14 @@
   (remove-duplicates
    (filter values
            (for/list ([m (in-list (installed-toolchain-metas/safe))])
-             (and (hash? m)
-                  (equal? (hash-ref m 'kind #f) 'local)
-                  (hash-ref m 'source-path #f))))
+             (and (hash? m) (equal? (hash-ref m 'kind #f) 'local) (hash-ref m 'source-path #f))))
    string=?))
 
 (define (warn-uninstall-summary home-path)
   (define home-str (path->string home-path))
-  (define ids (with-handlers ([exn:fail? (lambda (_) null)]) (installed-toolchain-ids)))
+  (define ids
+    (with-handlers ([exn:fail? (lambda (_) null)])
+      (installed-toolchain-ids)))
   (define linked-paths (linked-source-paths/safe))
   (eprintf "WARNING: `rackup uninstall` is destructive.\n")
   (eprintf "WARNING: This will permanently delete all rackup-managed data under:\n")
@@ -320,14 +353,16 @@
   (eprintf "  - hidden runtime used to run rackup\n")
   (eprintf "  - installed toolchains and linked-toolchain metadata/overlays\n")
   (eprintf "  - shims, caches, downloaded installers, and per-toolchain addon dirs/packages\n")
-  (eprintf "WARNING: This will also remove rackup-managed shell init blocks from ~~/.bashrc and ~~/.zshrc if present.\n")
+  (eprintf
+   "WARNING: This will also remove rackup-managed shell init blocks from ~~/.bashrc and ~~/.zshrc if present.\n")
   (eprintf "WARNING: This cannot be undone.\n")
   (eprintf "Detected installed toolchains: ~a\n" (length ids))
   (when (pair? ids)
     (for ([id (in-list ids)])
       (eprintf "  - ~a\n" id)))
   (when (pair? linked-paths)
-    (eprintf "WARNING: Linked local source trees will NOT be deleted (only rackup's links to them).\n")
+    (eprintf
+     "WARNING: Linked local source trees will NOT be deleted (only rackup's links to them).\n")
     (for ([p (in-list linked-paths)])
       (eprintf "  - external source tree: ~a\n" p))))
 
@@ -366,7 +401,8 @@
     (for ([p (in-list removed-rcs)])
       (printf "  ~a\n" (path->string p))))
   (displayln "Final file deletion may complete shortly after this command exits.")
-  (displayln "Your current shell may still have rackup-related PATH/env changes until you start a new shell."))
+  (displayln
+   "Your current shell may still have rackup-related PATH/env changes until you start a new shell."))
 
 (define (cmd-doctor)
   (doctor-report))
@@ -388,6 +424,7 @@
       [(list "list") (cmd-list)]
       [(list "default" rest ...) (cmd-default rest)]
       [(list "current") (cmd-current)]
+      [(list "prompt" rest ...) (cmd-prompt rest)]
       [(list "which" rest ...) (cmd-which rest)]
       [(list "shell" rest ...) (cmd-shell rest)]
       [(list "run" rest ...) (cmd-run rest)]

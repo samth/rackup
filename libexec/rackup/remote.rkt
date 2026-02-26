@@ -17,7 +17,10 @@
          fetch-version-rktd
          fetch-snapshot-stamp
          parse-installer-filename
+         parse-legacy-installer-filename
+         parse-legacy-installers-index-html
          select-installer-filename
+         select-legacy-installer-filename
          resolve-install-request
          download-url->file)
 
@@ -48,8 +51,12 @@
 
 (define (http-external-tool)
   (cond
-    [(find-executable-path "curl") => (lambda (p) (cons 'curl p))]
-    [(find-executable-path "wget") => (lambda (p) (cons 'wget p))]
+    [(find-executable-path "curl")
+     =>
+     (lambda (p) (cons 'curl p))]
+    [(find-executable-path "wget")
+     =>
+     (lambda (p) (cons 'wget p))]
     [else #f]))
 
 (define (command-display-string args)
@@ -66,7 +73,9 @@
                       who
                       (command-display-string args)
                       (let ([e (string-trim (get-output-string err))])
-                        (if (string-blank? e) "" (string-append "\n" e)))))))
+                        (if (string-blank? e)
+                            ""
+                            (string-append "\n" e)))))))
 
 (define (external-http-get-string url-str)
   (match (http-external-tool)
@@ -95,9 +104,7 @@
   (define code (status-code headers))
   (unless (equal? code 200)
     (close-input-port in)
-    (rackup-error "HTTP request failed (~a): ~a"
-                  code
-                  (path->string* url-str)))
+    (rackup-error "HTTP request failed (~a): ~a" code (path->string* url-str)))
   in)
 
 (define (http-get-string url-str)
@@ -113,15 +120,14 @@
     (close-input-port in)))
 
 (define (download-url->file url-str dest-path)
-  (or (external-download-url->file url-str dest-path)
-      (let ()
-        (make-directory* (or (path-only dest-path) "."))
-        (define in (http-open/racket url-str))
-        (call-with-output-file* dest-path
-          #:exists 'truncate/replace
-          (lambda (out) (copy-port in out)))
-        (close-input-port in)
-        dest-path)))
+  (or
+   (external-download-url->file url-str dest-path)
+   (let ()
+     (make-directory* (or (path-only dest-path) "."))
+     (define in (http-open/racket url-str))
+     (call-with-output-file* dest-path #:exists 'truncate/replace (lambda (out) (copy-port in out)))
+     (close-input-port in)
+     dest-path)))
 
 (define version-re #px"\\(stable \"([^\"]+)\"\\)")
 
@@ -136,17 +142,16 @@
       (car m)))
   ;; Prefer versions that appear in release/installers links.
   (define from-links
-    (append (extract #px"href=\"(?:[^\"]*/)?(?:releases|installers)/([0-9]+(?:\\.[0-9]+){1,3})/?(?:[\"#?])")
-            (extract #px"https?://download[.]racket-lang[.]org/(?:releases|installers)/([0-9]+(?:\\.[0-9]+){1,3})/?")))
+    (append
+     (extract #px"href=\"(?:[^\"]*/)?(?:releases|installers)/([0-9]+(?:\\.[0-9]+){1,3})/?(?:[\"#?])")
+     (extract
+      #px"https?://download[.]racket-lang[.]org/(?:releases|installers)/([0-9]+(?:\\.[0-9]+){1,3})/?")))
   ;; Current page uses table rows like `<strong>Version 9.1</strong>`.
-  (define from-version-labels
-    (extract #px"\\bVersion\\s+([0-9]+(?:\\.[0-9]+){1,3})\\b"))
+  (define from-version-labels (extract #px"\\bVersion\\s+([0-9]+(?:\\.[0-9]+){1,3})\\b"))
   ;; Fall back to anchored text if link formats drift.
-  (define from-anchor-text
-    (extract #px"<a[^>]*>\\s*([0-9]+(?:\\.[0-9]+){1,3})\\s*</a>"))
+  (define from-anchor-text (extract #px"<a[^>]*>\\s*([0-9]+(?:\\.[0-9]+){1,3})\\s*</a>"))
   (define candidates (append from-links from-version-labels from-anchor-text))
-  (define versions
-    (remove-duplicates (filter numeric-version? candidates) string=?))
+  (define versions (remove-duplicates (filter numeric-version? candidates) string=?))
   (sort versions (lambda (a b) (> (cmp-versions a b) 0))))
 
 (define (fetch-all-release-versions)
@@ -159,6 +164,14 @@
 (define (installers-base-url-for-release version)
   (format "https://download.racket-lang.org/installers/~a/" version))
 
+(define (legacy-installers-base-url-for-release version distribution)
+  (define subdir
+    (case distribution
+      [(full) "racket"]
+      [(minimal) "racket-textual"]
+      [else (rackup-error "unsupported legacy distribution: ~a" distribution)]))
+  (format "https://download.racket-lang.org/installers/~a/~a/" version subdir))
+
 (define (fetch-table-rktd installers-base)
   (http-get-rktd (string-append installers-base "table.rktd")))
 
@@ -169,6 +182,8 @@
   (http-get-string (format "~a/snapshots/current/stamp.txt" (hash-ref snapshot-sites site))))
 
 (define installer-rx #px"^(racket(?:-minimal)?)-([^-]+)-(.+?)(?:-(bc|cs))?\\.([A-Za-z0-9]+)$")
+(define legacy-installer-rx
+  #px"^(racket(?:-textual)?)-([0-9]+(?:\\.[0-9]+){0,3})-bin-(.+)\\.([A-Za-z0-9]+)$")
 
 (define (parse-installer-filename s)
   (match (regexp-match installer-rx s)
@@ -219,6 +234,61 @@
            (string-downcase ext))]
     [_ #f]))
 
+(define (parse-legacy-installer-filename s)
+  (match (regexp-match legacy-installer-rx s)
+    [(list _ prefix version-token platform-token ext-s)
+     (define distribution (if (equal? prefix "racket-textual") 'minimal 'full))
+     (define parts (string-split platform-token "-"))
+     (define arch-token
+       (if (pair? parts)
+           (car parts)
+           platform-token))
+     (define platform-parts
+       (if (>= (length parts) 2)
+           (cdr parts)
+           null))
+     (define platform
+       (if (pair? platform-parts)
+           (string-join platform-parts "-")
+           ""))
+     (define platform-family
+       (if (pair? platform-parts)
+           (car platform-parts)
+           platform))
+     (hash 'filename
+           s
+           'distribution
+           distribution
+           'version-token
+           version-token
+           'platform-token
+           platform-token
+           'arch-token
+           arch-token
+           'arch
+           (arch-token->normalized arch-token)
+           'platform
+           platform
+           'platform-family
+           platform-family
+           'platform-parts
+           platform-parts
+           'variant
+           'bc
+           'ext
+           (string-downcase ext-s))]
+    [_ #f]))
+
+(define (parse-legacy-installers-index-html html)
+  (define hrefs
+    (for/list ([m (in-list (regexp-match* #px"href=\"([^\"]+)\"" html #:match-select cdr))])
+      (car m)))
+  (remove-duplicates
+   (filter values
+           (for/list ([h (in-list hrefs)])
+             (and (string? h) (regexp-match? #px"^(?:racket|racket-textual)-.+\\.sh$" h) h)))
+   string=?))
+
 (define (table-filenames table)
   (cond
     [(hash? table)
@@ -242,6 +312,132 @@
     [(member "current" tokens) "current"]
     [(pair? tokens) (car (sort tokens string<?))]
     [else default]))
+
+(define (select-legacy-installer-filename filenames
+                                          #:version-token version-token
+                                          #:distribution distribution
+                                          #:arch arch
+                                          #:platform [platform "linux"]
+                                          #:ext [ext "sh"])
+  (define parsed (filter values (map parse-legacy-installer-filename filenames)))
+  (define matches
+    (for/list ([p parsed]
+               #:when (and (equal? (hash-ref p 'version-token) version-token)
+                           (equal? (hash-ref p 'distribution) distribution)
+                           (equal? (hash-ref p 'arch) arch)
+                           (equal? (hash-ref p 'platform-family) platform)
+                           (equal? (hash-ref p 'ext) ext)))
+      (hash-ref p 'filename)))
+  (cond
+    [(pair? matches) (car (sort matches string<?))]
+    [else
+     (rackup-error "no legacy installer found for version=~a distro=~a arch=~a platform=~a ext=~a"
+                   version-token
+                   distribution
+                   arch
+                   platform
+                   ext)]))
+
+(define (fetch-legacy-installer-filename version
+                                         #:distribution distribution
+                                         #:arch arch
+                                         #:platform [platform "linux"])
+  (define base (legacy-installers-base-url-for-release version distribution))
+  (define html (http-get-string base))
+  (define filenames (parse-legacy-installers-index-html html))
+  (values base
+          (select-legacy-installer-filename filenames
+                                            #:version-token version
+                                            #:distribution distribution
+                                            #:arch arch
+                                            #:platform platform
+                                            #:ext "sh")))
+
+(define (release-request-hash requested-spec
+                              resolved-version
+                              variant
+                              distribution*
+                              arch
+                              platform
+                              base
+                              filename)
+  (hash 'kind
+        'release
+        'requested-spec
+        requested-spec
+        'resolved-version
+        resolved-version
+        'version-token
+        resolved-version
+        'variant
+        variant
+        'distribution
+        distribution*
+        'arch
+        arch
+        'platform
+        platform
+        'snapshot-site
+        #f
+        'snapshot-stamp
+        #f
+        'installers-base
+        base
+        'installer-filename
+        filename
+        'installer-url
+        (string-append base filename)))
+
+(define (exn-message-looks-like-404? e)
+  (regexp-match? #px"\\b404\\b" (exn-message e)))
+
+(define (resolve-release-request/fallback requested-spec
+                                          resolved-version
+                                          variant
+                                          distribution*
+                                          arch
+                                          platform)
+  (define base (installers-base-url-for-release resolved-version))
+  (define table
+    (with-handlers ([exn:fail? (lambda (e)
+                                 (if (exn-message-looks-like-404? e)
+                                     #f
+                                     (raise e)))])
+      (fetch-table-rktd base)))
+  (cond
+    [table
+     (define filename
+       (select-installer-filename table
+                                  #:version-token resolved-version
+                                  #:variant variant
+                                  #:distribution distribution*
+                                  #:arch arch
+                                  #:platform platform
+                                  #:ext "sh"
+                                  #:allow-version-prefix? #t))
+     (release-request-hash requested-spec
+                           resolved-version
+                           variant
+                           distribution*
+                           arch
+                           platform
+                           base
+                           filename)]
+    [else
+     ;; Older releases (e.g. 5.2) predate table.rktd and use Apache index listings.
+     (define-values (legacy-base filename)
+       (fetch-legacy-installer-filename resolved-version
+                                        #:distribution distribution*
+                                        #:arch arch
+                                        #:platform platform))
+     (release-request-hash requested-spec
+                           resolved-version
+                           variant
+                           distribution*
+                           arch
+                           platform
+                           legacy-base
+                           filename)]))
 
 (define (select-installer-filename table
                                    #:version-token version-token
@@ -403,83 +599,21 @@
     ['stable
      (define resolved-version (lookup-stable-version))
      (define variant (variant-for resolved-version))
-     (define base (installers-base-url-for-release resolved-version))
-     (define table (fetch-table-rktd base))
-     (define filename
-       (select-installer-filename table
-                                  #:version-token resolved-version
-                                  #:variant variant
-                                  #:distribution distribution*
-                                  #:arch arch
-                                  #:platform platform
-                                  #:ext "sh"
-                                  #:allow-version-prefix? #t))
-     (hash 'kind
-           'release
-           'requested-spec
-           requested-spec
-           'resolved-version
-           resolved-version
-           'version-token
-           resolved-version
-           'variant
-           variant
-           'distribution
-           distribution*
-           'arch
-           arch
-           'platform
-           platform
-           'snapshot-site
-           #f
-           'snapshot-stamp
-           #f
-           'installers-base
-           base
-           'installer-filename
-           filename
-           'installer-url
-           (string-append base filename))]
+     (resolve-release-request/fallback requested-spec
+                                       resolved-version
+                                       variant
+                                       distribution*
+                                       arch
+                                       platform)]
     ['release
      (define resolved-version (hash-ref spec* 'version))
      (define variant (variant-for resolved-version))
-     (define base (installers-base-url-for-release resolved-version))
-     (define table (fetch-table-rktd base))
-     (define filename
-       (select-installer-filename table
-                                  #:version-token resolved-version
-                                  #:variant variant
-                                  #:distribution distribution*
-                                  #:arch arch
-                                  #:platform platform
-                                  #:ext "sh"
-                                  #:allow-version-prefix? #t))
-     (hash 'kind
-           'release
-           'requested-spec
-           requested-spec
-           'resolved-version
-           resolved-version
-           'version-token
-           resolved-version
-           'variant
-           variant
-           'distribution
-           distribution*
-           'arch
-           arch
-           'platform
-           platform
-           'snapshot-site
-           #f
-           'snapshot-stamp
-           #f
-           'installers-base
-           base
-           'installer-filename
-           filename
-           'installer-url
-           (string-append base filename))]
+     (resolve-release-request/fallback requested-spec
+                                       resolved-version
+                                       variant
+                                       distribution*
+                                       arch
+                                       platform)]
     ['pre-release
      (define table (fetch-table-rktd pre-release-installers-base))
      ;; pre-release.racket-lang.org may not publish installers/version.rktd.

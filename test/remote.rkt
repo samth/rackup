@@ -21,6 +21,14 @@
   (check-equal? (hash-ref p2 'variant) 'bc)
   (check-equal? (hash-ref p2 'version-token) "7.9")
 
+  (define p-legacy
+    (parse-legacy-installer-filename "racket-textual-5.2-bin-x86_64-linux-debian-squeeze.sh"))
+  (check-equal? (hash-ref p-legacy 'distribution) 'minimal)
+  (check-equal? (hash-ref p-legacy 'variant) 'bc)
+  (check-equal? (hash-ref p-legacy 'version-token) "5.2")
+  (check-equal? (hash-ref p-legacy 'arch) "x86_64")
+  (check-equal? (hash-ref p-legacy 'platform-family) "linux")
+
   (define fake-table
     (hash 'a
           "racket-8.18-x86_64-linux-cs.sh"
@@ -67,18 +75,32 @@
                 "racket-minimal-current-x86_64-linux-cs.sh")
 
   (define fake-all-versions-html
-    (string-append
-     "<html><body>\n"
-     "<a href=\"/releases/9.1/\">9.1</a>\n"
-     "<a href=\"/installers/8.18/\">8.18</a>\n"
-     "<a href=\"https://download.racket-lang.org/releases/7.9/\">7.9</a>\n"
-     "<a href=\"/releases/9.1/\">9.1</a>\n"
-     "<a href=\"/misc/2026/\">2026</a>\n"
-     "</body></html>\n"))
-  (check-equal? (parse-all-versions-html fake-all-versions-html)
-                '("9.1" "8.18" "7.9"))
+    (string-append "<html><body>\n"
+                   "<a href=\"/releases/9.1/\">9.1</a>\n"
+                   "<a href=\"/installers/8.18/\">8.18</a>\n"
+                   "<a href=\"https://download.racket-lang.org/releases/7.9/\">7.9</a>\n"
+                   "<a href=\"/releases/9.1/\">9.1</a>\n"
+                   "<a href=\"/misc/2026/\">2026</a>\n"
+                   "</body></html>\n"))
+  (check-equal? (parse-all-versions-html fake-all-versions-html) '("9.1" "8.18" "7.9"))
 
-  (define fake-all-versions-html-fallback
-    "<a class=\"v\">8.16.0.4</a> <a class=\"v\">8.15</a>")
-  (check-equal? (parse-all-versions-html fake-all-versions-html-fallback)
-                '("8.16.0.4" "8.15")))
+  (define fake-all-versions-html-fallback "<a class=\"v\">8.16.0.4</a> <a class=\"v\">8.15</a>")
+  (check-equal? (parse-all-versions-html fake-all-versions-html-fallback) '("8.16.0.4" "8.15"))
+
+  (define legacy-index-html
+    (string-append "<html><body>"
+                   "<a href=\"racket-5.2-bin-x86_64-linux-debian-squeeze.sh\">x</a>"
+                   "<a href=\"racket-5.2-bin-x86_64-linux-f14.sh\">x</a>"
+                   "<a href=\"racket-5.2-src-unix.tgz\">src</a>"
+                   "<a href=\"racket-5.2-bin-x86_64-linux-debian-squeeze.sh\">dup</a>"
+                   "</body></html>"))
+  (check-equal? (parse-legacy-installers-index-html legacy-index-html)
+                '("racket-5.2-bin-x86_64-linux-debian-squeeze.sh"
+                  "racket-5.2-bin-x86_64-linux-f14.sh"))
+
+  (check-equal?
+   (select-legacy-installer-filename (parse-legacy-installers-index-html legacy-index-html)
+                                     #:version-token "5.2"
+                                     #:distribution 'full
+                                     #:arch "x86_64")
+   "racket-5.2-bin-x86_64-linux-debian-squeeze.sh"))

@@ -26,9 +26,7 @@
   (define racket-exe (hidden-runtime-racket-path))
   (and racket-exe
        (let ([dir (path-only racket-exe)])
-         (and dir
-              (let ([p (build-path dir "raco")])
-                (and (executable-file? p) p))))))
+         (and dir (let ([p (build-path dir "raco")]) (and (executable-file? p) p))))))
 
 (define (hidden-runtime-present?)
   (and (hidden-runtime-racket-path) #t))
@@ -237,8 +235,7 @@
             ;; Minimal hidden runtimes may not include the `raco make` command.
             (unless (try-racket-make-flag)
               (void))]
-           [else
-            (warn-precompile "`raco make`" details)]))]
+           [else (warn-precompile "`raco make`" details)]))]
       [else
        (unless (try-racket-make-flag)
          (void))])))
