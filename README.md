@@ -26,10 +26,33 @@ Linux-first v1 scaffold implemented in Bash + Racket with:
 Bootstrap script (designed for `curl | sh`):
 
 ```bash
-bash scripts/install.sh
+curl -fsSL https://samth.github.io/rackup/install.sh | sh
+```
+
+Noninteractive:
+
+```bash
+curl -fsSL https://samth.github.io/rackup/install.sh | sh -s -- -y
+```
+
+Local bootstrap script (same script served via Pages):
+
+```bash
+sh scripts/install.sh
 ```
 
 It supports `-y` for noninteractive installs and prompts before shell config edits by default.
+Note: `rackup` currently requires a host `racket` to run the manager itself.
+
+## GitHub Pages Installer Site
+
+The repo includes a GitHub Pages workflow that publishes a small install page and serves:
+
+- `/` (landing page with copy/paste commands)
+- `/install.sh` (bootstrap script for `curl | sh`)
+- `/install` (alias)
+
+Workflow file: `.github/workflows/pages.yml`
 
 ## Docker E2E (Fresh Container)
 

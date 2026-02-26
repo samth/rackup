@@ -1,5 +1,5 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/sh
+set -eu
 
 PREFIX="${RACKUP_HOME:-$HOME/.rackup}"
 REPO="${RACKUP_GITHUB_REPO:-samth/rackup}"
@@ -21,12 +21,12 @@ Behavior:
   - Installs files under ~/.rackup unless --prefix or RACKUP_HOME is set.
 
 Examples:
-  curl -fsSL https://raw.githubusercontent.com/samth/rackup/main/scripts/install.sh | bash
-  curl -fsSL .../install.sh | bash -s -- -y
+  curl -fsSL https://samth.github.io/rackup/install.sh | sh
+  curl -fsSL .../install.sh | sh -s -- -y
 USAGE
 }
 
-while [[ $# -gt 0 ]]; do
+while [ "$#" -gt 0 ]; do
   case "$1" in
     -y|--yes)
       YES=1
@@ -77,7 +77,7 @@ trap cleanup EXIT
 
 SRC_DIR=""
 
-if [[ -n "$FROM_LOCAL" ]]; then
+if [ -n "$FROM_LOCAL" ]; then
   SRC_DIR="$FROM_LOCAL"
 else
   ARCHIVE_URL="https://github.com/${REPO}/archive/refs/heads/${REF}.tar.gz"
@@ -95,7 +95,7 @@ else
   SRC_DIR="$(find "$TMPDIR_INSTALL/src" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
 fi
 
-if [[ -z "$SRC_DIR" || ! -d "$SRC_DIR" ]]; then
+if [ -z "$SRC_DIR" ] || [ ! -d "$SRC_DIR" ]; then
   echo "Error: failed to locate source directory." >&2
   exit 1
 fi
@@ -111,16 +111,16 @@ chmod +x "$PREFIX/bin/rackup"
 echo "Installed: $PREFIX/bin/rackup"
 
 default_shell="$(basename "${SHELL:-bash}")"
-if [[ -n "$INIT_SHELL" ]]; then
+if [ -n "$INIT_SHELL" ]; then
   shell_to_init="$INIT_SHELL"
-elif [[ "$default_shell" == "zsh" ]]; then
+elif [ "$default_shell" = "zsh" ]; then
   shell_to_init="zsh"
 else
   shell_to_init="bash"
 fi
 
 do_init=0
-if [[ "$YES" -eq 1 ]]; then
+if [ "$YES" -eq 1 ]; then
   do_init=1
 else
   printf "Initialize %s shell config now? [Y/n] " "$shell_to_init"
@@ -135,7 +135,7 @@ else
   esac
 fi
 
-if [[ "$do_init" -eq 1 ]]; then
+if [ "$do_init" -eq 1 ]; then
   echo "Running rackup init --shell $shell_to_init"
   RACKUP_HOME="$PREFIX" "$PREFIX/bin/rackup" init --shell "$shell_to_init"
 else
