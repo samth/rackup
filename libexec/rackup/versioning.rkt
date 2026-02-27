@@ -3,6 +3,7 @@
 (require racket/list
          racket/match
          racket/string
+         "legacy-plt-catalog.rkt"
          "util.rkt")
 
 (provide parse-install-spec
@@ -20,25 +21,35 @@
          distribution->string)
 
 (define (numeric-version? s)
-  (and (string? s) (regexp-match? #px"^[0-9]+(?:\\.[0-9]+){0,3}$" s)))
+  (and (string? s) (regexp-match? #px"^[0-9]+(?:\\.[0-9]+){0,3}(?:p[0-9]+)?$" s)))
 
 (define (version-token->number v)
   (cond
     [(equal? v "current") 'current]
     [(equal? v "pre-release") 'pre-release]
     [else
-     (match (string-split v ".")
-       [(list a b c d)
-        (+ (* (string->number a) (expt 10 10))
-           (* (string->number b) (expt 10 7))
-           (* (string->number c) (expt 10 4))
-           (string->number d))]
-       [(list a b c)
-        (+ (* (string->number a) (expt 10 10))
-           (* (string->number b) (expt 10 7))
-           (* (string->number c) (expt 10 4)))]
-       [(list a b) (+ (* (string->number a) (expt 10 10)) (* (string->number b) (expt 10 7)))]
-       [(list a) (+ (* (string->number a) (expt 10 10)))]
+     (match (regexp-match #px"^([0-9]+(?:\\.[0-9]+){0,3})(?:p([0-9]+))?$" v)
+       [(list _ base patch-s)
+        (define patch (if patch-s (string->number patch-s) 0))
+        (match (string-split base ".")
+          [(list a b c d)
+           (+ (* (string->number a) (expt 10 10))
+              (* (string->number b) (expt 10 7))
+              (* (string->number c) (expt 10 4))
+              (* (string->number d) 10)
+              patch)]
+          [(list a b c)
+           (+ (* (string->number a) (expt 10 10))
+              (* (string->number b) (expt 10 7))
+              (* (string->number c) (expt 10 4))
+              patch)]
+          [(list a b)
+           (+ (* (string->number a) (expt 10 10))
+              (* (string->number b) (expt 10 7))
+              patch)]
+          [(list a)
+           (+ (* (string->number a) (expt 10 10)) patch)]
+          [_ 0])]
        [_ 0])]))
 
 (define (cmp-versions a b)
@@ -68,7 +79,8 @@
     [(regexp-match #px"^snapshot:(utah|northwestern)$" spec)
      =>
      (lambda (m) (hash 'input spec 'kind 'snapshot 'snapshot-site (string->symbol (list-ref m 1))))]
-    [(numeric-version? spec) (hash 'input spec 'kind 'release 'version spec)]
+    [(or (numeric-version? spec) (legacy-plt-version? spec))
+     (hash 'input spec 'kind 'release 'version spec)]
     [else (rackup-error "invalid version spec '~a'" spec)]))
 
 (define (sanitize-id-part s)

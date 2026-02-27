@@ -56,7 +56,44 @@ fi
 if [[ -z "${PLTADDONDIR:-}" ]]; then
   export PLTADDONDIR="$HOME_DIR/addons/$ACTIVE"
 fi
-exec "$TARGET" "$@"
+
+rackup_warn_missing_loader() {
+  local target="$1"
+  local desc host_machine
+  if ! command -v file >/dev/null 2>&1; then
+    return 0
+  fi
+  desc="$(file "$target" 2>/dev/null || true)"
+  case "$desc" in
+    *"ELF 32-bit"*)
+      host_machine="$(uname -m 2>/dev/null || true)"
+      case "$host_machine" in
+        x86_64|amd64)
+          for loader in /lib/ld-linux.so.2 \
+                        /lib32/ld-linux.so.2 \
+                        /lib/i386-linux-gnu/ld-linux.so.2 \
+                        /lib/i686-linux-gnu/ld-linux.so.2 \
+                        /usr/i386-linux-gnu/lib/ld-linux.so.2; do
+            if [[ -e "$loader" ]]; then
+              return 0
+            fi
+          done
+          echo "rackup: '$SHIM_NAME' from toolchain '$ACTIVE' is a 32-bit Linux executable, but this host appears to lack the 32-bit loader/runtime needed to start it." >&2
+          echo "Try installing 32-bit compatibility packages, or use a newer x86_64-capable Racket/PLT release." >&2
+          ;;
+      esac
+      ;;
+  esac
+}
+
+if "$TARGET" "$@"; then
+  exit 0
+fi
+STATUS=$?
+case "$STATUS" in
+  126|127) rackup_warn_missing_loader "$TARGET" ;;
+esac
+exit "$STATUS"
 EOF
   )
 

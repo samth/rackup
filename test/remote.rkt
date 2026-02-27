@@ -2,9 +2,34 @@
 
 (require rackunit
          racket/format
+         racket/file
+         racket/path
+         racket/runtime-path
+         racket/string
          "../libexec/rackup/remote.rkt")
 
 (module+ test
+  (define-runtime-path repo-root "..")
+  (define libexec-dir (build-path repo-root "libexec" "rackup"))
+
+  (define rackup-sources
+    (sort
+     (for/list ([p (in-list (directory-list libexec-dir #:build? #t))]
+                #:when (regexp-match? #px"[.]rkt$" (path->string p)))
+       p)
+     string<?
+     #:key path->string))
+
+  (for ([src (in-list rackup-sources)])
+    (define content (file->string src))
+    (check-false (regexp-match? #px"\\bcurl\\b" (string-downcase content))
+                 (format "~a should not shell out to curl" (path->string src)))
+    (check-false (regexp-match? #px"\\bwget\\b" (string-downcase content))
+                 (format "~a should not shell out to wget" (path->string src))))
+
+  (define resolve-install-request/runtime
+    (dynamic-require '(file "../libexec/rackup/remote.rkt") 'resolve-install-request))
+
   (define p1 (parse-installer-filename "racket-8.18-x86_64-linux-cs.sh"))
   (check-equal? (hash-ref p1 'distribution) 'full)
   (check-equal? (hash-ref p1 'variant) 'cs)
@@ -197,4 +222,32 @@
    (plt-generated-page-url->installer-filename
     "http://download.plt-scheme.org/plt-209-bin-i386-linux-gcc2-sh.html"
     "209")
-   "plt-209-bin-i386-linux-gcc2.sh"))
+   "plt-209-bin-i386-linux-gcc2.sh")
+
+  (define legacy-req-209 (resolve-install-request/runtime "209" #:arch "i386"))
+  (check-equal? (hash-ref legacy-req-209 'installer-url)
+                "http://download.plt-scheme.org/bundles/209/plt/plt-209-bin-i386-linux.sh")
+  (check-equal? (hash-ref legacy-req-209 'installer-filename)
+                "plt-209-bin-i386-linux.sh")
+  (check-equal? (hash-ref legacy-req-209 'installer-sha256)
+                "f70696da6302a9ca22a3df1fc9c951689f07669643859768489a372c04aef5c9")
+  (check-equal? (hash-ref legacy-req-209 'legacy-install-kind) 'shell-basic)
+
+  (define legacy-req-103p1 (resolve-install-request/runtime "103p1" #:arch "i386"))
+  (check-equal? (hash-ref legacy-req-103p1 'installer-url)
+                "http://download.plt-scheme.org/bundles/103p1/plt/plt-103p1-bin-i386-linux.tgz")
+  (check-equal? (hash-ref legacy-req-103p1 'installer-filename)
+                "plt-103p1-bin-i386-linux.tgz")
+  (check-equal? (hash-ref legacy-req-103p1 'installer-sha256)
+                "7090e2d7df07c17530e50cbc5fde67b51b39f77c162b7f20413242dca923a20a")
+  (check-equal? (hash-ref legacy-req-103p1 'legacy-install-kind) 'tgz)
+
+  (define legacy-req-4.2.5 (resolve-install-request/runtime "4.2.5" #:arch "x86_64"))
+  (check-equal? (hash-ref legacy-req-4.2.5 'installer-url)
+                "http://download.plt-scheme.org/bundles/4.2.5/plt/plt-4.2.5-bin-x86_64-linux-f7.sh")
+  (check-equal? (hash-ref legacy-req-4.2.5 'legacy-install-kind) 'shell-unixstyle)
+
+  (check-exn exn:fail?
+             (lambda () (resolve-install-request/runtime "053" #:arch "i386")))
+  (check-exn exn:fail?
+             (lambda () (resolve-install-request/runtime "203" #:arch "i386"))))

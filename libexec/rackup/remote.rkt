@@ -6,7 +6,9 @@
          racket/path
          racket/port
          racket/string
-         racket/system
+         net/http-client
+         net/url
+         "legacy-plt-catalog.rkt"
          "util.rkt"
          "versioning.rkt")
 
@@ -34,88 +36,72 @@
 (define snapshot-sites
   (hash 'utah "https://users.cs.utah.edu/plt" 'northwestern "https://plt.cs.northwestern.edu"))
 
-(define (status-code headers)
+(define (status-code status-line)
   (define h
-    (if (bytes? headers)
-        (bytes->string/utf-8 headers)
-        headers))
+    (if (bytes? status-line)
+        (bytes->string/utf-8 status-line)
+        status-line))
   (match (regexp-match #px"^HTTP/[0-9.]+ ([0-9][0-9][0-9])" h)
     [(list _ code) (string->number code)]
     [_ #f]))
 
-(define net/url:string->url #f)
-(define net/url:get-pure-port/headers #f)
-(define net/url:loaded? #f)
+(define (header-ref headers field)
+  (for/or ([header (in-list headers)])
+    (define s (bytes->string/utf-8 header))
+    (match (regexp-match (regexp (format "(?i:^~a:)[\t ]*(.*)$" (regexp-quote field))) s)
+      [(list _ value) (string-trim value)]
+      [_ #f])))
 
-(define (ensure-net/url!)
-  (unless net/url:loaded?
-    (set! net/url:string->url (dynamic-require 'net/url 'string->url))
-    (set! net/url:get-pure-port/headers (dynamic-require 'net/url 'get-pure-port/headers))
-    (set! net/url:loaded? #t)))
+(define (url->request-target u)
+  (define s (url->string u))
+  (match (regexp-match #px"^[a-z]+://[^/]+([^#]*)" s)
+    [(list _ path+query)
+     (cond
+       [(string=? path+query "") "/"]
+       [(string-prefix? path+query "/") path+query]
+       [else (string-append "/" path+query)])]
+    [_ "/"]))
 
-(define (http-external-tool)
+(define (redirect-url base-url location)
+  (if (regexp-match? #px"^[a-zA-Z][a-zA-Z0-9+.-]*://" location)
+      (string->url location)
+      (combine-url/relative base-url location)))
+
+(define (http-open/input url-str [redirects-left 5])
+  (define u (if (url? url-str) url-str (string->url url-str)))
+  (define scheme (url-scheme u))
+  (define host (url-host u))
+  (define port (url-port u))
+  (unless (and scheme host)
+    (rackup-error "invalid URL: ~a" (if (url? url-str) (url->string url-str) url-str)))
+  (define ssl? (equal? scheme "https"))
+  (define-values (status-line headers in)
+    (http-sendrecv host
+                   (url->request-target u)
+                   #:ssl? ssl?
+                   #:port (or port (if ssl? 443 80))
+                   #:content-decode '(gzip deflate)))
+  (define code (status-code status-line))
   (cond
-    [(find-executable-path "curl")
-     =>
-     (lambda (p) (cons 'curl p))]
-    [(find-executable-path "wget")
-     =>
-     (lambda (p) (cons 'wget p))]
-    [else #f]))
-
-(define (command-display-string args)
-  (string-join (map path->string* args) " "))
-
-(define (system*/capture who . args)
-  (define out (open-output-string))
-  (define err (open-output-string))
-  (parameterize ([current-output-port out]
-                 [current-error-port err])
-    (if (apply system* args)
-        (get-output-string out)
-        (rackup-error "~a failed: ~a~a"
-                      who
-                      (command-display-string args)
-                      (let ([e (string-trim (get-output-string err))])
-                        (if (string-blank? e)
-                            ""
-                            (string-append "\n" e)))))))
-
-(define (external-http-get-string url-str)
-  (match (http-external-tool)
-    [(cons 'curl exe) (system*/capture 'curl exe "-fsSL" "--compressed" url-str)]
-    [(cons 'wget exe) (system*/capture 'wget exe "-qO-" url-str)]
-    [_ #f]))
-
-(define (external-download-url->file url-str dest-path)
-  (make-directory* (or (path-only dest-path) "."))
-  (match (http-external-tool)
-    [(cons 'curl exe)
-     (system*/check 'curl-download exe "-fsSL" url-str "-o" dest-path)
-     dest-path]
-    [(cons 'wget exe)
-     (system*/check 'wget-download exe "-qO" dest-path url-str)
-     dest-path]
-    [_ #f]))
-
-(define (http-open/racket url-str)
-  (ensure-net/url!)
-  (define u
-    (if (string? url-str)
-        (net/url:string->url url-str)
-        url-str))
-  (define-values (in headers) (net/url:get-pure-port/headers u #:redirections 5 #:status? #t))
-  (define code (status-code headers))
-  (unless (equal? code 200)
-    (close-input-port in)
-    (rackup-error "HTTP request failed (~a): ~a" code (path->string* url-str)))
-  in)
+    [(member code '(301 302 303 307 308))
+     (define location (header-ref headers "Location"))
+     (close-input-port in)
+     (unless location
+       (rackup-error "HTTP request redirected without Location header (~a): ~a"
+                     code
+                     (url->string u)))
+     (unless (positive? redirects-left)
+       (rackup-error "too many HTTP redirects while fetching ~a" (url->string u)))
+     (http-open/input (redirect-url u location) (sub1 redirects-left))]
+    [(equal? code 200) in]
+    [else
+     (close-input-port in)
+     (rackup-error "HTTP request failed (~a): ~a" code (url->string u))]))
 
 (define (http-get-string url-str)
-  (or (external-http-get-string url-str)
-      (let ([in (http-open/racket url-str)])
-        (begin0 (port->string in)
-          (close-input-port in)))))
+  (define in (http-open/input url-str))
+  (begin0 (port->string in)
+    (close-input-port in)))
 
 (define (http-get-rktd url-str)
   (define s (http-get-string url-str))
@@ -124,14 +110,11 @@
     (close-input-port in)))
 
 (define (download-url->file url-str dest-path)
-  (or
-   (external-download-url->file url-str dest-path)
-   (let ()
-     (make-directory* (or (path-only dest-path) "."))
-     (define in (http-open/racket url-str))
-     (call-with-output-file* dest-path #:exists 'truncate/replace (lambda (out) (copy-port in out)))
-     (close-input-port in)
-     dest-path)))
+  (make-directory* (or (path-only dest-path) "."))
+  (define in (http-open/input url-str))
+  (call-with-output-file* dest-path #:exists 'truncate/replace (lambda (out) (copy-port in out)))
+  (close-input-port in)
+  dest-path)
 
 (define version-re #px"\\(stable \"([^\"]+)\"\\)")
 
@@ -469,7 +452,7 @@
   (regexp-match? #px"\\b404\\b" (exn-message e)))
 
 (define (version-maybe-plt-scheme? v)
-  (and (string? v) (or (regexp-match? #px"^4(?:\\.|$)" v) (regexp-match? #px"^[0-9]{3,}$" v))))
+  (legacy-plt-version? v))
 
 (define (resolve-release-request/fallback requested-spec
                                           resolved-version
@@ -477,15 +460,39 @@
                                           distribution*
                                           arch
                                           platform)
-  (define base (installers-base-url-for-release resolved-version))
-  (define table
-    (with-handlers ([exn:fail? (lambda (e)
-                                 (if (exn-message-looks-like-404? e)
-                                     #f
-                                     (raise e)))])
-      (fetch-table-rktd base)))
   (cond
-    [table
+    [(version-maybe-plt-scheme? resolved-version)
+     (define plt-request
+       (legacy-plt-request-info resolved-version
+                                #:distribution distribution*
+                                #:arch arch
+                                #:platform platform))
+     (define filename* (hash-ref plt-request 'filename))
+     (define url* (hash-ref plt-request 'url))
+     (define base* (substring url* 0 (- (string-length url*) (string-length filename*))))
+     (hash-set*
+      (release-request-hash requested-spec
+                            resolved-version
+                            variant
+                            distribution*
+                            arch
+                            platform
+                            base*
+                            filename*)
+      'installer-sha256
+      (hash-ref plt-request 'sha256)
+      'legacy-install-kind
+      (hash-ref plt-request 'install-kind))]
+    [else
+     (define base (installers-base-url-for-release resolved-version))
+     (define table
+       (with-handlers ([exn:fail? (lambda (e)
+                                    (if (exn-message-looks-like-404? e)
+                                        #f
+                                        (raise e)))])
+         (fetch-table-rktd base)))
+     (cond
+       [table
      (define filename
        (select-installer-filename/by-ext table
                                          #:version-token resolved-version
@@ -503,37 +510,25 @@
                            platform
                            base
                            filename)]
-    [else
-     ;; Older releases may use Apache index listings (e.g. 5.2) or PLT Scheme pages (e.g. 4.0).
-     (define legacy-result
-       (with-handlers ([exn:fail? (lambda (e)
-                                    (if (and (version-maybe-plt-scheme? resolved-version)
-                                             (or (exn-message-looks-like-404? e)
-                                                 (regexp-match? #px"no legacy installer found"
-                                                                (exn-message e))))
-                                        #f
-                                        (raise e)))])
-         (call-with-values (lambda ()
-                             (fetch-legacy-installer-filename resolved-version
-                                                              #:distribution distribution*
-                                                              #:arch arch
-                                                              #:platform platform))
-                           list)))
-     (define-values (base* filename*)
-       (if legacy-result
-           (values (first legacy-result) (second legacy-result))
-           (fetch-plt-scheme-installer-filename resolved-version
-                                                #:distribution distribution*
-                                                #:arch arch
-                                                #:platform platform)))
-     (release-request-hash requested-spec
-                           resolved-version
-                           variant
-                           distribution*
-                           arch
-                           platform
-                           base*
-                           filename*)]))
+       [else
+        ;; Older Racket releases may use Apache index listings (e.g. 5.2).
+        (define legacy-result
+          (call-with-values (lambda ()
+                              (fetch-legacy-installer-filename resolved-version
+                                                               #:distribution distribution*
+                                                               #:arch arch
+                                                               #:platform platform))
+                            list))
+        (define base* (first legacy-result))
+        (define filename* (second legacy-result))
+        (release-request-hash requested-spec
+                              resolved-version
+                              variant
+                              distribution*
+                              arch
+                              platform
+                              base*
+                              filename*)])]))
 
 (define (select-installer-filename table
                                    #:version-token version-token

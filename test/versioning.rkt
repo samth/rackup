@@ -6,11 +6,14 @@
 (module+ test
   (check-equal? (hash-ref (parse-install-spec "stable") 'kind) 'stable)
   (check-equal? (hash-ref (parse-install-spec "8.18") 'kind) 'release)
+  (check-equal? (hash-ref (parse-install-spec "103p1") 'kind) 'release)
   (check-equal? (hash-ref (parse-install-spec "snapshot") 'kind) 'snapshot)
   (check-equal? (hash-ref (parse-install-spec "snapshot:utah") 'snapshot-site) 'utah)
 
   (check-equal? (cmp-versions "8.18" "8.17") 1)
   (check-equal? (cmp-versions "7.9" "8.0") -1)
+  (check-equal? (cmp-versions "206p1" "206") 1)
+  (check-equal? (cmp-versions "103p1" "103") 1)
   (check-equal? (cmp-versions "current" "8.18") 1)
   (check-equal? (cmp-versions "pre-release" "8.18") 1)
 

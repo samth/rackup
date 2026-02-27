@@ -43,6 +43,11 @@
   out)
 
 (define-runtime-path rackup-bin "../bin/rackup")
+(define install-ns (module->namespace '(file "../libexec/rackup/install.rkt")))
+
+(define detect-bin-dir/private
+  (parameterize ([current-namespace install-ns])
+    (eval 'detect-bin-dir)))
 
 (define (run-bin-rackup/capture args)
   (define out (open-output-string))
@@ -470,6 +475,54 @@
 
   (with-temp-rackup-home
    (lambda (tmp)
+     (define installer (build-path tmp "plt-209-bin-i386-linux-fake.sh"))
+     (define dest (build-path tmp "legacy-basic-install"))
+     (write-string-file
+      installer
+      @~a{#!/bin/sh
+          set -eu
+          if [ "$#" -ne 0 ]; then
+            echo "unexpected args: $*" >&2
+            exit 7
+          fi
+          read where || where=""
+          read sysdir || sysdir=""
+          if [ -z "$where" ]; then
+            echo "missing destination" >&2
+            exit 8
+          fi
+          mkdir -p "$where/bin" "$where/collects"
+          printf '#!/bin/sh\nexit 0\n' > "$where/bin/mzscheme"
+          chmod +x "$where/bin/mzscheme"
+          exit 0
+          })
+     (file-or-directory-permissions installer #o755)
+     (run-linux-installer! installer dest #:legacy-install-kind 'shell-basic)
+     (check-true (directory-exists? (build-path dest "bin")))
+     (check-true (directory-exists? (build-path dest "collects")))
+     (check-true (file-exists? (build-path dest "bin" "mzscheme")))))
+
+  (with-temp-rackup-home
+   (lambda (tmp)
+     (define installer (build-path tmp "plt-209-bin-i386-linux-fail.sh"))
+     (define dest (build-path tmp "legacy-fail-install"))
+     (write-string-file
+      installer
+      @~a{#!/bin/sh
+          set -eu
+          echo 'bad 100% format %s output' >&2
+          exit 9
+          })
+     (file-or-directory-permissions installer #o755)
+     (define msg
+       (with-handlers ([exn:fail? exn-message])
+         (run-linux-installer! installer dest #:legacy-install-kind 'shell-basic)
+         #f))
+     (check-true (string? msg))
+     (check-true (string-contains? msg "linux-installer failed"))))
+
+  (with-temp-rackup-home
+   (lambda (tmp)
      (define tar-exe (find-executable-path "tar"))
      (unless tar-exe
        (error 'state-shims "tar executable not found"))
@@ -484,6 +537,13 @@
      (run-linux-tgz-installer! archive dest)
      (check-true (directory-exists? (build-path dest "racket" "bin")))
      (check-true (file-exists? (build-path dest "racket" "bin" "racket")))))
+
+  (with-temp-rackup-home
+   (lambda (tmp)
+     (define install-root (build-path tmp "plt-archive"))
+     (make-directory* (build-path install-root "plt" "bin"))
+     (check-equal? (path->string (detect-bin-dir/private install-root))
+                   (path->string (build-path install-root "plt" "bin")))))
 
   (check-equal? (run-main/stdout '("install" "--help"))
                 (run-main/stdout '("help" "install")))

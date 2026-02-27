@@ -70,14 +70,62 @@
   (build-path (rackup-download-cache-dir)
               (path-basename-string (string->path (car (reverse (string-split installer-url "/")))))))
 
-(define (ensure-installer-cached! installer-url #:no-cache? [no-cache? #f])
+(define (sha256-exe)
+  (cond
+    [(find-executable-path "sha256sum") => (lambda (p) (cons 'sha256sum p))]
+    [(find-executable-path "shasum") => (lambda (p) (cons 'shasum p))]
+    [(find-executable-path "openssl") => (lambda (p) (cons 'openssl p))]
+    [else #f]))
+
+(define (system*/capture-string who . args)
+  (define out (open-output-string))
+  (define err (open-output-string))
+  (parameterize ([current-output-port out]
+                 [current-error-port err])
+    (if (apply system* args)
+        (string-trim (get-output-string out))
+        (rackup-error "~a failed: ~a~a"
+                      who
+                      (string-join (map path->string* args) " ")
+                      (let ([e (string-trim (get-output-string err))])
+                        (if (string-blank? e)
+                            ""
+                            (string-append "\n" e)))))))
+
+(define (file-sha256 p)
+  (match (sha256-exe)
+    [(cons 'sha256sum exe)
+     (car (string-split (system*/capture-string 'sha256sum exe p)))]
+    [(cons 'shasum exe)
+     (car (string-split (system*/capture-string 'shasum exe "-a" "256" p)))]
+    [(cons 'openssl exe)
+     (last (string-split (system*/capture-string 'openssl exe "dgst" "-sha256" p)))]
+    [_ (rackup-error "could not find sha256sum, shasum, or openssl to verify downloads")]))
+
+(define (verify-installer-sha256! installer-path expected-sha256)
+  (when expected-sha256
+    (define actual-sha256 (file-sha256 installer-path))
+    (unless (equal? (string-downcase actual-sha256) (string-downcase expected-sha256))
+      (rackup-error "download checksum mismatch for ~a\nexpected: ~a\nactual:   ~a"
+                    (path->string* installer-path)
+                    expected-sha256
+                    actual-sha256))))
+
+(define (ensure-installer-cached! installer-url
+                                  #:no-cache? [no-cache? #f]
+                                  #:sha256 [expected-sha256 #f])
   (ensure-rackup-layout!)
   (define cache-path (installer-cache-file installer-url))
+  (when (and (file-exists? cache-path) expected-sha256)
+    (with-handlers ([exn:fail? (lambda (_)
+                                 (delete-file cache-path))])
+      (verify-installer-sha256! cache-path expected-sha256)))
   (when (or no-cache? (not (file-exists? cache-path)))
     (if (install-verbose?)
         (install-verbose "Downloading installer: ~a" installer-url)
         (install-info "Downloading installer..."))
     (download-url->file installer-url cache-path)
+    (verify-installer-sha256! cache-path expected-sha256)
     (file-or-directory-permissions cache-path #o755))
   cache-path)
 
@@ -88,13 +136,18 @@
   (regexp-match? #px"(?:^|/)(?:racket(?:-textual)?|plt)-.+-bin-.+[.]sh$"
                  (path->string* installer-file)))
 
-(define (legacy-installer-input-script dest)
+(define (legacy-installer-input-script dest legacy-install-kind)
   ;; Old PLT/Racket installers (e.g. 5.2, 4.x/3xx) do not support --dest/--in-place.
   ;; Answer prompts for a whole-directory install into the exact requested destination,
   ;; then skip creating system links.
-  (format "n\n~a\n\n" (path->string* dest)))
+  (case legacy-install-kind
+    [(shell-basic) (format "~a\n\n" (path->string* dest))]
+    [(shell-unixstyle) (format "n\n~a\n\n" (path->string* dest))]
+    [else (rackup-error "unknown legacy installer kind: ~a" legacy-install-kind)]))
 
-(define (run-linux-installer! installer-file install-root)
+(define (run-linux-installer! installer-file
+                              install-root
+                              #:legacy-install-kind [legacy-install-kind #f])
   ;; Use the same dest/in-place flow as setup-racket for Linux.
   (define installer (path->complete-path installer-file))
   (define dest (path->complete-path install-root))
@@ -103,7 +156,11 @@
   (define (delete-log!)
     (with-handlers ([exn:fail? (lambda (_) (void))])
       (delete-file log-file)))
-  (define legacy? (legacy-interactive-linux-installer? installer))
+  (define legacy-kind
+    (cond
+      [legacy-install-kind legacy-install-kind]
+      [(legacy-interactive-linux-installer? installer) 'shell-unixstyle]
+      [else #f]))
   (define ok?
     (call-with-output-file*
      log-file
@@ -112,7 +169,7 @@
        (define (run-modern)
          (system* (shell-exe) installer "--create-dir" "--in-place" "--dest" dest))
        (define (run-legacy)
-         (define scripted-in (open-input-string (legacy-installer-input-script dest)))
+         (define scripted-in (open-input-string (legacy-installer-input-script dest legacy-kind)))
          (dynamic-wind void
                        (lambda ()
                          (parameterize ([current-input-port scripted-in])
@@ -120,7 +177,7 @@
                        (lambda () (close-input-port scripted-in))))
        (parameterize ([current-output-port combined]
                       [current-error-port combined])
-         (if legacy?
+         (if legacy-kind
              (run-legacy)
              (run-modern))))))
   (unless ok?
@@ -129,11 +186,11 @@
         (call-with-input-file* log-file (lambda (in) (string-trim (port->string in))))))
     (install-warn "Installer script failed.")
     (unless (string-blank? details)
-      (eprintf "%s\n" (truncate-lines details)))
+      (eprintf "~a\n" (truncate-lines details)))
     (delete-log!)
     (rackup-error "linux-installer failed: ~a (~a)"
                   (path->string* installer)
-                  (if legacy?
+                  (if legacy-kind
                       "legacy interactive mode"
                       (format "--create-dir --in-place --dest ~a" (path->string* dest)))))
   (delete-log!))
@@ -158,9 +215,11 @@
 (define (detect-bin-dir install-root)
   (define p1 (build-path install-root "bin"))
   (define p2 (build-path install-root "racket" "bin"))
+  (define p3 (build-path install-root "plt" "bin"))
   (cond
     [(directory-exists? p1) p1]
     [(directory-exists? p2) p2]
+    [(directory-exists? p3) p3]
     [else (rackup-error "could not find Racket bin dir under ~a" (path->string* install-root))]))
 
 (define (file-executable?/safe p)
@@ -475,6 +534,8 @@
         (hash-ref request 'installer-url)
         'installer-filename
         (hash-ref request 'installer-filename)
+        'installer-sha256
+        (hash-ref request 'installer-sha256 #f)
         'install-root
         (path->string* (rackup-toolchain-install-dir id))
         'bin-link
@@ -692,7 +753,8 @@
        (install-info "Installing ~a..." id)
        (define installer-path
          (ensure-installer-cached! (hash-ref request 'installer-url)
-                                   #:no-cache? (hash-ref parsed-opts 'no-cache? #f)))
+                                   #:no-cache? (hash-ref parsed-opts 'no-cache? #f)
+                                   #:sha256 (hash-ref request 'installer-sha256 #f)))
        (define installer-ext
          (installer-filename-extension
           (hash-ref request
@@ -704,7 +766,10 @@
                                     (raise e))])
          (make-directory* tc-dir)
          (cond
-           [(equal? installer-ext "sh") (run-linux-installer! installer-path install-root)]
+           [(equal? installer-ext "sh")
+            (run-linux-installer! installer-path
+                                  install-root
+                                  #:legacy-install-kind (hash-ref request 'legacy-install-kind #f))]
            [(equal? installer-ext "tgz") (run-linux-tgz-installer! installer-path install-root)]
            [else
             (rackup-error "unsupported installer format for Linux: ~a"
