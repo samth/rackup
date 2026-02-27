@@ -18,6 +18,10 @@
   (check-equal? (default-variant-for-version "8.0") 'cs)
   (check-true (cs-supported? "7.4"))
   (check-false (cs-supported? "7.3"))
+  (check-equal? (arch-token->normalized "arm64") "aarch64")
+  (check-equal? (arch-token->normalized "aarch64") "aarch64")
+  (check-equal? (arch-token->normalized "x86_64") "x86_64")
+  (check-equal? (arch-token->normalized "i386") "i386")
 
   (check-equal? (canonical-toolchain-id 'release
                                         #:resolved-version "8.18"

@@ -17,6 +17,16 @@
   (check-equal? (hash-ref p1b 'platform) "linux-buster")
   (check-equal? (hash-ref p1b 'platform-family) "linux")
 
+  (define p1c (parse-installer-filename "racket-9.1-arm64-linux-cs.sh"))
+  (check-equal? (hash-ref p1c 'arch-token) "arm64")
+  (check-equal? (hash-ref p1c 'arch) "aarch64")
+  (check-equal? (hash-ref p1c 'platform) "linux")
+
+  (define p1d (parse-installer-filename "racket-9.1-aarch64-macosx-cs.sh"))
+  (check-equal? (hash-ref p1d 'arch) "aarch64")
+  (check-equal? (hash-ref p1d 'platform) "macosx")
+  (check-equal? (hash-ref p1d 'platform-family) "macosx")
+
   (define p2 (parse-installer-filename "racket-minimal-7.9-x86_64-linux.sh"))
   (check-equal? (hash-ref p2 'distribution) 'minimal)
   (check-equal? (hash-ref p2 'variant) 'bc)
@@ -67,6 +77,46 @@
                                            #:arch "x86_64"
                                            #:allow-version-prefix? #t)
                 "racket-9.1-x86_64-linux-buster-cs.sh")
+
+  (define fake-table-linux-flavors-2
+    (hash 'a
+          "racket-9.1-x86_64-linux-cs.sh"
+          'b
+          "racket-9.1-x86_64-linux-natipkg-cs.sh"
+          'c
+          "racket-9.1-x86_64-linux-pkg-build-cs.sh"))
+  (check-equal? (select-installer-filename fake-table-linux-flavors-2
+                                           #:version-token "9.1"
+                                           #:variant 'cs
+                                           #:distribution 'full
+                                           #:arch "x86_64")
+                "racket-9.1-x86_64-linux-cs.sh")
+
+  (check-exn exn:fail?
+             (lambda ()
+               (select-installer-filename (hash 'a "racket-9.1-x86_64-linux-natipkg-cs.sh")
+                                          #:version-token "9.1"
+                                          #:variant 'cs
+                                          #:distribution 'full
+                                          #:arch "x86_64")))
+
+  (define fake-table-platforms
+    (hash 'a "racket-9.1-x86_64-linux-cs.sh" 'b "racket-9.1-x86_64-win32-cs.sh"))
+  (check-equal? (select-installer-filename fake-table-platforms
+                                           #:version-token "9.1"
+                                           #:variant 'cs
+                                           #:distribution 'full
+                                           #:arch "x86_64"
+                                           #:platform "win32")
+                "racket-9.1-x86_64-win32-cs.sh")
+
+  (define fake-table-arm64 (hash 'a "racket-9.1-arm64-linux-cs.sh"))
+  (check-equal? (select-installer-filename fake-table-arm64
+                                           #:version-token "9.1"
+                                           #:variant 'cs
+                                           #:distribution 'full
+                                           #:arch "aarch64")
+                "racket-9.1-arm64-linux-cs.sh")
 
   (check-equal? (select-installer-filename fake-table
                                            #:version-token "current"
