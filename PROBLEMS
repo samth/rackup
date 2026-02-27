@@ -1,0 +1,78 @@
+
+
+```
+[samth@samth:~ ] [13s] rackup install --arch i386 102
+rackup: HTTP request failed (404): https://mirror.racket-lang.org/installers/102/racket/
+```
+
+```
+[samth@samth:~ ] [2s] rackup install --arch i386 209
+Installing release-209-bc-i386-linux-full...
+Installer script failed.
+This program will extract and install PLT Scheme v209.
+
+Note: the required diskspace for this installation is around 57M.
+
+Where do you want to install the "plt" directory tree?
+  1 - /usr/plt [default]
+  2 - /usr/local/plt
+  3 - $HOME/plt (/home/samth/plt)
+  4 - ./plt (here)
+  Or enter a different directory to install in.
+> Checking the integrity of the binary archive... ok.
+Unpacking into "/home/samth/.rackup/toolchains/release-209-bc-i386-linux-full/install"... done.
+Running the PLT installer...
+./finish-install: 42: exec: ./bin/mzscheme: not found
+Error: PLT installer failed.
+rackup: linux-installer failed: /home/samth/.rackup/cache/downloads/plt-209-bin-i386-linux.sh (legacy interactive mode)
+```
+
+
+Why are two things marked with stars?
+
+```
+[samth@samth:~ ] [2s] rackup list
+* release-103-bc-i386-linux-full  (103, bc, full)
+    tags: active
+  release-202-bc-i386-linux-full  (202, bc, full)
+  release-352-bc-i386-linux-full  (352, bc, full)
+  release-4.0-bc-x86_64-linux-full  (4.0, bc, full)
+  release-5.0-bc-x86_64-linux-full  (5.0, bc, full)
+  release-7.0-bc-x86_64-linux-minimal  (7.0, bc, minimal)
+  release-8.0-cs-x86_64-linux-minimal  (8.0, cs, minimal)
+* release-9.1-cs-x86_64-linux-minimal  (9.1, cs, minimal)
+    tags: default
+ ```
+
+```
+
+[samth@samth:~ ] [0s] rackup switch 103
+[samth@samth:~ ] [0s] mzscheme
+/home/samth/.rackup/toolchains/release-103-bc-i386-linux-full/bin/mzscheme: 1: /usr/local/lib/plt/bin/archsys: not found
+/home/samth/.rackup/toolchains/release-103-bc-i386-linux-full/bin/mzscheme: 13: exec: /usr/local/lib/plt/.bin//mzscheme: not found
+```
+
+```
+
+[samth@samth:~ ] [0s] rackup switch 202
+[samth@samth:~ ] [1s] mzscheme
+/home/samth/.rackup/shims/mzscheme: line 64: /home/samth/.rackup/toolchains/release-202-bc-i386-linux-full/bin/mzscheme: cannot execute: required file not found
+```
+
+```
+
+[samth@samth:~ ] [1s] rackup switch 352
+[samth@samth:~ ] [1s] mzscheme
+/home/samth/.rackup/shims/mzscheme: line 64: /home/samth/.rackup/toolchains/release-352-bc-i386-linux-full/bin/mzscheme: cannot execute: required file not found
+```
+
+
+This toolchain wasn't installed and it hung:
+```
+[samth@samth:~ ] [1s] rackup switch 9.0
+^Cuser break
+  context...:
+   /home/samth/.rackup/libexec/rackup/main.rkt:401:0: resolve-toolchain-or-offer-install
+   /home/samth/.rackup/libexec/rackup/main.rkt:534:0: cmd-switch
+   body of "/home/samth/.rackup/libexec/rackup-core.rkt"
+```

@@ -90,3 +90,12 @@ Deferred and future work that came up in `PLAN.md`, implementation, or follow-up
 - [ ] Consider distributing prebuilt `rackup` artifacts.
   - This relates to the `raco exe` question.
   - Could reduce bootstrap complexity and startup overhead.
+
+## Other
+
+- Should we install things in user or installation scope?
+
+- Should there be a `migrate` command to move packages between two
+  installs?
+  
+- 
