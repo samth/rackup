@@ -1,0 +1,335 @@
+rackup expanded docker transcript
+commit: c52f38bdcc42f30198462b8832d8f05aa94510b8
+generated: 2026-02-27T00:11:34Z
+image: rackup-e2e:absent
+host_racket: absent
+trace: 0
+
+
+== Preparing source copy ==
+
+== Bootstrapping rackup ==
+Installing rackup into /tmp/rackup-transcript-home/.rackup-transcript
+Installed: /tmp/rackup-transcript-home/.rackup-transcript/bin/rackup
+Ensuring hidden runtime is installed...
+rackup bootstrap: downloading hidden runtime installer: https://download.racket-lang.org/installers/9.1/racket-minimal-9.1-x86_64-linux-buster-cs.sh
+rackup bootstrap: installing hidden runtime: runtime-9.1-cs-x86_64-linux-minimal
+Registering/validating hidden runtime...
+Skipping shell init.
+
+rackup installed successfully.
+
+Next steps:
+  1. Add ${RACKUP_HOME:-/tmp/rackup-transcript-home/.rackup-transcript}/shims to PATH (or run '/tmp/rackup-transcript-home/.rackup-transcript/bin/rackup init').
+  2. Install your first toolchain (the first install becomes the default automatically):
+       /tmp/rackup-transcript-home/.rackup-transcript/bin/rackup install stable
+
+== Help and discovery commands ==
+rackup - Racket toolchain manager
+
+Commands:
+  available [--all|--limit N]  List remote install specs and recent release versions.
+  install <spec> [flags]  Install a Racket toolchain (release, pre-release, snapshot).
+  link <name> <path> [flags]  Link an in-place/local Racket build as a managed toolchain.
+  list                  List installed toolchains (shows default/active tags).
+  default [id|status|set <toolchain>|clear|<toolchain>|--unset]  Show, set, or clear the global default toolchain.
+  current [id|source|line]  Show the active toolchain and where it came from.
+  which <exe> [--toolchain <toolchain>]  Show the real executable path for a tool in a toolchain.
+  shell <toolchain> | shell --deactivate  Emit shell code to activate/deactivate a toolchain in this shell.
+  run <toolchain> -- <command> [args...]  Run a command using a specific toolchain without changing defaults.
+  prompt [--raw|--source]  Print fast prompt info for PS1 (wrapper handles this without Racket startup).
+  remove <toolchain>    Remove an installed or linked toolchain and its addon dir.
+  reshim                Rebuild executable shims from installed toolchains.
+  init [--shell bash|zsh]  Install/update shell integration in ~/.bashrc or ~/.zshrc.
+  uninstall [--yes]     Remove rackup, its toolchains/runtime, and shell init blocks (destructive).
+  self-upgrade [--with-init]  Upgrade rackup's code by rerunning the installer into the current RACKUP_HOME.
+  runtime status|install|upgrade  Manage rackup's hidden internal runtime used to run rackup itself.
+  doctor                Print diagnostics for paths, runtime, and installed toolchains.
+  help [command]        Show global help or help for a specific command.
+
+Use `rackup <command> --help` or `rackup help <command>` for command help.
+Usage: rackup install <spec> [flags]
+
+Install a Racket toolchain from official release, pre-release, or snapshot installers.
+
+Specs:
+  stable | pre-release | snapshot | snapshot:utah | snapshot:northwestern
+  <numeric version> (examples: 9.1, 8.18, 7.9, 5.2)
+
+Flags:
+  --variant cs|bc         Override VM variant (default depends on version).
+  --distribution full|minimal  Install full or minimal distribution (default: full).
+  --snapshot-site auto|utah|northwestern  Choose snapshot mirror (default: auto).
+  --arch <arch>           Override target architecture (default: host arch).
+  --set-default           Set installed toolchain as the global default.
+  --force                 Reinstall if the same canonical toolchain is already installed.
+  --no-cache              Redownload installer instead of using cache.
+  --quiet                 Show minimal output (errors + final result lines).
+  --verbose               Show detailed installer URL/path output.
+
+Examples:
+  rackup install stable
+  rackup install 8.18 --variant cs
+  rackup install snapshot --snapshot-site utah
+Install aliases:
+  stable -> 9.1 (cs, full, x86_64)
+  pre-release -> 9.0.900 (cs, full, x86_64)
+  snapshot -> 9.1.0.7 (utah, stamp 2026-02-26-26be534ac9, cs, full, x86_64)
+  snapshot:utah -> 9.1.0.7 (utah, stamp 2026-02-26-26be534ac9, cs, full, x86_64)
+  snapshot:northwestern -> 9.1.0.7 (northwestern, stamp 2026-02-26-26be534ac9, cs, full, x86_64)
+
+Release versions (showing 20 of 67):
+  9.1
+  9.0
+  8.18
+  8.17
+  8.16
+  8.15
+  8.14
+  8.13
+  8.12
+  8.11.1
+  8.11
+  8.10
+  8.9
+  8.8
+  8.7
+  8.6
+  8.5
+  8.4
+  8.3
+  8.2
+
+Examples:
+  rackup install stable
+  rackup install 8.18
+  rackup install pre-release
+  rackup install snapshot
+
+Note: specific variant/distribution/arch compatibility is checked at install time.
+Install aliases:
+  stable -> 9.1 (cs, full, x86_64)
+  pre-release -> 9.0.900 (cs, full, x86_64)
+  snapshot -> 9.1.0.7 (utah, stamp 2026-02-26-26be534ac9, cs, full, x86_64)
+  snapshot:utah -> 9.1.0.7 (utah, stamp 2026-02-26-26be534ac9, cs, full, x86_64)
+  snapshot:northwestern -> 9.1.0.7 (northwestern, stamp 2026-02-26-26be534ac9, cs, full, x86_64)
+
+Release versions (all 67):
+  9.1
+  9.0
+  8.18
+  8.17
+  8.16
+  8.15
+  8.14
+  8.13
+  8.12
+  8.11.1
+  8.11
+  8.10
+  8.9
+  8.8
+  8.7
+  8.6
+  8.5
+  8.4
+  8.3
+  8.2
+  8.1
+  8.0
+  7.9
+  7.8
+  7.7
+  7.6
+  7.5
+  7.4
+  7.3
+  7.2
+  7.1
+  7.0
+
+== Install matrix ==
+Installing release-9.1-cs-x86_64-linux-minimal...
+Installed release-9.1-cs-x86_64-linux-minimal
+Default toolchain: release-9.1-cs-x86_64-linux-minimal (set by --set-default)
+captured-id[stable-minimal]=release-9.1-cs-x86_64-linux-minimal
+Installing release-9.1-cs-x86_64-linux-full...
+Downloading installer...
+Installed release-9.1-cs-x86_64-linux-full
+Default toolchain: release-9.1-cs-x86_64-linux-full (set by --set-default)
+captured-id[stable-full]=release-9.1-cs-x86_64-linux-full
+Installing release-8.18-cs-x86_64-linux-minimal...
+Downloading installer...
+Installed release-8.18-cs-x86_64-linux-minimal
+Default toolchain: release-8.18-cs-x86_64-linux-minimal (set by --set-default)
+captured-id[v8_18_minimal]=release-8.18-cs-x86_64-linux-minimal
+Installing release-8.10-cs-x86_64-linux-full...
+Downloading installer...
+Installed release-8.10-cs-x86_64-linux-full
+Default toolchain: release-8.10-cs-x86_64-linux-full (set by --set-default)
+captured-id[v8_10]=release-8.10-cs-x86_64-linux-full
+Installing release-7.9-bc-x86_64-linux-full...
+Downloading installer...
+Installed release-7.9-bc-x86_64-linux-full
+Default toolchain: release-7.9-bc-x86_64-linux-full (set by --set-default)
+captured-id[v7_9]=release-7.9-bc-x86_64-linux-full
+Installing pre-9.0.900-cs-x86_64-linux-full...
+Downloading installer...
+Installed pre-9.0.900-cs-x86_64-linux-full
+Default toolchain: pre-9.0.900-cs-x86_64-linux-full (set by --set-default)
+captured-id[pre_release]=pre-9.0.900-cs-x86_64-linux-full
+Installing snapshot-utah-2026-02-26-26be534ac9-9.1.0.7-cs-x86_64-linux-full...
+Downloading installer...
+Installed snapshot-utah-2026-02-26-26be534ac9-9.1.0.7-cs-x86_64-linux-full
+Default toolchain: snapshot-utah-2026-02-26-26be534ac9-9.1.0.7-cs-x86_64-linux-full (set by --set-default)
+captured-id[snapshot]=snapshot-utah-2026-02-26-26be534ac9-9.1.0.7-cs-x86_64-linux-full
+Installing release-6.12-bc-x86_64-linux-full...
+Downloading installer...
+Installed release-6.12-bc-x86_64-linux-full
+Default toolchain: release-6.12-bc-x86_64-linux-full (set by --set-default)
+captured-id[v6_12]=release-6.12-bc-x86_64-linux-full
+Installing release-5.2-bc-x86_64-linux-minimal...
+Downloading installer...
+Installed release-5.2-bc-x86_64-linux-minimal
+Default toolchain: release-5.2-bc-x86_64-linux-minimal (set by --set-default)
+captured-id[v5_2_minimal]=release-5.2-bc-x86_64-linux-minimal
+
+== List and switch matrix ==
+  pre-9.0.900-cs-x86_64-linux-full  (9.0.900, cs, full)
+* release-5.2-bc-x86_64-linux-minimal  (5.2, bc, minimal)
+    tags: default, active
+  release-6.12-bc-x86_64-linux-full  (6.12, bc, full)
+  release-7.9-bc-x86_64-linux-full  (7.9, bc, full)
+  release-8.10-cs-x86_64-linux-full  (8.10, cs, full)
+  release-8.18-cs-x86_64-linux-minimal  (8.18, cs, minimal)
+  release-9.1-cs-x86_64-linux-full  (9.1, cs, full)
+  release-9.1-cs-x86_64-linux-minimal  (9.1, cs, minimal)
+  snapshot-utah-2026-02-26-26be534ac9-9.1.0.7-cs-x86_64-linux-full  (9.1.0.7, cs, full)
+release-5.2-bc-x86_64-linux-minimal	(default)
+Default toolchain: release-9.1-cs-x86_64-linux-minimal
+release-9.1-cs-x86_64-linux-minimal	(default)
+Default toolchain: release-9.1-cs-x86_64-linux-full
+release-9.1-cs-x86_64-linux-full	(default)
+Default toolchain: release-8.18-cs-x86_64-linux-minimal
+release-8.18-cs-x86_64-linux-minimal	(default)
+Default toolchain: release-8.10-cs-x86_64-linux-full
+release-8.10-cs-x86_64-linux-full	(default)
+Default toolchain: release-7.9-bc-x86_64-linux-full
+release-7.9-bc-x86_64-linux-full	(default)
+Default toolchain: pre-9.0.900-cs-x86_64-linux-full
+pre-9.0.900-cs-x86_64-linux-full	(default)
+Default toolchain: snapshot-utah-2026-02-26-26be534ac9-9.1.0.7-cs-x86_64-linux-full
+snapshot-utah-2026-02-26-26be534ac9-9.1.0.7-cs-x86_64-linux-full	(default)
+Default toolchain: release-5.2-bc-x86_64-linux-minimal
+release-5.2-bc-x86_64-linux-minimal	(default)
+Default toolchain: release-6.12-bc-x86_64-linux-full
+release-6.12-bc-x86_64-linux-full	(default)
+
+== Run commands under selected toolchains ==
+9.1
+8.18
+7.9
+9.0.900
+9.1.0.7
+
+== Which and prompt commands ==
+/tmp/rackup-transcript-home/.rackup-transcript/toolchains/release-5.2-bc-x86_64-linux-minimal/bin/racket
+/tmp/rackup-transcript-home/.rackup-transcript/toolchains/release-5.2-bc-x86_64-linux-minimal/bin/raco
+release-6.12-bc-x86_64-linux-full
+default
+release-6.12-bc-x86_64-linux-full	default
+release-6.12-bc-x86_64-linux-full
+set	release-6.12-bc-x86_64-linux-full
+[rk:release-6.12-bc-x86_64-linux-full]
+release-6.12-bc-x86_64-linux-full
+release-6.12-bc-x86_64-linux-full	default
+
+== Package isolation ==
+Default toolchain: release-9.1-cs-x86_64-linux-full
+rackup-extra-ok
+Default toolchain: release-8.18-cs-x86_64-linux-minimal
+package isolation confirmed
+
+== Shell commands ==
+Initialized shell integration in /tmp/rackup-transcript-home/.bashrc
+Initialized shell integration in /tmp/rackup-transcript-home/.zshrc
+if [ -d "${RACKUP_HOME:-$HOME/.rackup}/shims" ]; then
+  case ":$PATH:" in *":${RACKUP_HOME:-$HOME/.rackup}/shims:"*) ;; *) export PATH="${RACKUP_HOME:-$HOME/.rackup}/shims:$PATH" ;; esac
+fi
+export RACKUP_TOOLCHAIN='release-9.1-cs-x86_64-linux-full'
+export PLTADDONDIR='/tmp/rackup-transcript-home/.rackup-transcript/addons/release-9.1-cs-x86_64-linux-full'
+if [ -d "${RACKUP_HOME:-$HOME/.rackup}/shims" ]; then
+  case ":$PATH:" in *":${RACKUP_HOME:-$HOME/.rackup}/shims:"*) ;; *) export PATH="${RACKUP_HOME:-$HOME/.rackup}/shims:$PATH" ;; esac
+fi
+unset RACKUP_TOOLCHAIN
+unset PLTADDONDIR
+
+== Link local source tree ==
+Linked local-matrix => /tmp/rackup-local-src/racket
+local-matrix
+/tmp/rackup-transcript-home/.rackup-transcript/toolchains/local-matrix/bin/scheme
+LOCAL-SCHEME --version
+Default toolchain: release-9.1-cs-x86_64-linux-full
+
+== Remove and reshim ==
+Removed release-8.10-cs-x86_64-linux-full
+Reshim complete.
+  local-matrix  (9.99-local, cs, in-place)
+  pre-9.0.900-cs-x86_64-linux-full  (9.0.900, cs, full)
+  release-5.2-bc-x86_64-linux-minimal  (5.2, bc, minimal)
+  release-6.12-bc-x86_64-linux-full  (6.12, bc, full)
+  release-7.9-bc-x86_64-linux-full  (7.9, bc, full)
+  release-8.18-cs-x86_64-linux-minimal  (8.18, cs, minimal)
+* release-9.1-cs-x86_64-linux-full  (9.1, cs, full)
+    tags: default, active
+  release-9.1-cs-x86_64-linux-minimal  (9.1, cs, minimal)
+  snapshot-utah-2026-02-26-26be534ac9-9.1.0.7-cs-x86_64-linux-full  (9.1.0.7, cs, full)
+
+== Runtime and self-upgrade ==
+present: yes
+id: runtime-9.1-cs-x86_64-linux-minimal
+racket: /tmp/rackup-transcript-home/.rackup-transcript/runtime/current/bin/racket
+version: 9.1
+variant: chez-scheme
+distribution: minimal
+installed-at: 2026-02-27T00:11:37Z
+Hidden runtime already up to date: runtime-9.1-cs-x86_64-linux-minimal
+Downloading rackup sources from https://samth.github.io/rackup/rackup-src.tar.gz
+Installing rackup into /tmp/rackup-transcript-home/.rackup-transcript
+Installed: /tmp/rackup-transcript-home/.rackup-transcript/bin/rackup
+Ensuring hidden runtime is installed...
+Registering/validating hidden runtime...
+
+Upgrading rackup code in /tmp/rackup-transcript-home/.rackup-transcript
+rackup code upgrade complete.
+
+== Uninstall ==
+WARNING: `rackup uninstall` is destructive.
+WARNING: This will permanently delete all rackup-managed data under:
+  /tmp/rackup-transcript-home/.rackup-transcript
+WARNING: This includes:
+  - hidden runtime used to run rackup
+  - installed toolchains and linked-toolchain metadata/overlays
+  - shims, caches, downloaded installers, and per-toolchain addon dirs/packages
+WARNING: This will also remove rackup-managed shell init blocks from ~/.bashrc and ~/.zshrc if present.
+WARNING: This cannot be undone.
+Detected installed toolchains: 9
+  - local-matrix
+  - pre-9.0.900-cs-x86_64-linux-full
+  - release-5.2-bc-x86_64-linux-minimal
+  - release-6.12-bc-x86_64-linux-full
+  - release-7.9-bc-x86_64-linux-full
+  - release-8.18-cs-x86_64-linux-minimal
+  - release-9.1-cs-x86_64-linux-full
+  - release-9.1-cs-x86_64-linux-minimal
+  - snapshot-utah-2026-02-26-26be534ac9-9.1.0.7-cs-x86_64-linux-full
+WARNING: Linked local source trees will NOT be deleted (only rackup's links to them).
+  - external source tree: /tmp/rackup-local-src
+rackup uninstalled.
+Removed rackup shell init blocks from:
+  /tmp/rackup-transcript-home/.bashrc
+  /tmp/rackup-transcript-home/.zshrc
+Final file deletion may complete shortly after this command exits.
+Your current shell may still have rackup-related PATH/env changes until you start a new shell.
+
+== Done ==

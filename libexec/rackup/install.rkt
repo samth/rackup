@@ -244,58 +244,72 @@
 (define chez-extra-names '("scheme" "petite"))
 
 (define (find-local-chez-extra-executables layout)
-  (define source-root* (hash-ref layout 'source-root #f))
-  (if (not source-root*)
+  (define base-paths
+    (filter values
+            (for/list ([key (in-list '(source-root input-path plthome))])
+              (define v (hash-ref layout key #f))
+              (and v (string->path v)))))
+  (define search-roots
+    (remove-duplicates
+     (filter directory-exists?
+             (append
+              base-paths
+              (for*/list ([base (in-list base-paths)]
+                          [suffix (in-list '(("bin")
+                                             ("src")
+                                             ("src" "build")
+                                             ("src" "build" "cs" "c" "ChezScheme")
+                                             ("src" "ChezScheme")
+                                             ("racket" "src")
+                                             ("racket" "src" "build")
+                                             ("racket" "src" "build" "cs" "c" "ChezScheme")
+                                             ("racket" "src" "ChezScheme")))])
+                (apply build-path base suffix))))
+     equal?))
+  (define matches
+    (remove-duplicates
+     (append*
+      (for/list ([root (in-list search-roots)])
+        (find-files (lambda (p)
+                      (and (file-exists? p)
+                           (member (path-basename-string p) chez-extra-names)
+                           (file-executable?/safe p)))
+                    root)))
+     equal?))
+  (if (null? matches)
       null
       (let ()
-        (define source-root (string->path source-root*))
-        (define search-roots
-          (filter directory-exists?
-                  (list (build-path source-root "racket" "src" "build" "cs" "c" "ChezScheme")
-                        (build-path source-root "racket" "src" "ChezScheme"))))
-        (define matches
-          (remove-duplicates (append* (for/list ([root (in-list search-roots)])
-                                        (find-files (lambda (p)
-                                                      (and (file-exists? p)
-                                                           (member (path-basename-string p)
-                                                                   chez-extra-names)
-                                                           (file-executable?/safe p)))
-                                                    root)))
-                             equal?))
-        (if (null? matches)
-            null
-            (let ()
-              (define dirs->executables (make-hash))
-              (for ([p (in-list matches)])
-                (define dir (path-only p))
-                (when dir
-                  (define names->paths (hash-ref dirs->executables dir #f))
-                  (unless names->paths
-                    (set! names->paths (make-hash))
-                    (hash-set! dirs->executables dir names->paths))
-                  (hash-set! names->paths (path-basename-string p) p)))
-              (let* ([scored (for/list ([dir (in-list (hash-keys dirs->executables))])
-                               (define names->paths (hash-ref dirs->executables dir))
-                               (define both?
-                                 (and (hash-has-key? names->paths "scheme")
-                                      (hash-has-key? names->paths "petite")))
-                               (define score
-                                 (+ (if both? 200 0)
-                                    (if (path-contains? dir #rx"/src/build/") 100 0)
-                                    (if (path-contains? dir #rx"/ChezScheme/") 40 0)
-                                    (if (path-contains? dir #rx"/bin/") 20 0)))
-                               (list dir names->paths score (path->string* dir)))]
-                     [best (car (sort scored
-                                      (lambda (a b)
-                                        (define sa (list-ref a 2))
-                                        (define sb (list-ref b 2))
-                                        (define pa (list-ref a 3))
-                                        (define pb (list-ref b 3))
-                                        (or (> sa sb) (and (= sa sb) (string<? pa pb))))))]
-                     [names->paths (list-ref best 1)])
-                (for/list ([name (in-list chez-extra-names)]
-                           #:when (hash-has-key? names->paths name))
-                  (cons name (hash-ref names->paths name)))))))))
+        (define dirs->executables (make-hash))
+        (for ([p (in-list matches)])
+          (define dir (path-only p))
+          (when dir
+            (define names->paths (hash-ref dirs->executables dir #f))
+            (unless names->paths
+              (set! names->paths (make-hash))
+              (hash-set! dirs->executables dir names->paths))
+            (hash-set! names->paths (path-basename-string p) p)))
+        (let* ([scored (for/list ([dir (in-list (hash-keys dirs->executables))])
+                         (define names->paths (hash-ref dirs->executables dir))
+                         (define both?
+                           (and (hash-has-key? names->paths "scheme")
+                                (hash-has-key? names->paths "petite")))
+                         (define score
+                           (+ (if both? 200 0)
+                              (if (path-contains? dir #rx"/src/build/") 100 0)
+                              (if (path-contains? dir #rx"/ChezScheme/") 40 0)
+                              (if (path-contains? dir #rx"/bin/") 20 0)))
+                         (list dir names->paths score (path->string* dir)))]
+               [best (car (sort scored
+                                (lambda (a b)
+                                  (define sa (list-ref a 2))
+                                  (define sb (list-ref b 2))
+                                  (define pa (list-ref a 3))
+                                  (define pb (list-ref b 3))
+                                  (or (> sa sb) (and (= sa sb) (string<? pa pb))))))]
+               [names->paths (list-ref best 1)])
+          (for/list ([name (in-list chez-extra-names)]
+                     #:when (hash-has-key? names->paths name))
+            (cons name (hash-ref names->paths name)))))))
 
 (define (detect-local-source-layout path-input)
   (define input-path
@@ -304,6 +318,22 @@
                                                (string->path path-input)))))
   (define (dir? . parts)
     (directory-exists? (apply build-path input-path parts)))
+  (define (installed-prefix-layout root)
+    (define plthome root)
+    (define maybe-root (maybe-parent plthome))
+    (define pkgs (build-path plthome "share" "racket" "pkgs"))
+    (hash 'input-path
+          (path-complete-string input-path)
+          'source-root
+          #f
+          'plthome
+          (path-complete-string plthome)
+          'bin-dir
+          (path-complete-string (build-path plthome "bin"))
+          'collects-dir
+          (path-complete-string (build-path plthome "share" "racket" "collects"))
+          'pkgs-dir
+          (and (directory-exists? pkgs) (path-complete-string pkgs))))
   (cond
     [(and (dir? "racket") (dir? "racket" "bin") (dir? "racket" "collects"))
      (define source-root input-path)
@@ -323,6 +353,8 @@
            (path-complete-string collects)
            'pkgs-dir
            (and (directory-exists? pkgs) (path-complete-string pkgs)))]
+    [(and (dir? "racket") (dir? "racket" "bin") (dir? "racket" "share" "racket" "collects"))
+     (installed-prefix-layout (build-path input-path "racket"))]
     [else
      (define maybe-bin
        (cond
@@ -331,31 +363,48 @@
                (directory-exists? (build-path input-path "bin")))
           (build-path input-path "bin")]
          [(and (directory-exists? input-path)
+               (directory-exists? (build-path input-path "share" "racket" "collects"))
+               (directory-exists? (build-path input-path "bin")))
+          (build-path input-path "bin")]
+         [(and (directory-exists? input-path)
                (equal? (path-basename-string input-path) "bin")
                (directory-exists? (build-path (or (maybe-parent input-path) input-path) "collects")))
+          input-path]
+         [(and (directory-exists? input-path)
+               (equal? (path-basename-string input-path) "bin")
+               (directory-exists?
+                (build-path (or (maybe-parent input-path) input-path) "share" "racket" "collects")))
           input-path]
          [else #f]))
      (unless maybe-bin
        (rackup-error
         (string-append
          "could not detect an in-place source build layout at ~a\n"
-         "Expected either <root>/racket/bin + <root>/racket/collects or <plthome>/bin + <plthome>/collects")
+         "Expected one of:\n"
+         "  <root>/racket/bin + <root>/racket/collects\n"
+         "  <root>/racket/bin + <root>/racket/share/racket/collects\n"
+         "  <plthome>/bin + <plthome>/collects\n"
+         "  <plthome>/bin + <plthome>/share/racket/collects")
         (path->string* input-path)))
      (define plthome (or (maybe-parent maybe-bin) input-path))
-     (define maybe-root (maybe-parent plthome))
-     (define pkgs (and maybe-root (build-path maybe-root "pkgs")))
-     (hash 'input-path
-           (path-complete-string input-path)
-           'source-root
-           (and maybe-root (directory-exists? pkgs) (path-complete-string maybe-root))
-           'plthome
-           (path-complete-string plthome)
-           'bin-dir
-           (path-complete-string maybe-bin)
-           'collects-dir
-           (path-complete-string (build-path plthome "collects"))
-           'pkgs-dir
-           (and (directory-exists? pkgs) (path-complete-string pkgs)))]))
+     (cond
+       [(directory-exists? (build-path plthome "share" "racket" "collects"))
+        (installed-prefix-layout plthome)]
+       [else
+        (define maybe-root (maybe-parent plthome))
+        (define pkgs (and maybe-root (build-path maybe-root "pkgs")))
+        (hash 'input-path
+              (path-complete-string input-path)
+              'source-root
+              (and maybe-root (directory-exists? pkgs) (path-complete-string maybe-root))
+              'plthome
+              (path-complete-string plthome)
+              'bin-dir
+              (path-complete-string maybe-bin)
+              'collects-dir
+              (path-complete-string (build-path plthome "collects"))
+              'pkgs-dir
+              (and (directory-exists? pkgs) (path-complete-string pkgs)))])]))
 
 (define (local-layout-env-vars layout)
   (define collects-dir (hash-ref layout 'collects-dir))

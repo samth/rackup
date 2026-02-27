@@ -214,6 +214,71 @@
      (void (putenv "RACKUP_TOOLCHAIN" ""))))
 
   (with-temp-rackup-home
+   (lambda (tmp)
+     (ensure-index!)
+     (define install-root (build-path tmp "fake-installed"))
+     (define plthome (build-path install-root "racket"))
+     (define bin-dir (build-path plthome "bin"))
+     (define collects-dir (build-path plthome "share" "racket" "collects"))
+     (define pkgs-dir (build-path plthome "share" "racket" "pkgs"))
+     (make-directory* bin-dir)
+     (make-directory* collects-dir)
+     (make-directory* pkgs-dir)
+
+     (define (write-bin-exe name body)
+       (define p (build-path bin-dir name))
+       (write-string-file p body)
+       (file-or-directory-permissions p #o755)
+       p)
+
+     (write-bin-exe "racket"
+                    @~a{#!/usr/bin/env bash
+                        set -euo pipefail
+                        if [[ "$#" -ge 2 && "$1" == "-e" ]]; then
+                          case "$2" in
+                            *"(version)"*) printf '8.18-installed'; exit 0 ;;
+                            *"system-type 'vm"*) printf 'cs'; exit 0 ;;
+                          esac
+                        fi
+                        printf 'PLTHOME=%s\n' "${PLTHOME:-}"
+                        printf 'PLTCOLLECTS=%s\n' "${PLTCOLLECTS:-}"
+                        })
+     (write-bin-exe "raco"
+                    @~a{#!/usr/bin/env bash
+                        set -euo pipefail
+                        printf 'raco-installed\n'
+                        })
+     (for ([name '("scheme" "petite")])
+       (write-bin-exe name
+                      @~a{#!/usr/bin/env bash
+                          set -euo pipefail
+                          printf '@|name|-installed %s\n' "$*"
+                          }))
+
+     (define linked-id (link-toolchain! "installed" (path->string install-root) '("--set-default")))
+     (check-equal? linked-id "local-installed")
+
+     (define linked-meta (read-toolchain-meta linked-id))
+     (check-equal? (hash-ref linked-meta 'plthome) (path->string plthome))
+     (check-equal? (hash-ref linked-meta 'source-root) #f)
+     (check-not-false (member "racket" (hash-ref linked-meta 'executables)))
+     (check-not-false (member "scheme" (hash-ref linked-meta 'executables)))
+     (check-not-false (member "petite" (hash-ref linked-meta 'executables)))
+
+     (define shim-out
+       (parameterize ([current-output-port (open-output-string)]
+                      [current-error-port (open-output-string)])
+         (define out (current-output-port))
+         (check-true (system* (build-path (rackup-shims-dir) "racket")))
+         (get-output-string out)))
+     (check-true (regexp-match? (regexp (regexp-quote (format "PLTHOME=~a" (path->string plthome))))
+                                shim-out))
+     (check-true (regexp-match? (regexp (regexp-quote (format "PLTCOLLECTS=~a:~a"
+                                                              (path->string collects-dir)
+                                                              (path->string pkgs-dir))))
+                                shim-out)))))
+
+  (with-temp-rackup-home
    (lambda (_tmp)
      (ensure-index!)
      (define runtime-id "runtime-9.1-cs-x86_64-linux-minimal")
@@ -493,7 +558,7 @@
        (format "Removed orphan/partial toolchain directory ~a\n" orphan-id))
      (check-false (directory-exists? tc-dir))
      (check-false (directory-exists? addon-dir))
-     (void))))
+     (void)))
 
   (with-temp-rackup-home
    (lambda (tmp)
