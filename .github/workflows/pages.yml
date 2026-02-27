@@ -23,7 +23,30 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  bootstrap-curl-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Racket
+        uses: Bogdanp/setup-racket@v1.14
+        with:
+          architecture: x64
+          distribution: full
+          variant: CS
+          version: stable
+      - name: Install Pages build deps
+        run: |
+          raco pkg install --auto plt-web
+      - name: Verify curl-pipe-sh bootstrap against Pages artifact
+        run: |
+          scripts/docker-test-fresh-install.sh \
+            --mode bootstrap-curl \
+            --host-racket absent \
+            --spec stable
+
   build:
+    needs: bootstrap-curl-smoke
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
