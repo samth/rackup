@@ -75,12 +75,7 @@ echo
 echo "== Preparing fresh source copy (excluding compiled artifacts) =="
 rm -rf "$RUN_SRC"
 mkdir -p "$RUN_SRC"
-tar -C "$WORKDIR" \
-  --exclude='.git' \
-  --exclude='libexec/compiled' \
-  --exclude='libexec/rackup/compiled' \
-  --exclude='test/compiled' \
-  -cf - . | tar -C "$RUN_SRC" -xf -
+"$WORKDIR/scripts/copy-filtered-tree.sh" "$WORKDIR" "$RUN_SRC"
 echo "RUN_SRC=$RUN_SRC"
 
 if [[ "$UNIT_TESTS" == "1" ]]; then
@@ -142,8 +137,7 @@ else
   export RACKUP_HOME="$HOME/.rackup-direct"
   rm -rf "$RACKUP_HOME"
   mkdir -p "$RACKUP_HOME/bin" "$RACKUP_HOME/libexec"
-  cp -R "$RUN_SRC/bin/." "$RACKUP_HOME/bin/"
-  cp -R "$RUN_SRC/libexec/." "$RACKUP_HOME/libexec/"
+  "$RUN_SRC/scripts/copy-filtered-tree.sh" "$RUN_SRC" "$RACKUP_HOME" bin libexec
   chmod +x "$RACKUP_HOME/bin/rackup"
   RACKUP_BIN="$RACKUP_HOME/bin/rackup"
 fi
@@ -302,7 +296,7 @@ shell_eval_snippet_test() {
   cmd=$(
     cat <<EOF
 set -euo pipefail
-eval "\$("$RACKUP_BIN" shell "$toolchain_id")"
+eval "\$("$RACKUP_BIN" switch "$toolchain_id")"
 test "\${RACKUP_TOOLCHAIN}" = "$toolchain_id"
 test "\${PLTADDONDIR}" = "$RACKUP_HOME/addons/$toolchain_id"
 v="\$(racket -e '(display (version))')"
@@ -310,7 +304,7 @@ case "\$v" in
   ${expected_prefix}*) ;;
   *) echo "unexpected version via $shell_name shell snippet: \$v" >&2; exit 1 ;;
 esac
-eval "\$("$RACKUP_BIN" shell --deactivate)"
+eval "\$("$RACKUP_BIN" switch --unset)"
 test -z "\${RACKUP_TOOLCHAIN:-}"
 test -z "\${PLTADDONDIR:-}"
 EOF
@@ -345,14 +339,14 @@ shell_helper_function_test() {
 set -euo pipefail
 source "$rc_file"
 type rackup >/dev/null
-rackup shell "$toolchain_id"
+rackup switch "$toolchain_id"
 test "\${RACKUP_TOOLCHAIN}" = "$toolchain_id"
 v="\$(racket -e '(display (version))')"
 case "\$v" in
   ${expected_prefix}*) ;;
   *) echo "unexpected version via $shell_name helper: \$v" >&2; exit 1 ;;
 esac
-rackup shell --deactivate
+rackup switch --unset
 test -z "\${RACKUP_TOOLCHAIN:-}"
 EOF
   )

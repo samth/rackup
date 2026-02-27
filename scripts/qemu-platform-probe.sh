@@ -139,8 +139,7 @@ if [ "$QEMU_PROBE_MODE" = "runtime-install" ]; then
   probe_src=/tmp/rackup-probe-src
   rm -rf "$probe_src"
   mkdir -p "$probe_src"
-  cp -R /work/libexec "$probe_src/libexec"
-  rm -rf "$probe_src/libexec/compiled" "$probe_src/libexec/rackup/compiled"
+  /work/scripts/copy-filtered-tree.sh /work "$probe_src" libexec
   "$runtime_racket" -e "(display (version))" >/tmp/rackup-qemu-runtime-version.txt
   "$runtime_racket" -e "(require (file \"$probe_src/libexec/rackup/versioning.rkt\")) (display (normalized-host-arch))" >/tmp/rackup-qemu-runtime-arch.txt
   runtime_arch="$(cat /tmp/rackup-qemu-runtime-arch.txt)"

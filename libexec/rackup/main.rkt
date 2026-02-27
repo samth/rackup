@@ -37,12 +37,14 @@
               "Show the active toolchain and where it came from.")
   (usage-line "which <exe> [--toolchain <toolchain>]"
               "Show the real executable path for a tool in a toolchain.")
+  (usage-line "switch <toolchain> | switch --unset"
+              "Switch the active toolchain in this shell without changing default.")
   (usage-line "shell <toolchain> | shell --deactivate"
-              "Emit shell code to activate/deactivate a toolchain in this shell.")
+              "Low-level: emit shell code to activate/deactivate a toolchain.")
   (usage-line "run <toolchain> -- <command> [args...]"
               "Run a command using a specific toolchain without changing defaults.")
-  (usage-line "prompt [--raw|--source]"
-              "Print fast prompt info for PS1 (wrapper handles this without Racket startup).")
+  (usage-line "prompt [--long|--short|--raw|--source]"
+              "Print fast prompt info for PS1 (default: compact label).")
   (usage-line "remove <toolchain>" "Remove an installed or linked toolchain and its addon dir.")
   (usage-line "reshim" "Rebuild executable shims from installed toolchains.")
   (usage-line "init [--shell bash|zsh]" "Install/update shell integration in ~/.bashrc or ~/.zshrc.")
@@ -167,11 +169,23 @@
      (displayln "")
      (displayln "Show the real executable path for a tool in a toolchain.")
      #t]
+    [(switch)
+     (help-usage "switch <toolchain> | switch --unset")
+     (displayln "")
+     (displayln "Switch the active toolchain in the current shell without changing the default.")
+     (displayln "When run via the shell integration installed by `rackup init`, this updates")
+     (displayln "the current shell. Otherwise, it emits shell code that you can `eval`.")
+     (displayln "")
+     (displayln "Examples:")
+     (displayln "  rackup switch stable")
+     (displayln "  rackup switch 8.18")
+     (displayln "  rackup switch --unset")
+     #t]
     [(shell)
      (help-usage "shell <toolchain> | shell --deactivate")
      (displayln "")
      (displayln "Emit shell code to activate/deactivate a toolchain in the current shell.")
-     (displayln "This is normally wrapped by the shell function installed by `rackup init`.")
+     (displayln "This is the low-level form used by `rackup switch` and the shell wrapper.")
      #t]
     [(run)
      (help-usage "run <toolchain> -- <command> [args...]")
@@ -179,14 +193,27 @@
      (displayln "Run a command under a specific toolchain without changing defaults.")
      #t]
     [(prompt)
-     (help-usage "prompt [--raw|--source]")
+     (help-usage "prompt [--long|--short|--raw|--source]")
      (displayln "")
-     (displayln "Print fast prompt information for PS1/PS2.")
+     (displayln "Print prompt/status information for the active toolchain.")
+     (displayln "Prints nothing when no active/default toolchain is configured.")
      (displayln "Handled by the shell wrapper without starting Racket when possible.")
      (displayln "")
+     (displayln "Default output:")
+     (displayln "  racket-9.1")
+     (displayln "")
      (displayln "Options:")
+     (help-option-line "--long" "Print the long bracketed form: \"[rk:<toolchain-id>]\".")
+     (help-option-line "--short" "Print a compact label like \"racket-9.1\" (same as default).")
      (help-option-line "--raw" "Print only the active toolchain id.")
      (help-option-line "--source" "Print \"<id><TAB><env|default>\".")
+     (displayln "")
+     (displayln "Examples:")
+     (displayln "  rackup prompt")
+     (displayln "  rackup prompt --long")
+     (displayln "  rackup prompt --short")
+     (displayln "  rackup prompt --raw")
+     (displayln "  PS1='$(rackup prompt) '$PS1")
      #t]
     [(remove)
      (help-usage "remove <toolchain>")
@@ -504,6 +531,15 @@
      (display (emit-shell-activation id))]
     [_ (rackup-error "usage: rackup shell <toolchain> | rackup shell --deactivate")]))
 
+(define (cmd-switch rest)
+  (ensure-index!)
+  (match rest
+    [(list "--unset") (display (emit-shell-deactivation))]
+    [(list spec)
+     (define id (resolve-toolchain-or-offer-install spec))
+     (display (emit-shell-activation id))]
+    [_ (rackup-error "usage: rackup switch <toolchain> | rackup switch --unset")]))
+
 (define (cmd-init rest)
   (define shell-name #f)
   (match rest
@@ -571,20 +607,45 @@
       (let-values ([(spec opts) (split-install-command-args rest)])
         (void (install-toolchain! spec opts)))))
 
+(define (prompt-short-label id)
+  (define meta (and id (read-toolchain-meta id)))
+  (define kind (and (hash? meta) (hash-ref meta 'kind #f)))
+  (define version (and (hash? meta) (hash-ref meta 'resolved-version #f)))
+  (define suffix
+    (match kind
+      ['release (or version id)]
+      ['stable (or version id)]
+      ['pre-release (format "pre-~a" (or version id))]
+      ['snapshot (format "snapshot-~a" (or version id))]
+      ['local
+       (cond
+         [(and (string? version)
+               (not (string-blank? version))
+               (not (equal? version "local")))
+          (format "local-~a" version)]
+         [(and (string? id) (string-prefix? id "local-")) (format "local-~a" (substring id 6))]
+         [else (or id "local")])]
+      [_ (or id "")]))
+  (if (string-blank? suffix) "" (format "racket-~a" suffix)))
+
 (define (cmd-prompt rest)
   (define mode
     (match rest
-      ['() 'default]
+      ['() 'short]
+      [(list "--long") 'long]
+      [(list "--short") 'short]
       [(list "--raw") 'raw]
       [(list "--source") 'source]
-      [_ (rackup-error "usage: rackup prompt [--raw|--source]")]))
+      [_ (rackup-error "usage: rackup prompt [--long|--short|--raw|--source]")]))
   (define id (resolve-active-toolchain-id))
   (define src (current-toolchain-source))
   (when id
     (match mode
+      ['long (printf "[rk:~a]\n" id)]
+      ['short (displayln (prompt-short-label id))]
       ['raw (displayln id)]
       ['source (printf "~a\t~a\n" id (or src 'unknown))]
-      [_ (printf "[rk:~a]\n" id)])))
+      [_ (displayln (prompt-short-label id))])))
 
 (define (parse-available-options rest)
   (define limit 20)
@@ -843,6 +904,7 @@
          [(list "current" rest ...) (cmd-current rest)]
          [(list "prompt" rest ...) (cmd-prompt rest)]
          [(list "which" rest ...) (cmd-which rest)]
+         [(list "switch" rest ...) (cmd-switch rest)]
          [(list "shell" rest ...) (cmd-shell rest)]
          [(list "run" rest ...) (cmd-run rest)]
          [(list "remove" rest ...) (cmd-remove rest)]

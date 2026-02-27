@@ -164,8 +164,21 @@ mkdir -p "$PREFIX"
 mkdir -p "$PREFIX/bin" "$PREFIX/libexec"
 
 info "Installing rackup into $PREFIX"
-cp -R "$SRC_DIR/bin/." "$PREFIX/bin/"
-cp -R "$SRC_DIR/libexec/." "$PREFIX/libexec/"
+copy_filtered_tree() {
+  src_dir="$1"
+  dest_dir="$2"
+  shift 2
+  mkdir -p "$dest_dir"
+  (
+    cd "$src_dir"
+    find "$@" \
+      \( -type d \( -name .git -o -name compiled \) -prune \) -o \
+      \( -type f \( -name '*.zo' -o -name '*.dep' \) -prune \) -o \
+      \( -type f -o -type l \) -print0
+  ) | tar -C "$src_dir" --null -T - -cf - | tar -C "$dest_dir" -xf -
+}
+
+copy_filtered_tree "$SRC_DIR" "$PREFIX" bin libexec
 chmod +x "$PREFIX/bin/rackup"
 chmod +x "$PREFIX/libexec/rackup-bootstrap.sh" 2>/dev/null || true
 
@@ -185,6 +198,7 @@ rackup_hidden_runtime_install_if_missing
 
 info "Registering/validating hidden runtime..."
 "$PREFIX/bin/rackup" runtime install >/dev/null
+"$PREFIX/bin/rackup" reshim >/dev/null
 
 default_shell="$(basename "${SHELL:-bash}")"
 if [ -n "$INIT_SHELL" ]; then

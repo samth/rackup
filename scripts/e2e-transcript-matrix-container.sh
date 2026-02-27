@@ -33,12 +33,7 @@ install_toolchain() {
 note "Preparing source copy"
 rm -rf "$RUN_SRC"
 mkdir -p "$RUN_SRC"
-tar -C "$WORKDIR" \
-  --exclude='.git' \
-  --exclude='libexec/compiled' \
-  --exclude='libexec/rackup/compiled' \
-  --exclude='test/compiled' \
-  -cf - . | tar -C "$RUN_SRC" -xf -
+"$WORKDIR/scripts/copy-filtered-tree.sh" "$WORKDIR" "$RUN_SRC"
 
 note "Bootstrapping rackup"
 rm -rf "$RACKUP_HOME"
@@ -97,6 +92,8 @@ note "Which and prompt commands"
 "$RACKUP_BIN" default id
 "$RACKUP_BIN" default status
 "$RACKUP_BIN" prompt
+"$RACKUP_BIN" prompt --long
+"$RACKUP_BIN" prompt --short
 "$RACKUP_BIN" prompt --raw
 "$RACKUP_BIN" prompt --source
 
@@ -128,8 +125,8 @@ fi
 note "Shell commands"
 "$RACKUP_BIN" init --shell bash
 "$RACKUP_BIN" init --shell zsh
-"$RACKUP_BIN" shell "$stable_full_id" | sed -n '1,20p'
-"$RACKUP_BIN" shell --deactivate | sed -n '1,20p'
+"$RACKUP_BIN" switch "$stable_full_id" | sed -n '1,20p'
+"$RACKUP_BIN" switch --unset | sed -n '1,20p'
 
 note "Link local source tree"
 local_src=/tmp/rackup-local-src

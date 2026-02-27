@@ -1,6 +1,7 @@
-#lang racket/base
+#lang at-exp racket/base
 
 (require racket/file
+         racket/format
          racket/list
          racket/path
          racket/set
@@ -17,39 +18,47 @@
          reshim!
          current-toolchain-source)
 
+(define bootstrap-shim-names
+  '("racket" "raco"))
+
 (define (dispatcher-script)
-  (string-append "#!/usr/bin/env bash\n"
-                 "set -euo pipefail\n"
-                 "SELF=\"${BASH_SOURCE[0]}\"\n"
-                 "LIBEXEC_DIR=\"$(cd -P \"$(dirname \"$SELF\")\" && pwd)\"\n"
-                 "HOME_DIR=\"${RACKUP_HOME:-$(cd -P \"$LIBEXEC_DIR/..\" && pwd)}\"\n"
-                 "SHIM_NAME=\"$(basename \"$0\")\"\n"
-                 "DEFAULT_FILE=\"$HOME_DIR/state/default-toolchain\"\n"
-                 "ENV_FILE=\"\"\n"
-                 "ACTIVE=\"${RACKUP_TOOLCHAIN:-}\"\n"
-                 "if [[ -z \"$ACTIVE\" && -f \"$DEFAULT_FILE\" ]]; then\n"
-                 "  ACTIVE=\"$(tr -d '\\r\\n' < \"$DEFAULT_FILE\")\"\n"
-                 "fi\n"
-                 "if [[ -z \"$ACTIVE\" ]]; then\n"
-                 "  echo \"rackup: no active/default toolchain configured\" >&2\n"
-                 "  echo \"Try: rackup list ; rackup default <toolchain>\" >&2\n"
-                 "  exit 2\n"
-                 "fi\n"
-                 "TARGET=\"$HOME_DIR/toolchains/$ACTIVE/bin/$SHIM_NAME\"\n"
-                 "ENV_FILE=\"$HOME_DIR/toolchains/$ACTIVE/env.sh\"\n"
-                 "if [[ ! -x \"$TARGET\" ]]; then\n"
-                 "  echo \"rackup: executable '$SHIM_NAME' not found in toolchain '$ACTIVE'\" >&2\n"
-                 "  echo \"Try: rackup which $SHIM_NAME --toolchain $ACTIVE\" >&2\n"
-                 "  exit 127\n"
-                 "fi\n"
-                 "if [[ -f \"$ENV_FILE\" ]]; then\n"
-                 "  # shellcheck disable=SC1090\n"
-                 "  . \"$ENV_FILE\"\n"
-                 "fi\n"
-                 "if [[ -z \"${PLTADDONDIR:-}\" ]]; then\n"
-                 "  export PLTADDONDIR=\"$HOME_DIR/addons/$ACTIVE\"\n"
-                 "fi\n"
-                 "exec \"$TARGET\" \"$@\"\n"))
+  #<<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+SELF="${BASH_SOURCE[0]}"
+LIBEXEC_DIR="$(cd -P "$(dirname "$SELF")" && pwd)"
+HOME_DIR="${RACKUP_HOME:-$(cd -P "$LIBEXEC_DIR/.." && pwd)}"
+SHIM_NAME="$(basename "$0")"
+DEFAULT_FILE="$HOME_DIR/state/default-toolchain"
+ENV_FILE=""
+ACTIVE="${RACKUP_TOOLCHAIN:-}"
+if [[ -z "$ACTIVE" && -f "$DEFAULT_FILE" ]]; then
+  ACTIVE="$(tr -d '\r\n' < "$DEFAULT_FILE")"
+fi
+if [[ -z "$ACTIVE" ]]; then
+  echo "rackup: '$SHIM_NAME' is managed by rackup, but no active toolchain is configured." >&2
+  echo "Install one with: rackup install stable" >&2
+  echo "Or select one with: rackup default <toolchain>" >&2
+  echo "Inspect choices with: rackup list | rackup available --limit 20" >&2
+  exit 2
+fi
+TARGET="$HOME_DIR/toolchains/$ACTIVE/bin/$SHIM_NAME"
+ENV_FILE="$HOME_DIR/toolchains/$ACTIVE/env.sh"
+if [[ ! -x "$TARGET" ]]; then
+  echo "rackup: executable '$SHIM_NAME' not found in toolchain '$ACTIVE'" >&2
+  echo "Try: rackup which $SHIM_NAME --toolchain $ACTIVE" >&2
+  exit 127
+fi
+if [[ -f "$ENV_FILE" ]]; then
+  # shellcheck disable=SC1090
+  . "$ENV_FILE"
+fi
+if [[ -z "${PLTADDONDIR:-}" ]]; then
+  export PLTADDONDIR="$HOME_DIR/addons/$ACTIVE"
+fi
+exec "$TARGET" "$@"
+EOF
+  )
 
 (define (ensure-shim-dispatcher!)
   (ensure-rackup-layout!)
@@ -106,7 +115,8 @@
   (ensure-core-rackup-shim!)
   (define shims-dir (rackup-shims-dir))
   (define dispatcher (rackup-shim-dispatcher))
-  (define desired (list->set (cons "rackup" (all-installed-executables))))
+  (define desired
+    (list->set (append '("rackup") bootstrap-shim-names (all-installed-executables))))
   (for ([name (in-set desired)])
     (unless (equal? name "rackup")
       (define p (build-path shims-dir name))

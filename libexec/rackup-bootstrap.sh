@@ -47,6 +47,76 @@ rackup_read_default_toolchain_shell() {
   fi
 }
 
+rackup_toolchain_meta_file_shell() {
+  toolchain_id="$1"
+  printf '%s\n' "$(rackup_home)/toolchains/$toolchain_id/meta.rktd"
+}
+
+rackup_rktd_string_field_shell() {
+  key="$1"
+  file="$2"
+  [ -f "$file" ] || return 0
+  grep -Eo "\\($key \\. \"[^\"]*\"\\)" "$file" 2>/dev/null \
+    | sed -n 's/.*"\([^"]*\)".*/\1/p' \
+    | head -n 1
+}
+
+rackup_rktd_symbol_field_shell() {
+  key="$1"
+  file="$2"
+  [ -f "$file" ] || return 0
+  grep -Eo "\\($key \\. [^ )]+\\)" "$file" 2>/dev/null \
+    | sed -n 's/.*\. \([^ )]*\)).*/\1/p' \
+    | head -n 1
+}
+
+rackup_prompt_short_shell() {
+  active="$1"
+  meta_file="$(rackup_toolchain_meta_file_shell "$active")"
+  kind="$(rackup_rktd_symbol_field_shell kind "$meta_file")"
+  version="$(rackup_rktd_string_field_shell resolved-version "$meta_file")"
+  case "$kind" in
+    release|stable)
+      suffix="${version:-$active}"
+      ;;
+    pre-release)
+      suffix="pre-${version:-$active}"
+      ;;
+    snapshot)
+      suffix="snapshot-${version:-$active}"
+      ;;
+    local)
+      if [ -n "${version:-}" ] && [ "$version" != "local" ]; then
+        suffix="local-$version"
+      else
+        suffix="local-${active#local-}"
+      fi
+      ;;
+    *)
+      case "$active" in
+        release-*)
+          suffix="${active#release-}"
+          suffix="${suffix%%-*}"
+          ;;
+        pre-*)
+          suffix="${active#pre-}"
+          suffix="pre-${suffix%%-*}"
+          ;;
+        snapshot-*)
+          suffix="snapshot-$active"
+          ;;
+        local-*)
+          suffix="local-${active#local-}"
+          ;;
+        *)
+          suffix="$active"
+          ;;
+      esac
+      ;;
+  esac
+  printf 'racket-%s\n' "$suffix"
+}
+
 rackup_prompt_shell() {
   mode="${1:-}"
   active="${RACKUP_TOOLCHAIN:-}"
@@ -61,6 +131,12 @@ rackup_prompt_shell() {
   fi
   [ -n "$active" ] || return 0
   case "$mode" in
+    --long)
+      printf '[rk:%s]\n' "$active"
+      ;;
+    --short)
+      rackup_prompt_short_shell "$active"
+      ;;
     --raw)
       printf '%s\n' "$active"
       ;;
@@ -68,7 +144,7 @@ rackup_prompt_shell() {
       printf '%s\t%s\n' "$active" "$source_kind"
       ;;
     *)
-      printf '[rk:%s]\n' "$active"
+      rackup_prompt_short_shell "$active"
       ;;
   esac
 }

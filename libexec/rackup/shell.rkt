@@ -24,12 +24,19 @@
                  (emit-path-prepend)
                  "rackup() {\n"
                  "  local _rackup_bin=\"${RACKUP_HOME:-$HOME/.rackup}/bin/rackup\"\n"
-                 "  if [ \"$#\" -gt 0 ] && [ \"$1\" = \"shell\" ]; then\n"
-                 "    shift\n"
-                 "    eval \"$(\"$_rackup_bin\" shell \"$@\")\"\n"
-                 "  else\n"
-                 "    \"$_rackup_bin\" \"$@\"\n"
+                 "  if [ \"$#\" -gt 0 ]; then\n"
+                 "    case \"$1\" in\n"
+                 "      shell|switch)\n"
+                 "        if [ \"$#\" -ge 2 ] && [ \"$2\" != \"--help\" ] && [ \"$2\" != \"-h\" ]; then\n"
+                 "          local _rackup_cmd=\"$1\"\n"
+                 "          shift\n"
+                 "          eval \"$(\"$_rackup_bin\" \"$_rackup_cmd\" \"$@\")\"\n"
+                 "          return\n"
+                 "        fi\n"
+                 "        ;;\n"
+                 "    esac\n"
                  "  fi\n"
+                 "  \"$_rackup_bin\" \"$@\"\n"
                  "}\n"))
 
 (define (managed-rc-block shell-name)

@@ -21,9 +21,10 @@ cp "$ROOT_DIR/scripts/install.sh" "$OUT_DIR/install"
 chmod 0755 "$OUT_DIR/install.sh" "$OUT_DIR/install"
 
 mkdir -p "$TMP_STAGE/rackup-src"
-cp -R "$ROOT_DIR/bin" "$TMP_STAGE/rackup-src/bin"
-cp -R "$ROOT_DIR/libexec" "$TMP_STAGE/rackup-src/libexec"
-find "$TMP_STAGE/rackup-src/libexec" -type d -name compiled -prune -exec rm -rf {} +
+"$ROOT_DIR/scripts/copy-filtered-tree.sh" "$ROOT_DIR" "$TMP_STAGE/rackup-src" \
+  bin \
+  libexec \
+  scripts/copy-filtered-tree.sh
 tar -C "$TMP_STAGE" -czf "$OUT_DIR/rackup-src.tar.gz" rackup-src
 
 : > "$OUT_DIR/.nojekyll"

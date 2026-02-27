@@ -1,6 +1,7 @@
 #lang racket/base
 
 (require racket/file
+         racket/list
          racket/match
          racket/path
          racket/port
@@ -21,12 +22,6 @@
 (define (hidden-runtime-racket-path)
   (define p (build-path (rackup-runtime-current-link) "bin" "racket"))
   (and (executable-file? p) p))
-
-(define (hidden-runtime-raco-path)
-  (define racket-exe (hidden-runtime-racket-path))
-  (and racket-exe
-       (let ([dir (path-only racket-exe)])
-         (and dir (let ([p (build-path dir "raco")]) (and (executable-file? p) p))))))
 
 (define (hidden-runtime-present?)
   (and (hidden-runtime-racket-path) #t))
@@ -223,6 +218,27 @@
 (define (rackup-core-source-path)
   (build-path (rackup-libexec-dir) "rackup-core.rkt"))
 
+(define (compiled-dir-name? p)
+  (define leaf (file-name-from-path p))
+  (and leaf (equal? (path->string* leaf) "compiled")))
+
+(define (rackup-source-file? p)
+  (and (file-exists? p)
+       (regexp-match? #px"[.]rkt$" (path->string* p))))
+
+(define (rackup-source-paths)
+  (sort
+   (filter rackup-source-file?
+           (find-files (lambda (p)
+                         (cond
+                           [(directory-exists? p) (not (compiled-dir-name? p))]
+                           [else (rackup-source-file? p)]))
+                       (rackup-libexec-dir)
+                       #:follow-links? #f
+                       #:skip-filtered-directory? #t))
+   string<?
+   #:key path->string*))
+
 (define (run-quiet-program exe . args)
   (define out (open-output-nowhere))
   (define err (open-output-string))
@@ -233,33 +249,26 @@
   (values ok? (string-trim (get-output-string err))))
 
 (define (precompile-rackup-sources!)
-  (define raco-exe (hidden-runtime-raco-path))
   (define racket-exe (hidden-runtime-racket-path))
-  (define core (rackup-core-source-path))
-  (when (file-exists? core)
-    (define (warn-precompile step details)
-      (eprintf "rackup: warning: failed to precompile rackup sources via ~a\n" step)
-      (unless (string-blank? details)
-        (eprintf "~a\n" details)))
-    (define (try-racket-make-flag)
-      (and racket-exe
-           (let-values ([(ok? details) (run-quiet-program racket-exe "-y" core "--help")])
-             (unless ok?
-               (warn-precompile "`racket -y`" details))
-             ok?)))
-    (cond
-      [raco-exe
-       (let-values ([(ok? details) (run-quiet-program raco-exe "make" core)])
-         (cond
-           [ok? (void)]
-           [(regexp-match? #px"Unrecognized command:\\s*make" details)
-            ;; Minimal hidden runtimes may not include the `raco make` command.
-            (unless (try-racket-make-flag)
-              (void))]
-           [else (warn-precompile "`raco make`" details)]))]
-      [else
-       (unless (try-racket-make-flag)
-         (void))])))
+  (define sources (rackup-source-paths))
+  (when (and racket-exe (pair? sources))
+    (define compile-expression
+      (string-join
+       '("(begin"
+         "  (require compiler/cm racket/path)"
+         "  (for ([arg (in-vector (current-command-line-arguments))])"
+         "    (managed-compile-zo (path->complete-path (string->path arg)))))")
+       " "))
+    (let-values ([(ok? details)
+                  (apply run-quiet-program
+                         racket-exe
+                         "-e"
+                         compile-expression
+                         (map path->string* sources))])
+      (unless ok?
+        (eprintf "rackup: warning: failed to precompile rackup sources via compiler/cm\n")
+        (unless (string-blank? details)
+          (eprintf "~a\n" details))))))
 
 (define (with-runtime-lock thunk)
   (ensure-rackup-layout!)

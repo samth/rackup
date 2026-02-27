@@ -6,6 +6,7 @@
          racket/format
          racket/port
          racket/path
+         racket/runtime-path
          racket/string
          racket/system
          "../libexec/rackup/install.rkt"
@@ -41,7 +42,48 @@
   (define-values (out _err) (run-main/capture args))
   out)
 
+(define-runtime-path rackup-bin "../bin/rackup")
+
+(define (run-bin-rackup/capture args)
+  (define out (open-output-string))
+  (define err (open-output-string))
+  (define ok?
+    (parameterize ([current-output-port out]
+                   [current-error-port err])
+      (apply system* rackup-bin args)))
+  (values ok? (get-output-string out) (get-output-string err)))
+
+(define (run-program/capture program args)
+  (define-values (proc stdout stdin stderr)
+    (apply subprocess #f #f #f program args))
+  (close-output-port stdin)
+  (subprocess-wait proc)
+  (values (subprocess-status proc)
+          (port->string stdout)
+          (port->string stderr)))
+
 (module+ test
+  (with-temp-rackup-home
+   (lambda (_tmp)
+     (ensure-index!)
+     (reshim!)
+     (define shims-dir (rackup-shims-dir))
+     (for ([exe '("racket" "raco")])
+       (define shim (build-path shims-dir exe))
+       (check-true (link-exists? shim))
+       (let-values ([(status out err) (run-program/capture shim '())])
+         (check-equal? status 2)
+         (check-equal? out "")
+         (check-true
+          (string-contains?
+           err
+           (format "rackup: '~a' is managed by rackup, but no active toolchain is configured."
+                   exe)))
+         (check-true (string-contains? err "Install one with: rackup install stable"))
+         (check-true (string-contains? err "Or select one with: rackup default <toolchain>"))
+         (check-true
+          (string-contains? err "Inspect choices with: rackup list | rackup available --limit 20"))))))
+
   (with-temp-rackup-home (lambda (tmp)
                            (ensure-index!)
                            (check-true (directory-exists? (rackup-home)))
@@ -95,6 +137,20 @@
                            (register-toolchain! id meta)
                            (check-equal? (get-default-toolchain) id)
                            (check-equal? (find-local-toolchain "release-8.18") id)
+                           (check-equal? (run-main/stdout '("prompt"))
+                                         "racket-8.18\n")
+                           (check-equal? (run-main/stdout '("prompt" "--short"))
+                                         "racket-8.18\n")
+                           (check-equal? (run-main/stdout '("prompt" "--long"))
+                                         "[rk:release-8.18-cs-x86_64-linux-full]\n")
+                           (let-values ([(ok? out err) (run-bin-rackup/capture '("prompt" "--short"))])
+                             (check-true ok?)
+                             (check-equal? out "racket-8.18\n")
+                             (check-equal? err ""))
+                           (let-values ([(ok? out err) (run-bin-rackup/capture '("prompt"))])
+                             (check-true ok?)
+                             (check-equal? out "racket-8.18\n")
+                             (check-equal? err ""))
                            (check-equal? (path->string (resolve-executable-path "racket"))
                                          (path->string (build-path (rackup-toolchain-bin-link id)
                                                                    "racket")))
@@ -207,10 +263,15 @@
      (define activation (emit-shell-activation linked-id))
      (check-true (string-contains? activation "export PLTHOME="))
      (check-true (string-contains? activation "export PLTCOLLECTS="))
+     (check-equal? (run-main/stdout (list "switch" "devsrc")) activation)
+     (check-equal? (run-main/stdout '("prompt")) "racket-local-9.99-local\n")
+     (check-equal? (run-main/stdout '("prompt" "--short")) "racket-local-9.99-local\n")
+     (check-equal? (run-main/stdout '("prompt" "--long")) "[rk:local-devsrc]\n")
      (void (putenv "RACKUP_TOOLCHAIN" linked-id))
      (define deactivation (emit-shell-deactivation))
      (check-true (string-contains? deactivation "unset PLTHOME"))
      (check-true (string-contains? deactivation "unset PLTCOLLECTS"))
+     (check-equal? (run-main/stdout '("switch" "--unset")) deactivation)
      (void (putenv "RACKUP_TOOLCHAIN" ""))))
 
   (with-temp-rackup-home
@@ -452,6 +513,55 @@
               rackup install 8.18 --variant cs
               rackup install snapshot --snapshot-site utah
           })
+  (check-equal? (run-main/stdout '("switch" "--help"))
+                (run-main/stdout '("help" "switch")))
+  (expect (display (run-main/stdout '("switch" "--help")))
+          @~a{
+            Usage: rackup switch <toolchain> | switch --unset
+
+            Switch the active toolchain in the current shell without changing the default.
+            When run via the shell integration installed by `rackup init`, this updates
+            the current shell. Otherwise, it emits shell code that you can `eval`.
+
+            Examples:
+              rackup switch stable
+              rackup switch 8.18
+              rackup switch --unset
+          })
+  (check-equal? (run-main/stdout '("prompt" "--help"))
+                (run-main/stdout '("help" "prompt")))
+  (expect (display (run-main/stdout '("prompt" "--help")))
+          @~a{
+            Usage: rackup prompt [--long|--short|--raw|--source]
+
+            Print prompt/status information for the active toolchain.
+            Prints nothing when no active/default toolchain is configured.
+            Handled by the shell wrapper without starting Racket when possible.
+
+            Default output:
+              racket-9.1
+
+            Options:
+              --long                  Print the long bracketed form: "[rk:<toolchain-id>]".
+              --short                 Print a compact label like "racket-9.1" (same as default).
+              --raw                   Print only the active toolchain id.
+              --source                Print "<id><TAB><env|default>".
+
+            Examples:
+              rackup prompt
+              rackup prompt --long
+              rackup prompt --short
+              rackup prompt --raw
+              PS1='$(rackup prompt) '$PS1
+          })
+  (with-temp-rackup-home
+   (lambda (_tmp)
+     (ensure-index!)
+     (define-values (help-ok? help-out help-err)
+       (run-bin-rackup/capture '("prompt" "--help")))
+     (check-true help-ok?)
+     (check-equal? help-err "")
+     (check-true (string-contains? help-out "Usage: rackup prompt [--long|--short|--raw|--source]"))))
   (expect (display (run-main/stdout '("runtime" "--help")))
           @~a{
             Usage: rackup runtime status|install|upgrade

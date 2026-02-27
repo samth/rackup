@@ -9,6 +9,7 @@ on:
       - libexec/**
       - pages/**
       - scripts/build-pages-site.sh
+      - scripts/copy-filtered-tree.sh
       - scripts/install.sh
   workflow_dispatch:
 
