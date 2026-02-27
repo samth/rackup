@@ -232,8 +232,12 @@ if [[ -n "$DOCKER_PLATFORM" ]]; then
 fi
 
 if [[ "$MODE" == "bootstrap-curl" ]]; then
-  PREBUILT_PAGES_DIR="$(mktemp -d "${TMPDIR:-/tmp}/rackup-pages-prebuilt.XXXXXX")"
-  sh "$ROOT_DIR/scripts/build-pages-site.sh" "$PREBUILT_PAGES_DIR"
+  if [[ -n "${RACKUP_E2E_PREBUILT_PAGES_DIR:-}" ]]; then
+    PREBUILT_PAGES_DIR="$RACKUP_E2E_PREBUILT_PAGES_DIR"
+  else
+    PREBUILT_PAGES_DIR="$(mktemp -d "${TMPDIR:-/tmp}/rackup-pages-prebuilt.XXXXXX")"
+    sh "$ROOT_DIR/scripts/build-pages-site.sh" "$PREBUILT_PAGES_DIR"
+  fi
   run_cmd+=(-v "$PREBUILT_PAGES_DIR:/prebuilt-pages:ro")
 fi
 

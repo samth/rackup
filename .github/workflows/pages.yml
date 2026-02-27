@@ -23,30 +23,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  bootstrap-curl-smoke:
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
-    steps:
-      - uses: actions/checkout@v4
-      - name: Setup Racket
-        uses: Bogdanp/setup-racket@v1.14
-        with:
-          architecture: x64
-          distribution: full
-          variant: CS
-          version: stable
-      - name: Install Pages build deps
-        run: |
-          raco pkg install --auto plt-web
-      - name: Verify curl-pipe-sh bootstrap against Pages artifact
-        run: |
-          scripts/docker-test-fresh-install.sh \
-            --mode bootstrap-curl \
-            --host-racket absent \
-            --spec stable
-
   build:
-    needs: bootstrap-curl-smoke
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -64,13 +41,39 @@ jobs:
       - name: Build static Pages site
         run: |
           sh scripts/build-pages-site.sh _site
+      - name: Upload smoke-test site artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pages-site-smoke
+          path: _site
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: _site
 
-  deploy:
+  bootstrap-curl-smoke:
     needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download built site artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: pages-site-smoke
+          path: _site
+      - name: Verify curl-pipe-sh bootstrap against built site artifact
+        run: |
+          RACKUP_E2E_PREBUILT_PAGES_DIR="$PWD/_site" \
+          scripts/docker-test-fresh-install.sh \
+            --mode bootstrap-curl \
+            --host-racket absent \
+            --spec stable
+
+  deploy:
+    needs:
+      - build
+      - bootstrap-curl-smoke
     runs-on: ubuntu-latest
     environment:
       name: github-pages
