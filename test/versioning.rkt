@@ -22,6 +22,9 @@
   (check-equal? (arch-token->normalized "aarch64") "aarch64")
   (check-equal? (arch-token->normalized "x86_64") "x86_64")
   (check-equal? (arch-token->normalized "i386") "i386")
+  (check-equal? (arch-token->normalized "riscv64") "riscv64")
+  (check-equal? (arch-token->normalized "ppc") "ppc")
+  (check-equal? (arch-token->normalized "ppc64le") "ppc")
 
   (check-equal? (canonical-toolchain-id 'release
                                         #:resolved-version "8.18"

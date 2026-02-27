@@ -62,7 +62,8 @@
   (unless (file-exists? cache-path)
     (displayln (format "Downloading hidden runtime installer: ~a" installer-url))
     (download-url->file installer-url cache-path)
-    (file-or-directory-permissions cache-path #o755))
+    (when (regexp-match? #px"[.]sh$" (string-downcase (path->string* cache-path)))
+      (file-or-directory-permissions cache-path #o755)))
   cache-path)
 
 (define (run-linux-installer! installer-file install-root)
@@ -76,6 +77,23 @@
                  "--in-place"
                  "--dest"
                  dest))
+
+(define (tar-exe)
+  (or (find-executable-path "tar") (string->path "/bin/tar")))
+
+(define (run-linux-tgz-installer! installer-file install-root)
+  (define archive (path->complete-path installer-file))
+  (define dest (path->complete-path install-root))
+  (displayln (format "Extracting hidden runtime archive into ~a" (path->string dest)))
+  (make-directory* dest)
+  (system*/check 'hidden-runtime-tgz-installer (tar-exe) "-xzf" archive "-C" dest))
+
+(define (installer-extension p)
+  (define low (string-downcase (path->string* p)))
+  (cond
+    [(regexp-match? #px"[.]sh$" low) "sh"]
+    [(regexp-match? #px"[.]tgz$" low) "tgz"]
+    [else #f]))
 
 (define (detect-bin-dir install-root)
   (define p1 (build-path install-root "bin"))
@@ -155,7 +173,10 @@
           (and variant-out (not (string-blank? variant-out)) (string-downcase variant-out))))
 
 (define (hidden-runtime-request)
-  (resolve-install-request "stable" #:variant 'cs #:distribution 'minimal))
+  (with-handlers ([exn:fail? (lambda (_) (resolve-install-request "stable"
+                                                                  #:variant 'bc
+                                                                  #:distribution 'minimal))])
+    (resolve-install-request "stable" #:variant 'cs #:distribution 'minimal)))
 
 (define (request-with-version req version [variant #f])
   (define v* (or variant (hash-ref req 'variant)))
@@ -269,7 +290,8 @@
                    [install-root (rackup-runtime-install-dir id)]
                    [bin-link (rackup-runtime-bin-link id)]
                    [installer-url (hash-ref req 'installer-url)]
-                   [installer-file (ensure-installer-cached! installer-url)])
+                   [installer-file (ensure-installer-cached! installer-url)]
+                   [installer-ext (installer-extension installer-file)])
               (if (and (directory-exists? version-dir) (file-exists? (build-path bin-link "racket")))
                   (begin
                     (replace-link! (rackup-runtime-current-link) version-dir)
@@ -279,7 +301,14 @@
                                                  (delete-directory/files version-dir))
                                                (raise e))])
                     (make-directory* version-dir)
-                    (run-linux-installer! installer-file install-root)
+                    (cond
+                      [(equal? installer-ext "sh")
+                       (run-linux-installer! installer-file install-root)]
+                      [(equal? installer-ext "tgz")
+                       (run-linux-tgz-installer! installer-file install-root)]
+                      [else
+                       (rackup-error "unsupported hidden runtime installer format: ~a"
+                                     (or installer-ext "unknown"))])
                     (define real-bin (detect-bin-dir install-root))
                     (replace-link! bin-link real-bin)
                     (write-runtime-meta! id

@@ -487,14 +487,14 @@
   (cond
     [table
      (define filename
-       (select-installer-filename table
-                                  #:version-token resolved-version
-                                  #:variant variant
-                                  #:distribution distribution*
-                                  #:arch arch
-                                  #:platform platform
-                                  #:ext "sh"
-                                  #:allow-version-prefix? #t))
+       (select-installer-filename/by-ext table
+                                         #:version-token resolved-version
+                                         #:variant variant
+                                         #:distribution distribution*
+                                         #:arch arch
+                                         #:platform platform
+                                         #:exts '("sh" "tgz")
+                                         #:allow-version-prefix? #t))
      (release-request-hash requested-spec
                            resolved-version
                            variant
@@ -578,6 +578,41 @@
       platform
       ext)]))
 
+(define (select-installer-filename/by-ext table
+                                          #:version-token version-token
+                                          #:variant variant
+                                          #:distribution distribution
+                                          #:arch arch
+                                          #:platform [platform "linux"]
+                                          #:exts [exts '("sh")]
+                                          #:allow-version-prefix? [allow-version-prefix? #f])
+  (let loop ([rest exts]
+             [last-exn #f])
+    (cond
+      [(null? rest)
+       (if last-exn
+           (raise last-exn)
+           (rackup-error
+            "no installer found in table for version-token=~a variant=~a distro=~a arch=~a platform=~a exts=~a"
+            version-token
+            variant
+            distribution
+            arch
+            platform
+            exts))]
+      [else
+       (with-handlers ([exn:fail?
+                        (lambda (e)
+                          (loop (cdr rest) e))])
+         (select-installer-filename table
+                                    #:version-token version-token
+                                    #:variant variant
+                                    #:distribution distribution
+                                    #:arch arch
+                                    #:platform platform
+                                    #:ext (car rest)
+                                    #:allow-version-prefix? allow-version-prefix?))])))
+
 (define (symbol-site s)
   (cond
     [(symbol? s) s]
@@ -619,21 +654,21 @@
                                             #:distribution distribution
                                             #:arch arch
                                             #:platform [platform "linux"]
-                                            #:ext [ext "sh"])
+                                            #:exts [exts '("sh" "tgz")])
   (define resolved-version (resolved-version-from-version-rktd version-rktd "current"))
   (define fallback-token
     (if (and (string? resolved-version) (not (equal? resolved-version "current")))
         resolved-version
         (best-version-token-from-table table "current")))
   (define (select token #:allow-prefix? [allow-prefix? #f])
-    (select-installer-filename table
-                               #:version-token token
-                               #:variant variant
-                               #:distribution distribution
-                               #:arch arch
-                               #:platform platform
-                               #:ext ext
-                               #:allow-version-prefix? allow-prefix?))
+    (select-installer-filename/by-ext table
+                                      #:version-token token
+                                      #:variant variant
+                                      #:distribution distribution
+                                      #:arch arch
+                                      #:platform platform
+                                      #:exts exts
+                                      #:allow-version-prefix? allow-prefix?))
   (with-handlers ([exn:fail?
                    (lambda (e)
                      (cond
@@ -730,14 +765,14 @@
            [else (best-version-token-from-table table "current")])))
      (define variant (variant-for resolved-version))
      (define (select-pre-release token #:allow-prefix? [allow-prefix? #f])
-       (select-installer-filename table
-                                  #:version-token token
-                                  #:variant variant
-                                  #:distribution distribution*
-                                  #:arch arch
-                                  #:platform platform
-                                  #:ext "sh"
-                                  #:allow-version-prefix? allow-prefix?))
+       (select-installer-filename/by-ext table
+                                         #:version-token token
+                                         #:variant variant
+                                         #:distribution distribution*
+                                         #:arch arch
+                                         #:platform platform
+                                         #:exts '("sh" "tgz")
+                                         #:allow-version-prefix? allow-prefix?))
      (define filename
        (with-handlers ([exn:fail? (lambda (e)
                                     (if (numeric-version? resolved-version)
@@ -802,7 +837,7 @@
                                            #:distribution distribution*
                                            #:arch arch
                                            #:platform platform
-                                           #:ext "sh"))
+                                           #:exts '("sh" "tgz")))
      (hash 'kind
            'snapshot
            'requested-spec

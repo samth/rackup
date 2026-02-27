@@ -118,16 +118,19 @@
 
 (define (normalized-host-arch)
   (define raw (system-type 'machine))
-  (define m
+  (define m*
     (if (symbol? raw)
         (symbol->string raw)
         (format "~a" raw)))
+  (define m (string-downcase m*))
   (cond
-    [(or (member m '("x86_64" "amd64")) (regexp-match? #px"x86_64|amd64" m)) "x86_64"]
-    [(member m '("aarch64" "arm64")) "aarch64"]
-    [(member m '("i386" "i686" "x86")) "i386"]
-    [(equal? m "arm32") "arm"]
-    [else m]))
+    [(regexp-match? #px"x86_64|amd64" m) "x86_64"]
+    [(regexp-match? #px"aarch64|arm64" m) "aarch64"]
+    [(regexp-match? #px"(?:^|[^a-z0-9])(?:i[3-6]86|x86)(?:[^a-z0-9]|$)" m) "i386"]
+    [(regexp-match? #px"arm32|armv7|armv6|(?:^|[^a-z0-9])arm(?:[^a-z0-9]|$)" m) "arm"]
+    [(regexp-match? #px"riscv64" m) "riscv64"]
+    [(regexp-match? #px"ppc|powerpc" m) "ppc"]
+    [else m*]))
 
 (define (linux-platform-token)
   "linux")
@@ -139,4 +142,12 @@
     [(equal? token "arm64") "aarch64"]
     [(equal? token "i386") "i386"]
     [(equal? token "arm") "arm"]
+    [(equal? token "riscv64") "riscv64"]
+    [(or (equal? token "ppc")
+         (equal? token "powerpc")
+         (equal? token "ppc64")
+         (equal? token "ppc64le")
+         (equal? token "powerpc64")
+         (equal? token "powerpc64le"))
+     "ppc"]
     [else token]))

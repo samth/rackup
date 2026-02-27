@@ -6,24 +6,107 @@ on:
 
 jobs:
   unit-tests:
-    name: Unit Tests (Racket)
-    runs-on: ubuntu-latest
+    name: Unit Tests (${{ matrix.arch_name }})
+    runs-on: ${{ matrix.runs_on }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runs_on: ubuntu-latest
+            arch_name: x64
+            setup_racket_arch: x64
+          - runs_on: ubuntu-24.04-arm
+            arch_name: arm64
+            setup_racket_arch: arm64
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - name: Setup Racket
         uses: Bogdanp/setup-racket@v1.14
         with:
-          architecture: x64
+          architecture: ${{ matrix.setup_racket_arch }}
           distribution: full
           variant: CS
           version: stable
       - name: Build
+        shell: bash
         run: raco make libexec/rackup-core.rkt libexec/rackup/*.rkt
       - name: Install test deps
+        shell: bash
         run: raco pkg install --auto recspecs
       - name: Test (includes local-link unit coverage)
-        run: TMPDIR=/tmp raco test test/versioning.rkt test/remote.rkt test/state-shims.rkt
+        shell: bash
+        run: TMPDIR=/tmp raco test test/versioning.rkt test/remote.rkt test/platform-targets.rkt test/state-shims.rkt
+
+  docker-e2e-linux-distros:
+    name: "Docker E2E (native ${{ matrix.arch_name }} / ${{ matrix.base_image }})"
+    runs-on: ${{ matrix.runs_on }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runs_on: ubuntu-latest
+            arch_name: x64
+            docker_arch: amd64
+            base_image: "ubuntu:24.04"
+          - runs_on: ubuntu-latest
+            arch_name: x64
+            docker_arch: amd64
+            base_image: "debian:12"
+          - runs_on: ubuntu-24.04-arm
+            arch_name: arm64
+            docker_arch: arm64
+            base_image: "ubuntu:24.04"
+          - runs_on: ubuntu-24.04-arm
+            arch_name: arm64
+            docker_arch: arm64
+            base_image: "debian:12"
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Docker bootstrap install smoke on distro
+        run: |
+          scripts/docker-test-fresh-install.sh \
+            --mode bootstrap \
+            --host-racket absent \
+            --base-image "${{ matrix.base_image }}" \
+            --platform "linux/${{ matrix.docker_arch }}" \
+            --spec stable \
+            --spec 8.18
+
+  docker-e2e-qemu-platform-probe:
+    name: "Docker QEMU Detect (${{ matrix.platform }} => ${{ matrix.expected_arch }})"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/arm/v7
+            expected_arch: arm
+            base_image: debian:13
+          - platform: linux/386
+            expected_arch: i386
+            base_image: debian:13
+          - platform: linux/riscv64
+            expected_arch: riscv64
+            base_image: debian:13
+          - platform: linux/ppc64le
+            expected_arch: ppc
+            base_image: debian:13
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm,386,riscv64,ppc64le
+      - name: Probe arch/platform detection
+        run: |
+          scripts/qemu-platform-probe.sh \
+            --platform "${{ matrix.platform }}" \
+            --expected-arch "${{ matrix.expected_arch }}" \
+            --base-image "${{ matrix.base_image }}" \
+            --mode detect
 
   docker-e2e-direct:
     name: Docker E2E (direct, stable + older + local link)

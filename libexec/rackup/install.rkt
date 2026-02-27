@@ -21,6 +21,7 @@
          link-toolchain!
          remove-toolchain!
          run-linux-installer!
+         run-linux-tgz-installer!
          enumerate-toolchain-executables
          doctor-report)
 
@@ -136,6 +137,23 @@
                       "legacy interactive mode"
                       (format "--create-dir --in-place --dest ~a" (path->string* dest)))))
   (delete-log!))
+
+(define (tar-exe)
+  (or (find-executable-path "tar") (string->path "/bin/tar")))
+
+(define (run-linux-tgz-installer! installer-file install-root)
+  (define archive (path->complete-path installer-file))
+  (define dest (path->complete-path install-root))
+  (install-verbose "Extracting archive into ~a" (path->string dest))
+  (make-directory* dest)
+  (system*/check 'linux-tgz-installer (tar-exe) "-xzf" archive "-C" dest))
+
+(define (installer-filename-extension s)
+  (define low (string-downcase s))
+  (cond
+    [(regexp-match? #px"[.]sh$" low) "sh"]
+    [(regexp-match? #px"[.]tgz$" low) "tgz"]
+    [else #f]))
 
 (define (detect-bin-dir install-root)
   (define p1 (build-path install-root "bin"))
@@ -626,12 +644,22 @@
        (define installer-path
          (ensure-installer-cached! (hash-ref request 'installer-url)
                                    #:no-cache? (hash-ref parsed-opts 'no-cache? #f)))
+       (define installer-ext
+         (installer-filename-extension
+          (hash-ref request
+                    'installer-filename
+                    (path-basename-string (string->path (path->string* installer-path))))))
        (with-handlers ([exn:fail? (lambda (e)
                                     (when (directory-exists? tc-dir)
                                       (delete-directory/files tc-dir))
                                     (raise e))])
          (make-directory* tc-dir)
-         (run-linux-installer! installer-path install-root)
+         (cond
+           [(equal? installer-ext "sh") (run-linux-installer! installer-path install-root)]
+           [(equal? installer-ext "tgz") (run-linux-tgz-installer! installer-path install-root)]
+           [else
+            (rackup-error "unsupported installer format for Linux: ~a"
+                          (or installer-ext "unknown"))])
          (define real-bin-dir (detect-bin-dir install-root))
          (make-bin-link! id real-bin-dir)
          (delete-toolchain-env-file! id)

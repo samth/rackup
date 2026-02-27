@@ -2,6 +2,8 @@
 set -euo pipefail
 
 IMAGE_TAG="${RACKUP_DOCKER_IMAGE:-}"
+BASE_IMAGE="${RACKUP_DOCKER_BASE_IMAGE:-ubuntu:24.04}"
+DOCKER_PLATFORM="${RACKUP_DOCKER_PLATFORM:-}"
 BUILD=1
 UNIT_TESTS=0
 MODE="direct"
@@ -28,7 +30,9 @@ Usage:
   scripts/docker-test-fresh-install.sh [options]
 
 Options:
-  --image TAG             Docker image tag (default: rackup-e2e:local)
+  --image TAG             Docker image tag (default: rackup-e2e:<host-racket>-<base-image>)
+  --base-image IMAGE      Docker base image (default: ubuntu:24.04)
+  --platform PLATFORM     Docker platform/arch (example: linux/arm64, linux/riscv64)
   --no-build              Skip docker build and reuse existing image
   --mode direct|bootstrap|bootstrap-curl
                         Test repo directly, via local scripts/install.sh, or via curl|sh from a local Pages server (default: direct)
@@ -57,6 +61,14 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --image)
       IMAGE_TAG="$2"
+      shift 2
+      ;;
+    --base-image)
+      BASE_IMAGE="$2"
+      shift 2
+      ;;
+    --platform)
+      DOCKER_PLATFORM="$2"
       shift 2
       ;;
     --no-build)
@@ -154,15 +166,37 @@ esac
 ROOT_DIR="$(cd -P "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 if [[ -z "$IMAGE_TAG" ]]; then
-  IMAGE_TAG="rackup-e2e:${HOST_RACKET}"
+  base_tag="${BASE_IMAGE//\//-}"
+  base_tag="${base_tag//:/-}"
+  platform_tag="${DOCKER_PLATFORM:-native}"
+  platform_tag="${platform_tag//\//-}"
+  platform_tag="${platform_tag//:/-}"
+  IMAGE_TAG="rackup-e2e:${HOST_RACKET}-${base_tag}-${platform_tag}"
 fi
 
 if [[ "$BUILD" -eq 1 ]]; then
-  echo "Building Docker image ${IMAGE_TAG}..."
+  echo "Building Docker image ${IMAGE_TAG} (base=${BASE_IMAGE}, platform=${DOCKER_PLATFORM:-native})..."
+  build_cmd=(docker build)
+  if [[ -n "$DOCKER_PLATFORM" ]]; then
+    if docker buildx version >/dev/null 2>&1; then
+      build_cmd=(docker buildx build --load)
+    fi
+    build_cmd+=(--platform "$DOCKER_PLATFORM")
+  fi
   if [[ "$HOST_RACKET" == "present" ]]; then
-    docker build --build-arg INCLUDE_SYSTEM_RACKET=1 -t "$IMAGE_TAG" -f "$ROOT_DIR/docker/Dockerfile.e2e" "$ROOT_DIR"
+    "${build_cmd[@]}" \
+      --build-arg BASE_IMAGE="$BASE_IMAGE" \
+      --build-arg INCLUDE_SYSTEM_RACKET=1 \
+      -t "$IMAGE_TAG" \
+      -f "$ROOT_DIR/docker/Dockerfile.e2e" \
+      "$ROOT_DIR"
   else
-    docker build --build-arg INCLUDE_SYSTEM_RACKET=0 -t "$IMAGE_TAG" -f "$ROOT_DIR/docker/Dockerfile.e2e" "$ROOT_DIR"
+    "${build_cmd[@]}" \
+      --build-arg BASE_IMAGE="$BASE_IMAGE" \
+      --build-arg INCLUDE_SYSTEM_RACKET=0 \
+      -t "$IMAGE_TAG" \
+      -f "$ROOT_DIR/docker/Dockerfile.e2e" \
+      "$ROOT_DIR"
   fi
 else
   if ! docker image inspect "$IMAGE_TAG" >/dev/null 2>&1; then
@@ -184,7 +218,12 @@ done
 UID_GID="$(id -u):$(id -g)"
 echo "Running fresh-container install test with specs: ${speclist}"
 
-docker run --rm \
+run_cmd=(docker run --rm)
+if [[ -n "$DOCKER_PLATFORM" ]]; then
+  run_cmd+=(--platform "$DOCKER_PLATFORM")
+fi
+
+"${run_cmd[@]}" \
   --user "$UID_GID" \
   -e HOME=/tmp/rackup-e2e-home \
   -e RACKUP_E2E_MODE="$MODE" \

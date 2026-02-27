@@ -342,6 +342,23 @@
      (check-true (directory-exists? (build-path dest "collects")))
      (check-true (file-exists? (build-path dest "bin" "racket")))))
 
+  (with-temp-rackup-home
+   (lambda (tmp)
+     (define tar-exe (find-executable-path "tar"))
+     (unless tar-exe
+       (error 'state-shims "tar executable not found"))
+     (define archive-root (build-path tmp "archive-root"))
+     (define archive (build-path tmp "racket-minimal-9.1-riscv64-linux-cs.tgz"))
+     (define dest (build-path tmp "tgz-install"))
+     (make-directory* (build-path archive-root "racket" "bin"))
+     (write-string-file (build-path archive-root "racket" "bin" "racket")
+                        "#!/usr/bin/env bash\necho tgz-runtime\n")
+     (file-or-directory-permissions (build-path archive-root "racket" "bin" "racket") #o755)
+     (check-true (system* tar-exe "-czf" archive "-C" archive-root "."))
+     (run-linux-tgz-installer! archive dest)
+     (check-true (directory-exists? (build-path dest "racket" "bin")))
+     (check-true (file-exists? (build-path dest "racket" "bin" "racket")))))
+
   (check-equal? (run-main/stdout '("install" "--help"))
                 (run-main/stdout '("help" "install")))
   (expect (display (run-main/stdout '("install" "--help")))

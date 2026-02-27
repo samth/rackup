@@ -113,6 +113,8 @@ rackup_normalized_arch() {
     aarch64|arm64) echo "aarch64" ;;
     i386|i686|x86) echo "i386" ;;
     armv7*|armv6*|arm) echo "arm" ;;
+    riscv64) echo "riscv64" ;;
+    ppc|powerpc|ppc64|ppc64le|powerpc64|powerpc64le) echo "ppc" ;;
     *) echo "$m" ;;
   esac
 }
@@ -130,53 +132,76 @@ rackup_select_hidden_runtime_filename() {
   table_url="https://download.racket-lang.org/installers/$version/table.rktd"
   table="$(rackup_fetch_text "$table_url")" || rackup_fail "failed to fetch $table_url"
 
-  # Extract candidate .sh installers from table.rktd conservatively.
-  candidates="$(printf '%s\n' "$table" | grep -Eo 'racket(-minimal)?-[^"[:space:]]+\.sh' | sort -u || true)"
+  # Extract candidate installers from table.rktd conservatively.
+  candidates="$(printf '%s\n' "$table" | grep -Eo 'racket(-minimal)?-[^"[:space:]]+\.(sh|tgz)' | sort -u || true)"
   [ -n "$candidates" ] || rackup_fail "failed to parse installer candidates from $table_url"
 
   found=""
-  for f in $candidates; do
-    case "$f" in
-      racket-minimal-*.sh) ;;
-      *) continue ;;
-    esac
-
-    base=${f%.sh}
-    case "$base" in
-      *-cs) : ;;
-      *) continue ;;
-    esac
-
-    rest=${base#racket-minimal-}
-    version_token=${rest%%-*}
-    case "$version_token" in
-      "$version"|"$version".*) : ;;
-      *) continue ;;
-    esac
-
-    rest2=${rest#"$version_token"-}
-    arch_token=${rest2%%-*}
-    [ "$arch_token" = "$arch" ] || continue
-    platform_and_variant=${rest2#"$arch_token"-}
-    platform_token=${platform_and_variant%-cs}
-
-    case "$platform_token" in
-      linux|linux-*)
-        case "$platform_token" in
-          *natipkg*|*pkg-build*) continue ;;
+  for want_variant in cs bc; do
+    for want_ext in sh tgz; do
+      for f in $candidates; do
+        case "$f" in
+          racket-minimal-*."$want_ext") ;;
+          *) continue ;;
         esac
-        ;;
-      *)
-        continue
-        ;;
-    esac
 
-    found="$f"
-    break
+        ext=${f##*.}
+        base=${f%."$ext"}
+        rest=${base#racket-minimal-}
+        version_token=${rest%%-*}
+        case "$version_token" in
+          "$version"|"$version".*) : ;;
+          *) continue ;;
+        esac
+
+        rest2=${rest#"$version_token"-}
+        arch_token=${rest2%%-*}
+        [ "$arch_token" = "$arch" ] || continue
+        platform_and_variant=${rest2#"$arch_token"-}
+
+        variant=bc
+        platform_token=$platform_and_variant
+        case "$platform_and_variant" in
+          *-cs)
+            variant=cs
+            platform_token=${platform_and_variant%-cs}
+            ;;
+          *-bc)
+            variant=bc
+            platform_token=${platform_and_variant%-bc}
+            ;;
+        esac
+        [ "$variant" = "$want_variant" ] || continue
+
+        case "$platform_token" in
+          linux|linux-*)
+            case "$platform_token" in
+              *natipkg*|*pkg-build*) continue ;;
+            esac
+            ;;
+          *)
+            continue
+            ;;
+        esac
+
+        found="$f"
+        break 3
+      done
+    done
   done
 
   [ -n "$found" ] || rackup_fail "no matching hidden runtime installer found for stable=$version arch=$arch"
   printf '%s\n' "$found"
+}
+
+rackup_runtime_variant_from_filename() {
+  f="$1"
+  base=${f%.*}
+  case "$base" in
+    *-cs) printf '%s\n' "cs" ;;
+    *-bc) printf '%s\n' "bc" ;;
+    *) printf '%s\n' "bc" ;;
+  esac
 }
 
 rackup_detect_bin_dir_shell() {
@@ -235,8 +260,10 @@ rackup_hidden_runtime_install_if_missing() {
   arch="$(rackup_normalized_arch)"
   stable_ver="$(rackup_lookup_stable_version_shell)"
   filename="$(rackup_select_hidden_runtime_filename "$stable_ver" "$arch")"
+  runtime_variant="$(rackup_runtime_variant_from_filename "$filename")"
+  runtime_ext="${filename##*.}"
   installer_url="https://download.racket-lang.org/installers/$stable_ver/$filename"
-  runtime_id="runtime-$stable_ver-cs-$arch-linux-minimal"
+  runtime_id="runtime-$stable_ver-$runtime_variant-$arch-linux-minimal"
   version_dir="$versions_dir/$runtime_id"
   tmp_version_dir="$versions_dir/.${runtime_id}.tmp.$$"
   install_root="$tmp_version_dir/install"
@@ -256,18 +283,35 @@ rackup_hidden_runtime_install_if_missing() {
   if [ ! -f "$installer_cache" ]; then
     rackup_warn "downloading hidden runtime installer: $installer_url"
     rackup_download_to "$installer_url" "$installer_cache"
-    chmod 0755 "$installer_cache" || true
+    if [ "$runtime_ext" = "sh" ]; then
+      chmod 0755 "$installer_cache" || true
+    fi
   fi
 
   rackup_warn "installing hidden runtime: $runtime_id"
-  installer_log="$(mktemp "${TMPDIR:-/tmp}/rackup-hidden-runtime-installer.XXXXXX.log")"
-  if ! /bin/sh "$installer_cache" --create-dir --in-place --dest "$install_root" >"$installer_log" 2>&1; then
-    sed -n '1,200p' "$installer_log" >&2 || true
-    rm -f "$installer_log"
-    rm -rf "$tmp_version_dir"
-    rackup_fail "hidden runtime installer failed"
-  fi
-  rm -f "$installer_log"
+  case "$runtime_ext" in
+    sh)
+      installer_log="$(mktemp "${TMPDIR:-/tmp}/rackup-hidden-runtime-installer.XXXXXX.log")"
+      if ! /bin/sh "$installer_cache" --create-dir --in-place --dest "$install_root" >"$installer_log" 2>&1; then
+        sed -n '1,200p' "$installer_log" >&2 || true
+        rm -f "$installer_log"
+        rm -rf "$tmp_version_dir"
+        rackup_fail "hidden runtime installer failed"
+      fi
+      rm -f "$installer_log"
+      ;;
+    tgz)
+      mkdir -p "$install_root"
+      if ! tar -xzf "$installer_cache" -C "$install_root"; then
+        rm -rf "$tmp_version_dir"
+        rackup_fail "hidden runtime archive extraction failed"
+      fi
+      ;;
+    *)
+      rm -rf "$tmp_version_dir"
+      rackup_fail "unsupported hidden runtime installer format: $runtime_ext"
+      ;;
+  esac
 
   rm -rf "$version_dir"
   mv "$tmp_version_dir" "$version_dir"
