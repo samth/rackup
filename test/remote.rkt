@@ -22,6 +22,9 @@
 
   (for ([src (in-list rackup-sources)])
     (define content (file->string src))
+    (check-false (regexp-match? #px"^#lang +at-exp(?: |$)" content)
+                 (format "~a should not use #lang at-exp in client-installed code"
+                         (path->string src)))
     (check-false (regexp-match? #px"\\bcurl\\b" (string-downcase content))
                  (format "~a should not shell out to curl" (path->string src)))
     (check-false (regexp-match? #px"\\bwget\\b" (string-downcase content))

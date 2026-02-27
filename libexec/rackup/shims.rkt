@@ -1,4 +1,4 @@
-#lang at-exp racket/base
+#lang racket/base
 
 (require racket/file
          racket/format
