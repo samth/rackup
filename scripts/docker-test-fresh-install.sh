@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-IMAGE_TAG="${RACKUP_DOCKER_IMAGE:-rackup-e2e:local}"
+IMAGE_TAG="${RACKUP_DOCKER_IMAGE:-}"
 BUILD=1
 UNIT_TESTS=0
 MODE="direct"
@@ -153,12 +153,22 @@ esac
 
 ROOT_DIR="$(cd -P "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+if [[ -z "$IMAGE_TAG" ]]; then
+  IMAGE_TAG="rackup-e2e:${HOST_RACKET}"
+fi
+
 if [[ "$BUILD" -eq 1 ]]; then
   echo "Building Docker image ${IMAGE_TAG}..."
   if [[ "$HOST_RACKET" == "present" ]]; then
     docker build --build-arg INCLUDE_SYSTEM_RACKET=1 -t "$IMAGE_TAG" -f "$ROOT_DIR/docker/Dockerfile.e2e" "$ROOT_DIR"
   else
     docker build --build-arg INCLUDE_SYSTEM_RACKET=0 -t "$IMAGE_TAG" -f "$ROOT_DIR/docker/Dockerfile.e2e" "$ROOT_DIR"
+  fi
+else
+  if ! docker image inspect "$IMAGE_TAG" >/dev/null 2>&1; then
+    echo "Docker image not found: $IMAGE_TAG" >&2
+    echo "Either remove --no-build or pass --image with an existing image tag." >&2
+    exit 2
   fi
 fi
 

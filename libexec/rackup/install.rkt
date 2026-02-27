@@ -24,6 +24,17 @@
          enumerate-toolchain-executables
          doctor-report)
 
+(define current-install-verbosity (make-parameter 'normal))
+
+(define (install-verbosity)
+  (current-install-verbosity))
+
+(define (install-quiet?)
+  (eq? (install-verbosity) 'quiet))
+
+(define (install-verbose?)
+  (eq? (install-verbosity) 'verbose))
+
 (define (install-color-enabled?)
   (and (terminal-port? (current-output-port)) (not (getenv "NO_COLOR"))))
 
@@ -33,13 +44,18 @@
       s))
 
 (define (install-info fmt . args)
-  (displayln (ansi-color "34" (apply format fmt args))))
+  (unless (install-quiet?)
+    (displayln (ansi-color "34" (apply format fmt args)))))
 
 (define (install-ok fmt . args)
   (displayln (ansi-color "32" (apply format fmt args))))
 
 (define (install-warn fmt . args)
   (eprintf "~a\n" (ansi-color "33" (apply format fmt args))))
+
+(define (install-verbose fmt . args)
+  (when (install-verbose?)
+    (displayln (ansi-color "34" (apply format fmt args)))))
 
 (define (truncate-lines s [max-lines 80])
   (define lines (string-split s "\n"))
@@ -57,7 +73,9 @@
   (ensure-rackup-layout!)
   (define cache-path (installer-cache-file installer-url))
   (when (or no-cache? (not (file-exists? cache-path)))
-    (install-info "Downloading installer: ~a" installer-url)
+    (if (install-verbose?)
+        (install-verbose "Downloading installer: ~a" installer-url)
+        (install-info "Downloading installer..."))
     (download-url->file installer-url cache-path)
     (file-or-directory-permissions cache-path #o755))
   cache-path)
@@ -79,7 +97,7 @@
   ;; Use the same dest/in-place flow as setup-racket for Linux.
   (define installer (path->complete-path installer-file))
   (define dest (path->complete-path install-root))
-  (install-info "Installing into ~a" (path->string dest))
+  (install-verbose "Installing into ~a" (path->string dest))
   (define log-file (make-temporary-file "rackup-installer-~a.log"))
   (define (delete-log!)
     (with-handlers ([exn:fail? (lambda (_) (void))])
@@ -112,9 +130,11 @@
     (unless (string-blank? details)
       (eprintf "%s\n" (truncate-lines details)))
     (delete-log!)
-    (rackup-error "linux-installer failed: ~a --create-dir --in-place --dest ~a"
+    (rackup-error "linux-installer failed: ~a (~a)"
                   (path->string* installer)
-                  (path->string* dest)))
+                  (if legacy?
+                      "legacy interactive mode"
+                      (format "--create-dir --in-place --dest ~a" (path->string* dest)))))
   (delete-log!))
 
 (define (detect-bin-dir install-root)
@@ -417,6 +437,7 @@
   (define set-default? #f)
   (define force? #f)
   (define no-cache? #f)
+  (define verbosity 'normal)
   (command-line #:program "rackup install"
                 #:argv opts
                 #:once-each [("--variant") v "VM variant" (set! variant v)]
@@ -426,6 +447,9 @@
                 [("--set-default") "Set installed toolchain as default" (set! set-default? #t)]
                 [("--force") "Reinstall existing canonical toolchain" (set! force? #t)]
                 [("--no-cache") "Redownload installer instead of using cache" (set! no-cache? #t)]
+                #:once-any
+                [("--quiet") "Show minimal install output" (set! verbosity 'quiet)]
+                [("--verbose") "Show detailed installer URL/path output" (set! verbosity 'verbose)]
                 #:args ()
                 (void))
   (hash 'variant
@@ -441,7 +465,9 @@
         'force?
         force?
         'no-cache?
-        no-cache?))
+        no-cache?
+        'verbosity
+        verbosity))
 
 (define (parse-link-options opts)
   (define set-default? #f)
@@ -556,6 +582,16 @@
        (displayln (format "Linked ~a => ~a" id (hash-ref layout 'plthome)))
        id)]))
 
+(define (report-default-change! before after id explicit?)
+  (when (and after (not (equal? before after)))
+    (cond
+      [(and explicit? (equal? after id))
+       (install-info "Default toolchain: ~a (set by --set-default)" after)]
+      [(and (not before) (equal? after id))
+       (install-info "Default toolchain: ~a (set automatically on first install)" after)]
+      [else
+       (install-info "Default toolchain changed: ~a -> ~a" (or before "none") after)])))
+
 (define (install-toolchain! spec opts)
   (ensure-rackup-layout!)
   (ensure-index!)
@@ -569,40 +605,46 @@
   (define id (canonical-id-for-request request))
   (define tc-dir (rackup-toolchain-dir id))
   (define install-root (rackup-toolchain-install-dir id))
-  (cond
-    [(directory-exists? tc-dir)
-     (if (hash-ref parsed-opts 'force? #f)
-         (begin
-           (delete-directory/files tc-dir)
-           (install-toolchain! spec opts))
-         (begin
-           (install-ok "Already installed: ~a" id)
-           (when (hash-ref parsed-opts 'set-default? #f)
-             (set-default-toolchain! id))
-           (reshim!)
-           id))]
-    [else
-     (define installer-path
-       (ensure-installer-cached! (hash-ref request 'installer-url)
-                                 #:no-cache? (hash-ref parsed-opts 'no-cache? #f)))
-     (with-handlers ([exn:fail? (lambda (e)
-                                  (when (directory-exists? tc-dir)
-                                    (delete-directory/files tc-dir))
-                                  (raise e))])
-       (make-directory* tc-dir)
-       (run-linux-installer! installer-path install-root)
-       (define real-bin-dir (detect-bin-dir install-root))
-       (make-bin-link! id real-bin-dir)
-       (delete-toolchain-env-file! id)
-       (ensure-toolchain-addon-dir! id)
-       (define executables (enumerate-toolchain-executables real-bin-dir))
-       (define meta (toolchain-meta request id real-bin-dir executables))
-       (register-toolchain! id meta)
-       (when (hash-ref parsed-opts 'set-default? #f)
-         (set-default-toolchain! id))
-       (reshim!)
-       (install-ok "Installed ~a" id)
-       id)]))
+  (parameterize ([current-install-verbosity (hash-ref parsed-opts 'verbosity 'normal)])
+    (define default-before (get-default-toolchain))
+    (define explicit-default? (hash-ref parsed-opts 'set-default? #f))
+    (cond
+      [(directory-exists? tc-dir)
+       (if (hash-ref parsed-opts 'force? #f)
+           (begin
+             (delete-directory/files tc-dir)
+             (install-toolchain! spec opts))
+           (begin
+             (install-ok "Already installed: ~a" id)
+             (when explicit-default?
+               (set-default-toolchain! id))
+             (reshim!)
+             (report-default-change! default-before (get-default-toolchain) id explicit-default?)
+             id))]
+      [else
+       (install-info "Installing ~a..." id)
+       (define installer-path
+         (ensure-installer-cached! (hash-ref request 'installer-url)
+                                   #:no-cache? (hash-ref parsed-opts 'no-cache? #f)))
+       (with-handlers ([exn:fail? (lambda (e)
+                                    (when (directory-exists? tc-dir)
+                                      (delete-directory/files tc-dir))
+                                    (raise e))])
+         (make-directory* tc-dir)
+         (run-linux-installer! installer-path install-root)
+         (define real-bin-dir (detect-bin-dir install-root))
+         (make-bin-link! id real-bin-dir)
+         (delete-toolchain-env-file! id)
+         (ensure-toolchain-addon-dir! id)
+         (define executables (enumerate-toolchain-executables real-bin-dir))
+         (define meta (toolchain-meta request id real-bin-dir executables))
+         (register-toolchain! id meta)
+         (when explicit-default?
+           (set-default-toolchain! id))
+         (reshim!)
+         (install-ok "Installed ~a" id)
+         (report-default-change! default-before (get-default-toolchain) id explicit-default?)
+         id)])))
 
 (define (remove-toolchain! id)
   (ensure-index!)

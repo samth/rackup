@@ -305,6 +305,10 @@
                 (split-install-command-args '("stable" "--distribution" "minimal" "--force"))])
     (check-equal? spec "stable")
     (check-equal? opts '("--distribution" "minimal" "--force")))
+  (let-values ([(spec opts)
+                (split-install-command-args '("--quiet" "stable" "--distribution" "minimal"))])
+    (check-equal? spec "stable")
+    (check-equal? opts '("--quiet" "--distribution" "minimal")))
   (check-exn exn:fail?
              (lambda () (split-install-command-args '("stable" "8.18"))))
 
@@ -358,6 +362,8 @@
               --set-default           Set installed toolchain as the global default.
               --force                 Reinstall if the same canonical toolchain is already installed.
               --no-cache              Redownload installer instead of using cache.
+              --quiet                 Show minimal output (errors + final result lines).
+              --verbose               Show detailed installer URL/path output.
 
             Examples:
               rackup install stable
@@ -392,6 +398,72 @@
           })
 
   (with-temp-rackup-home
+   (lambda (tmp)
+     (ensure-index!)
+     (define id "release-8.18-cs-x86_64-linux-full")
+     (define tc-dir (rackup-toolchain-dir id))
+     (define install-root (rackup-toolchain-install-dir id))
+     (define real-bin (build-path install-root "bin"))
+     (make-directory* real-bin)
+     (write-string-file (build-path real-bin "racket") "#!/usr/bin/env bash\nexit 0\n")
+     (file-or-directory-permissions (build-path real-bin "racket") #o755)
+     (make-file-or-directory-link real-bin (rackup-toolchain-bin-link id))
+     (make-directory* tc-dir)
+     (define meta
+       (hash 'id
+             id
+             'kind
+             'release
+             'requested-spec
+             "8.18"
+             'resolved-version
+             "8.18"
+             'variant
+             'cs
+             'distribution
+             'full
+             'arch
+             "x86_64"
+             'platform
+             "linux"
+             'snapshot-site
+             #f
+             'snapshot-stamp
+             #f
+             'installer-url
+             "https://example.invalid/racket.sh"
+             'installer-filename
+             "racket.sh"
+             'install-root
+             (path->string install-root)
+             'bin-link
+             (path->string (rackup-toolchain-bin-link id))
+             'real-bin-dir
+             (path->string real-bin)
+             'executables
+             '("racket")
+             'installed-at
+             "2026-02-26T00:00:00Z"))
+     (register-toolchain! id meta)
+     (check-equal? (run-main/stdout '("current" "id")) (format "~a\n" id))
+     (check-equal? (run-main/stdout '("current" "source")) "default\n")
+     (check-equal? (run-main/stdout '("current" "line")) (format "~a\tdefault\n" id))
+     (check-equal? (run-main/stdout '("default" "id")) (format "~a\n" id))
+     (check-equal? (run-main/stdout '("default" "status")) (format "set\t~a\n" id))
+     (define old-env-id (getenv "RACKUP_TOOLCHAIN"))
+     (dynamic-wind
+      (lambda () (putenv "RACKUP_TOOLCHAIN" id))
+      (lambda ()
+        (check-equal? (run-main/stdout '("current" "source")) "env\n")
+        (check-equal? (run-main/stdout '("current" "line")) (format "~a\tenv\n" id)))
+     (lambda ()
+        (if old-env-id
+            (putenv "RACKUP_TOOLCHAIN" old-env-id)
+            (putenv "RACKUP_TOOLCHAIN" ""))))
+     (check-equal? (run-main/stdout '("default" "clear")) "Cleared default toolchain.\n")
+     (check-equal? (run-main/stdout '("default" "status")) "unset\n")))
+
+  (with-temp-rackup-home
    (lambda (_tmp)
      (ensure-index!)
      (define orphan-id "release-5.2-bc-x86_64-linux-full")
@@ -411,9 +483,13 @@
      (ensure-index!)
      (define fake-installer (build-path tmp "fake-install.sh"))
      (define args-log (build-path tmp "self-upgrade-args.log"))
+     (define mode-log (build-path tmp "self-upgrade-mode.log"))
      (write-string-file
       fake-installer
-      (format "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$@\" > ~s\nexit 0\n" (path->string args-log)))
+      (format
+       "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$@\" > ~s\nprintf '%s\\n' \"${RACKUP_BOOTSTRAP_MODE:-}\" > ~s\nexit 0\n"
+       (path->string args-log)
+       (path->string mode-log)))
      (file-or-directory-permissions fake-installer #o755)
      (define old-override (getenv "RACKUP_SELF_UPGRADE_INSTALL_SH"))
      (dynamic-wind
@@ -422,11 +498,15 @@
         (expect (display (run-main/stdout '("self-upgrade")))
                 (format "Upgrading rackup code in ~a\nrackup code upgrade complete.\n"
                         (path->string (rackup-home))))
-        (define args-lines
-          (call-with-input-file args-log
-            (lambda (in) (filter (lambda (s) (not (string=? s ""))) (port->lines in)))))
-        (check-equal? args-lines
-                      (list "-y" "--no-init" "--prefix" (path->string (rackup-home)))))
+        (let ([args-lines
+               (call-with-input-file args-log
+                 (lambda (in) (filter (lambda (s) (not (string=? s ""))) (port->lines in))))])
+          (check-equal? args-lines
+                        (list "-y" "--no-init" "--prefix" (path->string (rackup-home)))))
+        (let ([mode-lines
+               (call-with-input-file mode-log
+                 (lambda (in) (filter (lambda (s) (not (string=? s ""))) (port->lines in))))])
+          (check-equal? mode-lines (list "self-upgrade"))))
       (lambda ()
         (if old-override
             (putenv "RACKUP_SELF_UPGRADE_INSTALL_SH" old-override)

@@ -161,7 +161,7 @@ shim_scribble() {
 }
 
 current_toolchain_id() {
-  run_rackup current | awk '{print $1}'
+  run_rackup current id
 }
 
 current_shim_version() {

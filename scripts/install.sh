@@ -10,6 +10,7 @@ INIT_SHELL=""
 FROM_LOCAL=""
 NO_INIT=0
 do_init=0
+BOOTSTRAP_MODE="${RACKUP_BOOTSTRAP_MODE:-install}"
 
 is_tty_stdout() {
   [ -t 1 ]
@@ -59,6 +60,7 @@ Behavior:
   - Installs files under ~/.rackup unless --prefix or RACKUP_HOME is set.
   - Installs a hidden internal Racket runtime for rackup itself.
   - For the default samth/rackup bootstrap, downloads a public source bundle from GitHub Pages.
+  - Internal: set RACKUP_BOOTSTRAP_MODE=self-upgrade for upgrade-oriented completion messaging.
 
 Examples:
   curl -fsSL https://samth.github.io/rackup/install.sh | sh
@@ -111,6 +113,14 @@ while [ "$#" -gt 0 ]; do
       ;;
   esac
 done
+
+case "$BOOTSTRAP_MODE" in
+  install|self-upgrade) ;;
+  *)
+    warn "Invalid RACKUP_BOOTSTRAP_MODE: $BOOTSTRAP_MODE (expected install or self-upgrade)"
+    exit 2
+    ;;
+esac
 
 TMPDIR_INSTALL="$(mktemp -d "${TMPDIR:-/tmp}/rackup-install.XXXXXX")"
 cleanup() {
@@ -212,9 +222,17 @@ if [ "$do_init" -eq 1 ]; then
   info "Running rackup init --shell $shell_to_init"
   RACKUP_HOME="$PREFIX" "$PREFIX/bin/rackup" init --shell "$shell_to_init"
 else
-  warn "Skipping shell init."
+  if [ "$BOOTSTRAP_MODE" != "self-upgrade" ]; then
+    info "Skipping shell init."
+  fi
 fi
 printf '\n'
+if [ "$BOOTSTRAP_MODE" = "self-upgrade" ]; then
+  if [ "$do_init" -eq 1 ]; then
+    info "Shell init updated for $shell_to_init."
+  fi
+  exit 0
+fi
 ok "${C_BOLD}rackup installed successfully.${C_RESET}"
 printf '\n'
 printf '%s\n' "${C_BOLD}Next steps:${C_RESET}"

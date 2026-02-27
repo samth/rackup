@@ -31,8 +31,10 @@
   (usage-line "link <name> <path> [flags]"
               "Link an in-place/local Racket build as a managed toolchain.")
   (usage-line "list" "List installed toolchains (shows default/active tags).")
-  (usage-line "default [<toolchain>|--unset]" "Show, set, or clear the global default toolchain.")
-  (usage-line "current" "Show the active toolchain and whether it is shell/global.")
+  (usage-line "default [id|status|set <toolchain>|clear|<toolchain>|--unset]"
+              "Show, set, or clear the global default toolchain.")
+  (usage-line "current [id|source|line]"
+              "Show the active toolchain and where it came from.")
   (usage-line "which <exe> [--toolchain <toolchain>]"
               "Show the real executable path for a tool in a toolchain.")
   (usage-line "shell <toolchain> | shell --deactivate"
@@ -104,6 +106,8 @@
      (help-option-line "--set-default" "Set installed toolchain as the global default.")
      (help-option-line "--force" "Reinstall if the same canonical toolchain is already installed.")
      (help-option-line "--no-cache" "Redownload installer instead of using cache.")
+     (help-option-line "--quiet" "Show minimal output (errors + final result lines).")
+     (help-option-line "--verbose" "Show detailed installer URL/path output.")
      (displayln "")
      (displayln "Examples:")
      (displayln "  rackup install stable")
@@ -132,7 +136,7 @@
      (displayln "List installed toolchains and show default/active tags.")
      #t]
     [(default)
-     (help-usage "default [<toolchain>|--unset]")
+     (help-usage "default [id|status|set <toolchain>|clear|<toolchain>|--unset]")
      (displayln "")
      (displayln "Show, set, or clear the global default toolchain.")
      (displayln
@@ -140,14 +144,23 @@
      (displayln "")
      (displayln "Examples:")
      (displayln "  rackup default")
+     (displayln "  rackup default id")
+     (displayln "  rackup default status")
+     (displayln "  rackup default set stable")
      (displayln "  rackup default stable")
+     (displayln "  rackup default clear")
      (displayln "  rackup default --unset")
      #t]
     [(current)
-     (help-usage "current")
+     (help-usage "current [id|source|line]")
      (displayln "")
      (displayln
       "Show the active toolchain and whether it comes from shell activation or global default.")
+     (displayln "")
+     (displayln "Subcommands:")
+     (help-option-line "id" "Print only the active toolchain id (blank if none).")
+     (help-option-line "source" "Print env|default|none.")
+     (help-option-line "line" "Print \"<id><TAB><source>\".")
      #t]
     [(which)
      (help-usage "which <exe> [--toolchain <toolchain>]")
@@ -261,6 +274,10 @@
         "--force"
         0
         "--no-cache"
+        0
+        "--quiet"
+        0
+        "--verbose"
         0))
 
 (define (string-flag-like? s)
@@ -392,31 +409,63 @@
         (unless (null? tags)
           (printf "    tags: ~a\n" (string-join tags ", "))))))
 
+(define (default-id->line)
+  (define id (get-default-toolchain))
+  (if id
+      (displayln id)
+      (displayln "")))
+
+(define (set-default-from-spec! spec)
+  (define id (resolve-toolchain-or-offer-install spec))
+  (set-default-toolchain! id)
+  (reshim!)
+  (displayln (format "Default toolchain: ~a" id)))
+
 (define (cmd-default rest)
   (ensure-index!)
   (match rest
-    ['()
+    ['() (default-id->line)]
+    [(list "id") (default-id->line)]
+    [(list "status")
      (define id (get-default-toolchain))
      (if id
-         (displayln id)
-         (displayln ""))]
-    [(list "--unset")
+         (printf "set\t~a\n" id)
+         (displayln "unset"))]
+    [(list "set" spec)
+     (set-default-from-spec! spec)]
+    [(or (list "--unset") (list "clear"))
      (clear-default-toolchain!)
      (displayln "Cleared default toolchain.")]
     [(list spec)
-     (define id (resolve-toolchain-or-offer-install spec))
-     (set-default-toolchain! id)
-     (reshim!)
-     (displayln (format "Default toolchain: ~a" id))]
-    [_ (rackup-error "usage: rackup default [<toolchain>|--unset]")]))
+     (set-default-from-spec! spec)]
+    [_ (rackup-error
+        "usage: rackup default [id|status|set <toolchain>|clear|<toolchain>|--unset]")]))
 
-(define (cmd-current)
+(define (source->line src)
+  (if src
+      (symbol->string src)
+      "none"))
+
+(define (cmd-current rest)
   (ensure-index!)
   (define id (resolve-active-toolchain-id))
   (define src (current-toolchain-source))
-  (cond
-    [id (printf "~a\t(~a)\n" id src)]
-    [else (displayln "none")]))
+  (match rest
+    ['()
+     (cond
+       [id (printf "~a\t(~a)\n" id src)]
+       [else (displayln "none")])]
+    [(list "id")
+     (if id
+         (displayln id)
+         (displayln ""))]
+    [(list "source")
+     (displayln (source->line src))]
+    [(list "line")
+     (if id
+         (printf "~a\t~a\n" id (source->line src))
+         (displayln "none\tnone"))]
+    [_ (rackup-error "usage: rackup current [id|source|line]")]))
 
 (define (parse-which-args rest)
   (define toolchain #f)
@@ -745,7 +794,14 @@
                 null
                 (list "--no-init"))
             (list "--prefix" home-str)))
-  (define ok? (apply system* (shell-exe/path) script-path args))
+  (define old-bootstrap-mode (getenv "RACKUP_BOOTSTRAP_MODE"))
+  (define ok? #f)
+  (dynamic-wind (lambda () (putenv "RACKUP_BOOTSTRAP_MODE" "self-upgrade"))
+                (lambda () (set! ok? (apply system* (shell-exe/path) script-path args)))
+                (lambda ()
+                  (if old-bootstrap-mode
+                      (putenv "RACKUP_BOOTSTRAP_MODE" old-bootstrap-mode)
+                      (putenv "RACKUP_BOOTSTRAP_MODE" ""))))
   (when (and (url-like? source) (file-exists? script-path))
     (with-handlers ([exn:fail? (lambda (_) (void))])
       (delete-file script-path)))
@@ -784,7 +840,7 @@
          [(list "link" rest ...) (cmd-link rest)]
          [(list "list") (cmd-list)]
          [(list "default" rest ...) (cmd-default rest)]
-         [(list "current") (cmd-current)]
+         [(list "current" rest ...) (cmd-current rest)]
          [(list "prompt" rest ...) (cmd-prompt rest)]
          [(list "which" rest ...) (cmd-which rest)]
          [(list "shell" rest ...) (cmd-shell rest)]
