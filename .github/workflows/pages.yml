@@ -37,19 +37,27 @@ jobs:
       - name: Install Pages build deps
         run: |
           raco pkg install --auto plt-web
-      - uses: actions/configure-pages@v5
       - name: Build static Pages site
         run: |
           sh scripts/build-pages-site.sh _site
-      - name: Upload smoke-test site artifact
+      - name: Archive built site bundle
+        run: |
+          tar \
+            --sort=name \
+            --mtime='UTC 1970-01-01' \
+            --owner=0 \
+            --group=0 \
+            --numeric-owner \
+            -czf pages-site.tar.gz \
+            -C _site .
+          sha256sum pages-site.tar.gz > pages-site.tar.gz.sha256
+      - name: Upload built site bundle
         uses: actions/upload-artifact@v4
         with:
-          name: pages-site-smoke
-          path: _site
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: _site
+          name: pages-site-bundle
+          path: |
+            pages-site.tar.gz
+            pages-site.tar.gz.sha256
 
   bootstrap-curl-smoke:
     needs: build
@@ -57,23 +65,51 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
-      - name: Download built site artifact
+      - name: Download built site bundle
         uses: actions/download-artifact@v4
         with:
-          name: pages-site-smoke
-          path: _site
-      - name: Verify curl-pipe-sh bootstrap against built site artifact
+          name: pages-site-bundle
+          path: dist
+      - name: Extract built site bundle
         run: |
-          RACKUP_E2E_PREBUILT_PAGES_DIR="$PWD/_site" \
+          cd dist
+          sha256sum -c pages-site.tar.gz.sha256
+          mkdir site
+          tar -xzf pages-site.tar.gz -C site
+      - name: Verify curl-pipe-sh bootstrap against built site bundle
+        run: |
+          RACKUP_E2E_PREBUILT_PAGES_DIR="$PWD/dist/site" \
           scripts/docker-test-fresh-install.sh \
             --mode bootstrap-curl \
             --host-racket absent \
             --spec stable
 
-  deploy:
+  package-pages-artifact:
     needs:
       - build
       - bootstrap-curl-smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/configure-pages@v5
+      - name: Download built site bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: pages-site-bundle
+          path: dist
+      - name: Extract built site bundle
+        run: |
+          cd dist
+          sha256sum -c pages-site.tar.gz.sha256
+          mkdir site
+          tar -xzf pages-site.tar.gz -C site
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist/site
+
+  deploy:
+    needs:
+      - package-pages-artifact
     runs-on: ubuntu-latest
     environment:
       name: github-pages
