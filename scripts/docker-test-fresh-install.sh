@@ -6,6 +6,7 @@ BASE_IMAGE="${RACKUP_DOCKER_BASE_IMAGE:-ubuntu:24.04}"
 DOCKER_PLATFORM="${RACKUP_DOCKER_PLATFORM:-}"
 BUILD=1
 UNIT_TESTS=0
+SKIP_PACKAGE_TESTS=0
 MODE="direct"
 SPECS=("stable")
 CUSTOM_SPECS=0
@@ -45,6 +46,7 @@ Options:
   --source-build-target T make target for source-build local-link mode (default: base)
   --source-build-jobs N   Parallel jobs for source-build local-link mode (default: 2)
   --host-racket MODE      present|absent system Racket in test image (default: present)
+  --skip-package-tests    Skip package-manager/isolation checks inside the container
   --unit-tests            Also run repo unit tests in container before install smoke test
   -h, --help              Show help
 
@@ -118,6 +120,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --unit-tests)
       UNIT_TESTS=1
+      shift
+      ;;
+    --skip-package-tests)
+      SKIP_PACKAGE_TESTS=1
       shift
       ;;
     -h|--help)
@@ -254,6 +260,7 @@ fi
   -e RACKUP_E2E_SOURCE_BUILD_JOBS="$SOURCE_BUILD_JOBS" \
   -e RACKUP_E2E_HOST_RACKET="$HOST_RACKET" \
   -e RACKUP_E2E_UNIT_TESTS="$UNIT_TESTS" \
+  -e RACKUP_E2E_SKIP_PACKAGE_TESTS="$SKIP_PACKAGE_TESTS" \
   -e RACKUP_E2E_PREBUILT_PAGES_DIR="${PREBUILT_PAGES_DIR:+/prebuilt-pages}" \
   -v "$ROOT_DIR:/work" \
   -w /work \

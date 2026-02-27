@@ -475,6 +475,76 @@
 
   (with-temp-rackup-home
    (lambda (tmp)
+     (define installer (build-path tmp "racket-6.0-x86_64-linux-fake.sh"))
+     (define dest (build-path tmp "legacy-6.0-install"))
+     (write-string-file
+      installer
+      @~a{#!/bin/sh
+          set -eu
+          echo "This program will extract and install Racket v6.0."
+          echo "Do you want a Unix-style distribution?"
+          read unixstyle || unixstyle=""
+          echo "Where do you want to install the \"racket\" directory tree?"
+          read where || where=""
+          echo "If you want to install new system links..."
+          read sysdir || sysdir=""
+          if [ "$#" -ne 0 ]; then
+            echo "unexpected args: $*" >&2
+            exit 7
+          fi
+          if [ "$unixstyle" != "n" ] && [ "$unixstyle" != "N" ]; then
+            echo "expected in-place install answer" >&2
+            exit 8
+          fi
+          if [ -z "$where" ]; then
+            echo "missing destination" >&2
+            exit 9
+          fi
+          mkdir -p "$where/bin" "$where/collects"
+          printf '#!/bin/sh\nexit 0\n' > "$where/bin/racket"
+          chmod +x "$where/bin/racket"
+          exit 0
+          })
+     (file-or-directory-permissions installer #o755)
+     (run-linux-installer! installer dest)
+     (check-true (directory-exists? (build-path dest "bin")))
+     (check-true (directory-exists? (build-path dest "collects")))
+     (check-true (file-exists? (build-path dest "bin" "racket")))))
+
+  (with-temp-rackup-home
+   (lambda (tmp)
+     (define installer (build-path tmp "racket-6.1.1-x86_64-linux-fake.sh"))
+     (define dest (build-path tmp "modern-6.1.1-install"))
+     (write-string-file
+      installer
+      @~a{#!/bin/sh
+          set -eu
+          echo "Command-line flags:"
+          echo "  --dest <path>"
+          echo "  --create-dir"
+          echo "  --in-place"
+          if [ "$#" -ne 4 ]; then
+            echo "unexpected args: $*" >&2
+            exit 7
+          fi
+          if [ "$1" != "--create-dir" ] || [ "$2" != "--in-place" ] || [ "$3" != "--dest" ]; then
+            echo "unexpected flag protocol: $*" >&2
+            exit 8
+          fi
+          where="$4"
+          mkdir -p "$where/bin" "$where/collects"
+          printf '#!/bin/sh\nexit 0\n' > "$where/bin/racket"
+          chmod +x "$where/bin/racket"
+          exit 0
+          })
+     (file-or-directory-permissions installer #o755)
+     (run-linux-installer! installer dest)
+     (check-true (directory-exists? (build-path dest "bin")))
+     (check-true (directory-exists? (build-path dest "collects")))
+     (check-true (file-exists? (build-path dest "bin" "racket")))))
+
+  (with-temp-rackup-home
+   (lambda (tmp)
      (define installer (build-path tmp "plt-209-bin-i386-linux-fake.sh"))
      (define dest (build-path tmp "legacy-basic-install"))
      (write-string-file

@@ -5,6 +5,7 @@ MODE="${RACKUP_E2E_MODE:-direct}"
 SPECS_CSV="${RACKUP_E2E_SPECS:-stable}"
 SNAPSHOT_SITE="${RACKUP_E2E_SNAPSHOT_SITE:-auto}"
 UNIT_TESTS="${RACKUP_E2E_UNIT_TESTS:-0}"
+SKIP_PACKAGE_TESTS="${RACKUP_E2E_SKIP_PACKAGE_TESTS:-0}"
 LOCAL_LINK_MODE="${RACKUP_E2E_LOCAL_LINK_MODE:-fake}"
 SOURCE_BUILD_REPO="${RACKUP_E2E_SOURCE_BUILD_REPO:-https://github.com/racket/racket.git}"
 SOURCE_BUILD_REF="${RACKUP_E2E_SOURCE_BUILD_REF:-v8.18}"
@@ -52,6 +53,7 @@ echo "mode=$MODE"
 echo "specs=$SPECS_CSV"
 echo "snapshot_site=$SNAPSHOT_SITE"
 echo "local_link_mode=$LOCAL_LINK_MODE"
+echo "skip_package_tests=$SKIP_PACKAGE_TESTS"
 echo "host_racket_mode=$HOST_RACKET"
 if [[ "$LOCAL_LINK_MODE" == "build" ]]; then
   echo "source_build_repo=$SOURCE_BUILD_REPO"
@@ -415,6 +417,8 @@ for spec in "${SPECS[@]}"; do
   # optional system graphics libraries that are outside rackup's control.
 done
 
+primary_id="${INSTALLED_IDS[0]}"
+
 echo
 echo "== Toolchain switching and rackup run tests =="
 if [[ ${#INSTALLED_IDS[@]} -ge 2 ]]; then
@@ -443,25 +447,28 @@ fi
 
 echo
 echo "== Package install / isolation tests =="
-pkg_dir="$(create_local_test_package)"
-primary_id="${INSTALLED_IDS[0]}"
-run_rackup default "$primary_id"
-shim_raco pkg install --auto --batch --no-setup "$pkg_dir"
-shim_raco pkg show rackup-e2e-pkg >/dev/null
-pkg_result="$(shim_racket -e '(require rackup-e2e-pkg) (display marker)')"
-assert_eq "rackup-e2e-package-ok" "$pkg_result" "local package should load in primary toolchain"
+if [[ "$SKIP_PACKAGE_TESTS" == "1" ]]; then
+  echo "Skipping package tests for this scenario"
+else
+  pkg_dir="$(create_local_test_package)"
+  run_rackup default "$primary_id"
+  shim_raco pkg install --auto --batch --no-setup "$pkg_dir"
+  shim_raco pkg show rackup-e2e-pkg >/dev/null
+  pkg_result="$(shim_racket -e '(require rackup-e2e-pkg) (display marker)')"
+  assert_eq "rackup-e2e-package-ok" "$pkg_result" "local package should load in primary toolchain"
 
-if [[ ${#INSTALLED_IDS[@]} -ge 2 ]]; then
-  secondary_id="${INSTALLED_IDS[$((${#INSTALLED_IDS[@]} - 1))]}"
-  run_rackup default "$secondary_id"
-  if shim_racket -e '(require rackup-e2e-pkg) (display marker)' >/tmp/rackup-e2e-no-pkg.out 2>/tmp/rackup-e2e-no-pkg.err; then
-    fail "package installed in $primary_id unexpectedly visible in $secondary_id"
-  else
-    echo "Confirmed package isolation between $primary_id and $secondary_id"
+  if [[ ${#INSTALLED_IDS[@]} -ge 2 ]]; then
+    secondary_id="${INSTALLED_IDS[$((${#INSTALLED_IDS[@]} - 1))]}"
+    run_rackup default "$secondary_id"
+    if shim_racket -e '(require rackup-e2e-pkg) (display marker)' >/tmp/rackup-e2e-no-pkg.out 2>/tmp/rackup-e2e-no-pkg.err; then
+      fail "package installed in $primary_id unexpectedly visible in $secondary_id"
+    else
+      echo "Confirmed package isolation between $primary_id and $secondary_id"
+    fi
+    run_pkg="$(run_rackup run "$primary_id" -- racket -e '(require rackup-e2e-pkg) (display marker)')"
+    assert_eq "rackup-e2e-package-ok" "$run_pkg" "rackup run should preserve package visibility for primary toolchain"
+    run_rackup default "$secondary_id"
   fi
-  run_pkg="$(run_rackup run "$primary_id" -- racket -e '(require rackup-e2e-pkg) (display marker)')"
-  assert_eq "rackup-e2e-package-ok" "$run_pkg" "rackup run should preserve package visibility for primary toolchain"
-  run_rackup default "$secondary_id"
 fi
 
 echo

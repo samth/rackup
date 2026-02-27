@@ -146,6 +146,16 @@ jobs:
         run: |
           scripts/docker-test-fresh-install.sh --spec stable --spec 8.18 --spec 7.9
 
+  docker-e2e-legacy-6_0:
+    name: Docker E2E (legacy 6.0 install smoke)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Docker legacy 6.0 install smoke
+        run: |
+          scripts/docker-test-fresh-install.sh --spec 6.0 --skip-package-tests
+
   docker-e2e-prerelease:
     name: Docker E2E (pre-release.racket-lang.org)
     runs-on: ubuntu-latest

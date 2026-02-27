@@ -136,6 +136,29 @@
   (regexp-match? #px"(?:^|/)(?:racket(?:-textual)?|plt)-.+-bin-.+[.]sh$"
                  (path->string* installer-file)))
 
+(define (read-file-prefix-bytes p [limit 65536])
+  (call-with-input-file* p
+    (lambda (in)
+      (or (read-bytes limit in) #""))))
+
+(define (detect-shell-installer-mode installer-file)
+  ;; Some older Racket shell installers (notably 6.0) have modern-looking
+  ;; filenames but only support interactive prompting. Detect them from the
+  ;; script header instead of guessing from the filename alone.
+  (define prefix
+    (with-handlers ([exn:fail? (lambda (_) #"")])
+      (read-file-prefix-bytes installer-file)))
+  (cond
+    [(and (regexp-match? #rx#"Command-line flags:" prefix)
+          (regexp-match? #rx#"--dest" prefix)
+          (regexp-match? #rx#"--in-place" prefix))
+     'modern]
+    [(regexp-match? #rx#"Do you want a Unix-style distribution\\?" prefix)
+     'shell-unixstyle]
+    [(regexp-match? #rx#"Where do you want to install the \"" prefix)
+     'shell-basic]
+    [else #f]))
+
 (define (legacy-installer-input-script dest legacy-install-kind)
   ;; Old PLT/Racket installers (e.g. 5.2, 4.x/3xx) do not support --dest/--in-place.
   ;; Answer prompts for a whole-directory install into the exact requested destination,
@@ -156,9 +179,13 @@
   (define (delete-log!)
     (with-handlers ([exn:fail? (lambda (_) (void))])
       (delete-file log-file)))
+  (define detected-shell-mode
+    (and (regexp-match? #px"[.]sh$" (string-downcase (path->string* installer)))
+         (detect-shell-installer-mode installer)))
   (define legacy-kind
     (cond
       [legacy-install-kind legacy-install-kind]
+      [(member detected-shell-mode '(shell-basic shell-unixstyle)) detected-shell-mode]
       [(legacy-interactive-linux-installer? installer) 'shell-unixstyle]
       [else #f]))
   (define ok?
