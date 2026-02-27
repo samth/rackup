@@ -16,6 +16,7 @@ SOURCE_BUILD_REF="${RACKUP_E2E_SOURCE_BUILD_REF:-v8.18}"
 SOURCE_BUILD_TARGET="${RACKUP_E2E_SOURCE_BUILD_TARGET:-base}"
 SOURCE_BUILD_JOBS="${RACKUP_E2E_SOURCE_BUILD_JOBS:-2}"
 HOST_RACKET="${RACKUP_E2E_HOST_RACKET:-present}"
+PREBUILT_PAGES_DIR=""
 
 usage() {
   cat <<'USAGE'
@@ -165,6 +166,13 @@ esac
 
 ROOT_DIR="$(cd -P "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+cleanup() {
+  if [[ -n "$PREBUILT_PAGES_DIR" ]]; then
+    rm -rf "$PREBUILT_PAGES_DIR"
+  fi
+}
+trap cleanup EXIT
+
 if [[ -z "$IMAGE_TAG" ]]; then
   base_tag="${BASE_IMAGE//\//-}"
   base_tag="${base_tag//:/-}"
@@ -223,6 +231,12 @@ if [[ -n "$DOCKER_PLATFORM" ]]; then
   run_cmd+=(--platform "$DOCKER_PLATFORM")
 fi
 
+if [[ "$MODE" == "bootstrap-curl" ]]; then
+  PREBUILT_PAGES_DIR="$(mktemp -d "${TMPDIR:-/tmp}/rackup-pages-prebuilt.XXXXXX")"
+  sh "$ROOT_DIR/scripts/build-pages-site.sh" "$PREBUILT_PAGES_DIR"
+  run_cmd+=(-v "$PREBUILT_PAGES_DIR:/prebuilt-pages:ro")
+fi
+
 "${run_cmd[@]}" \
   --user "$UID_GID" \
   -e HOME=/tmp/rackup-e2e-home \
@@ -236,6 +250,7 @@ fi
   -e RACKUP_E2E_SOURCE_BUILD_JOBS="$SOURCE_BUILD_JOBS" \
   -e RACKUP_E2E_HOST_RACKET="$HOST_RACKET" \
   -e RACKUP_E2E_UNIT_TESTS="$UNIT_TESTS" \
+  -e RACKUP_E2E_PREBUILT_PAGES_DIR="${PREBUILT_PAGES_DIR:+/prebuilt-pages}" \
   -v "$ROOT_DIR:/work" \
   -w /work \
   "$IMAGE_TAG" \

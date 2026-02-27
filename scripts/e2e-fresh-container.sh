@@ -105,9 +105,13 @@ elif [[ "$MODE" == "bootstrap-curl" ]]; then
   echo "== Installing rackup via curl | sh (local Pages server) =="
   export RACKUP_HOME="$HOME/.rackup-bootstrap-curl"
   rm -rf "$RACKUP_HOME"
-  PAGES_DIR="$TMPDIR/rackup-pages-site"
-  rm -rf "$PAGES_DIR"
-  sh "$RUN_SRC/scripts/build-pages-site.sh" "$PAGES_DIR"
+  if [[ -n "${RACKUP_E2E_PREBUILT_PAGES_DIR:-}" ]]; then
+    PAGES_DIR="$RACKUP_E2E_PREBUILT_PAGES_DIR"
+  else
+    PAGES_DIR="$TMPDIR/rackup-pages-site"
+    rm -rf "$PAGES_DIR"
+    sh "$RUN_SRC/scripts/build-pages-site.sh" "$PAGES_DIR"
+  fi
   PAGES_PORT="${RACKUP_E2E_PAGES_PORT:-18765}"
   python3 -m http.server --bind 127.0.0.1 "$PAGES_PORT" --directory "$PAGES_DIR" >/tmp/rackup-e2e-pages.log 2>&1 &
   PAGES_SERVER_PID=$!
@@ -245,14 +249,40 @@ EOF
 
 create_real_local_source_tree() {
   local root="${TMPDIR}/rackup-e2e-real-local-src"
+  local archive version srcdist_root
+  local -a build_args=()
   rm -rf "$root"
-  echo "Cloning Racket source: repo=$SOURCE_BUILD_REPO ref=$SOURCE_BUILD_REF" >&2
-  git clone --depth 1 --branch "$SOURCE_BUILD_REF" "$SOURCE_BUILD_REPO" "$root" >&2
-  echo "Building Racket from source in-place: target=$SOURCE_BUILD_TARGET jobs=$SOURCE_BUILD_JOBS" >&2
-  (
-    cd "$root"
-    make -j"$SOURCE_BUILD_JOBS" "$SOURCE_BUILD_TARGET" >&2
-  ) >&2
+  if [[ "$SOURCE_BUILD_REPO" == "https://github.com/racket/racket.git" && "$SOURCE_BUILD_REF" =~ ^v?([0-9][0-9A-Za-z._-]*)$ ]]; then
+    version="${BASH_REMATCH[1]}"
+    archive="https://download.racket-lang.org/installers/${version}/racket-minimal-${version}-src-builtpkgs.tgz"
+    echo "Downloading Racket source+builtpkgs archive: version=$version" >&2
+    mkdir -p "$root"
+    curl -fsSL "$archive" -o "$root/racket-src-builtpkgs.tgz" >&2
+    tar -xzf "$root/racket-src-builtpkgs.tgz" -C "$root"
+    srcdist_root="$(find "$root" -mindepth 1 -maxdepth 1 -type d -name 'racket-*' | head -n 1)"
+    [[ -n "$srcdist_root" ]] || fail "expected extracted Racket source distribution under $root"
+    mkdir -p "$srcdist_root/src/build"
+    if [[ "$SOURCE_BUILD_TARGET" == "base" ]]; then
+      echo "Building installed local source tree from source+builtpkgs: target=default jobs=$SOURCE_BUILD_JOBS" >&2
+    else
+      build_args=("$SOURCE_BUILD_TARGET")
+      echo "Building installed local source tree from source+builtpkgs: target=$SOURCE_BUILD_TARGET jobs=$SOURCE_BUILD_JOBS" >&2
+    fi
+    (
+      cd "$srcdist_root/src/build"
+      ../configure --prefix="$root/racket" >&2
+      make -j"$SOURCE_BUILD_JOBS" "${build_args[@]}" >&2
+      make install >&2
+    ) >&2
+  else
+    echo "Cloning Racket source: repo=$SOURCE_BUILD_REPO ref=$SOURCE_BUILD_REF" >&2
+    git clone --depth 1 --branch "$SOURCE_BUILD_REF" "$SOURCE_BUILD_REPO" "$root" >&2
+    echo "Building Racket from source in-place: target=$SOURCE_BUILD_TARGET jobs=$SOURCE_BUILD_JOBS" >&2
+    (
+      cd "$root"
+      make -j"$SOURCE_BUILD_JOBS" "$SOURCE_BUILD_TARGET" >&2
+    ) >&2
+  fi
   [[ -x "$root/racket/bin/racket" ]] || fail "expected built racket at $root/racket/bin/racket"
   echo "$root"
 }
@@ -387,7 +417,8 @@ for spec in "${SPECS[@]}"; do
   fi
   shim_raco help >/dev/null
   shim_scribble --help >/dev/null
-  "$RACKUP_HOME/shims/slideshow" --help >/dev/null || true
+  # `slideshow` is shimmed, but starting it in minimal headless images depends on
+  # optional system graphics libraries that are outside rackup's control.
 done
 
 echo
@@ -473,6 +504,11 @@ case "$LOCAL_LINK_MODE" in
     fail "unsupported local link mode: $LOCAL_LINK_MODE"
     ;;
 esac
+if [[ -d "${local_src_root}/racket/share/racket/collects" ]]; then
+  local_collects_dir="${local_src_root}/racket/share/racket/collects"
+else
+  local_collects_dir="${local_src_root}/racket/collects"
+fi
 linked_id="$(run_rackup link localsrc "$local_src_root" --set-default | tail -n 1)"
 assert_eq "local-localsrc" "$linked_id" "unexpected linked toolchain id"
 run_rackup which racket --toolchain localsrc
@@ -488,7 +524,7 @@ fi
 linked_plthome="$(shim_racket -e '(display (or (getenv "PLTHOME") ""))')"
 assert_eq "${local_src_root}/racket" "$linked_plthome" "linked shim should export PLTHOME"
 linked_collects="$(shim_racket -e '(display (or (getenv "PLTCOLLECTS") ""))')"
-assert_contains "${local_src_root}/racket/collects" "$linked_collects" "linked shim should export PLTCOLLECTS"
+assert_contains "${local_collects_dir}" "$linked_collects" "linked shim should export PLTCOLLECTS"
 linked_addon="$(shim_racket -e '(display (or (getenv "PLTADDONDIR") ""))')"
 assert_eq "${RACKUP_HOME}/addons/${linked_id}" "$linked_addon" "linked shim should export PLTADDONDIR"
 link_run_plthome="$(run_rackup run localsrc -- racket -e '(display (or (getenv "PLTHOME") ""))')"

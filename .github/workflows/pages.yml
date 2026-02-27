@@ -26,6 +26,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Setup Racket
+        uses: Bogdanp/setup-racket@v1.14
+        with:
+          architecture: x64
+          distribution: full
+          variant: CS
+          version: stable
+      - name: Install Pages build deps
+        run: |
+          raco pkg install --auto plt-web
       - uses: actions/configure-pages@v5
       - name: Build static Pages site
         run: |

@@ -3,8 +3,8 @@ set -eu
 
 OUT_DIR="${1:-_site}"
 ROOT_DIR=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
-SRC_PAGE_DIR="$ROOT_DIR/pages"
 TMP_STAGE="$(mktemp -d "${TMPDIR:-/tmp}/rackup-pages.XXXXXX")"
+PLT_WEB_STAGE="$TMP_STAGE/plt-web-out"
 
 cleanup() {
   rm -rf "$TMP_STAGE"
@@ -13,7 +13,9 @@ trap cleanup EXIT
 
 mkdir -p "$OUT_DIR"
 
-cp "$SRC_PAGE_DIR/index.html" "$OUT_DIR/index.html"
+mkdir -p "$PLT_WEB_STAGE"
+racket "$ROOT_DIR/pages/site.rkt" -r -o "$PLT_WEB_STAGE" -f
+cp -R "$PLT_WEB_STAGE/www/." "$OUT_DIR/"
 cp "$ROOT_DIR/scripts/install.sh" "$OUT_DIR/install.sh"
 cp "$ROOT_DIR/scripts/install.sh" "$OUT_DIR/install"
 chmod 0755 "$OUT_DIR/install.sh" "$OUT_DIR/install"

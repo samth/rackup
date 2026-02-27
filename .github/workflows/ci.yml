@@ -5,6 +5,30 @@ on:
   pull_request:
 
 jobs:
+  pages-build:
+    name: Pages Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Racket
+        uses: Bogdanp/setup-racket@v1.14
+        with:
+          architecture: x64
+          distribution: full
+          variant: CS
+          version: stable
+      - name: Install Pages build deps
+        shell: bash
+        run: raco pkg install --auto plt-web
+      - name: Build Pages site
+        shell: bash
+        run: |
+          sh scripts/build-pages-site.sh /tmp/rackup-pages-site
+          test -f /tmp/rackup-pages-site/index.html
+          test -f /tmp/rackup-pages-site/install.sh
+          test -f /tmp/rackup-pages-site/rackup-src.tar.gz
+
   unit-tests:
     name: Unit Tests (${{ matrix.arch_name }})
     runs-on: ${{ matrix.runs_on }}
@@ -158,6 +182,16 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
+      - name: Setup Racket
+        uses: Bogdanp/setup-racket@v1.14
+        with:
+          architecture: x64
+          distribution: full
+          variant: CS
+          version: stable
+      - name: Install Pages build deps
+        shell: bash
+        run: raco pkg install --auto plt-web
       - name: Docker curl-pipe-sh bootstrap smoke (no host racket)
         run: |
           scripts/docker-test-fresh-install.sh \
