@@ -57,34 +57,69 @@ if [[ -z "${PLTADDONDIR:-}" ]]; then
   export PLTADDONDIR="$HOME_DIR/addons/$ACTIVE"
 fi
 
-rackup_warn_missing_loader() {
+rackup_print_missing_loader_message() {
   local target="$1"
-  local desc host_machine
-  if ! command -v file >/dev/null 2>&1; then
-    return 0
+  local inspect_target host_machine sys candidate header
+  rackup_is_elf32() {
+    local probe="$1"
+    if ! command -v od >/dev/null 2>&1; then
+      return 1
+    fi
+    header="$(od -An -t u1 -N 5 "$probe" 2>/dev/null | tr -s "[:space:]" " " | sed "s/^ //")"
+    [[ "$header" == "127 69 76 70 1" ]]
+  }
+  inspect_target="$target"
+  if ! rackup_is_elf32 "$inspect_target"; then
+    if [[ -n "${PLTHOME:-}" && -d "$PLTHOME/.bin" ]]; then
+      if [[ -x "$PLTHOME/bin/archsys" ]]; then
+        sys="$("$PLTHOME/bin/archsys" z 2>/dev/null || true)"
+        if [[ -n "$sys" && -x "$PLTHOME/.bin/$sys/$SHIM_NAME" ]]; then
+          inspect_target="$PLTHOME/.bin/$sys/$SHIM_NAME"
+        fi
+      fi
+      if [[ "$inspect_target" == "$target" ]]; then
+        for candidate in "$PLTHOME"/.bin/*/"$SHIM_NAME"; do
+          if [[ -x "$candidate" ]]; then
+            inspect_target="$candidate"
+            break
+          fi
+        done
+      fi
+    fi
   fi
-  desc="$(file "$target" 2>/dev/null || true)"
-  case "$desc" in
-    *"ELF 32-bit"*)
-      host_machine="$(uname -m 2>/dev/null || true)"
-      case "$host_machine" in
-        x86_64|amd64)
-          for loader in /lib/ld-linux.so.2 \
-                        /lib32/ld-linux.so.2 \
-                        /lib/i386-linux-gnu/ld-linux.so.2 \
-                        /lib/i686-linux-gnu/ld-linux.so.2 \
-                        /usr/i386-linux-gnu/lib/ld-linux.so.2; do
-            if [[ -e "$loader" ]]; then
-              return 0
-            fi
-          done
-          echo "rackup: '$SHIM_NAME' from toolchain '$ACTIVE' is a 32-bit Linux executable, but this host appears to lack the 32-bit loader/runtime needed to start it." >&2
-          echo "Try installing 32-bit compatibility packages, or use a newer x86_64-capable Racket/PLT release." >&2
-          ;;
-      esac
+  if ! rackup_is_elf32 "$inspect_target"; then
+    return 1
+  fi
+  host_machine="$(uname -m 2>/dev/null || true)"
+  case "$host_machine" in
+    x86_64|amd64)
+      for loader in /lib/ld-linux.so.2 \
+                    /lib32/ld-linux.so.2 \
+                    /lib/i386-linux-gnu/ld-linux.so.2 \
+                    /lib/i686-linux-gnu/ld-linux.so.2 \
+                    /usr/i386-linux-gnu/lib/ld-linux.so.2; do
+        if [[ -e "$loader" ]]; then
+          return 1
+        fi
+      done
+      echo "rackup: '$SHIM_NAME' from toolchain '$ACTIVE' needs 32-bit Linux runtime support, but this host appears to lack the 32-bit loader/runtime needed to start it." >&2
+      if [[ "$inspect_target" != "$target" ]]; then
+        echo "rackup: resolved underlying executable: $inspect_target" >&2
+      fi
+      echo "Try installing 32-bit compatibility packages, or use a newer x86_64-capable Racket/PLT release." >&2
+      return 0
       ;;
   esac
+  return 1
 }
+
+rackup_warn_missing_loader() {
+  rackup_print_missing_loader_message "$1" >/dev/null
+}
+
+if rackup_print_missing_loader_message "$TARGET"; then
+  exit 126
+fi
 
 if "$TARGET" "$@"; then
   exit 0

@@ -398,18 +398,35 @@
         "__no__"))
   (or (string=? a "") (member a '("y" "yes"))))
 
+(define (call-with-user-tty proc)
+  (with-handlers ([exn:fail?
+                   (lambda (_)
+                     (and (terminal-port? (current-input-port))
+                          (terminal-port? (current-error-port))
+                          (proc (current-input-port) (current-error-port))))])
+    (define tty-in (open-input-file "/dev/tty"))
+    (define tty-out (open-output-file "/dev/tty" #:exists 'append))
+    (dynamic-wind void
+                  (lambda () (proc tty-in tty-out))
+                  (lambda ()
+                    (close-input-port tty-in)
+                    (close-output-port tty-out)))))
+
 (define (resolve-toolchain-or-offer-install spec)
   (define id (find-local-toolchain spec))
   (cond
     [id id]
-    [(not (terminal-port? (current-input-port)))
+    [(not (call-with-user-tty (lambda (_in _out) #t)))
      (rackup-error "no matching installed toolchain: ~a\nHint: run `rackup install ~a` first"
                    spec
                    spec)]
     [else
-     (printf "Toolchain '~a' is not installed. Install it now? [Y/n] " spec)
-     (flush-output)
-     (define answer (read-line))
+     (define answer
+       (call-with-user-tty
+        (lambda (in out)
+          (fprintf out "Toolchain '~a' is not installed. Install it now? [Y/n] " spec)
+          (flush-output out)
+          (read-line in))))
      (unless (yes?/default-yes answer)
        (rackup-error "toolchain not installed: ~a" spec))
      (install-toolchain! spec '())]))
@@ -427,14 +444,14 @@
         (define tags
           (filter values
                   (list (and (equal? id default-id) "default") (and (equal? id active-id) "active"))))
-        (printf "~a ~a  (~a, ~a, ~a)\n"
-                (if (null? tags) " " "*")
+        (printf "~a~a  (~a, ~a, ~a)\n"
+                (if (null? tags)
+                    ""
+                    (format "[~a] " (string-join tags ",")))
                 id
                 (hash-ref m 'resolved-version "?")
                 (hash-ref m 'variant "?")
-                (hash-ref m 'distribution "?"))
-        (unless (null? tags)
-          (printf "    tags: ~a\n" (string-join tags ", "))))))
+                (hash-ref m 'distribution "?")))))
 
 (define (default-id->line)
   (define id (get-default-toolchain))

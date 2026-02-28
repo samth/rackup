@@ -493,6 +493,23 @@ shell_helper_function_test bash "$shell_test_id" "$shell_test_prefix"
 shell_helper_function_test zsh "$shell_test_id" "$shell_test_prefix"
 
 echo
+echo "== Missing toolchain switch fails fast without a tty =="
+missing_switch_err="$(
+  env -i HOME="$HOME" RACKUP_HOME="$RACKUP_HOME" PATH="/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin" \
+    bash -lc '
+      set -euo pipefail
+      source "$RACKUP_HOME/shell/rackup.bash"
+      if rackup switch 9.0 >/tmp/rackup-missing-switch.out 2>/tmp/rackup-missing-switch.err; then
+        echo "unexpected success" >&2
+        exit 1
+      fi
+      cat /tmp/rackup-missing-switch.err
+    '
+)"
+assert_contains "no matching installed toolchain: 9.0" "$missing_switch_err" "missing switch should fail immediately without a tty"
+assert_contains "Hint: run \`rackup install 9.0\` first" "$missing_switch_err" "missing switch should include install hint"
+
+echo
 echo "== Local in-place source build link smoke =="
 case "$LOCAL_LINK_MODE" in
   fake)

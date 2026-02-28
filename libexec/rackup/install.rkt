@@ -327,6 +327,17 @@
 (define (path-contains? p rx)
   (regexp-match? rx (path->string* p)))
 
+(define linux-i386-loader-candidates
+  '("/lib/ld-linux.so.2"
+    "/lib32/ld-linux.so.2"
+    "/lib/i386-linux-gnu/ld-linux.so.2"
+    "/lib/i686-linux-gnu/ld-linux.so.2"
+    "/usr/i386-linux-gnu/lib/ld-linux.so.2"))
+
+(define (linux-i386-loader-present?)
+  (for/or ([loader (in-list linux-i386-loader-candidates)])
+    (file-exists? (string->path loader))))
+
 (define chez-extra-names '("scheme" "petite"))
 
 (define (find-local-chez-extra-executables layout)
@@ -536,7 +547,35 @@
   (values (and version-out (not (string-blank? version-out)) version-out)
           (and variant-out (not (string-blank? variant-out)) (string-downcase variant-out))))
 
-(define (toolchain-meta request id real-bin-dir executables)
+(define (installed-toolchain-env-vars real-bin-dir)
+  (define plthome (maybe-parent real-bin-dir))
+  (define-values (plthome-base plthome-leaf _plthome-dir?)
+    (if plthome
+        (split-path plthome)
+        (values #f #f #f)))
+  (define plthome-name
+    (and (path? plthome-leaf) (path->string plthome-leaf)))
+  (define plthome-normalized
+    (and plthome-base (path? plthome-leaf) (build-path plthome-base plthome-leaf)))
+  (cond
+    [(and plthome-normalized (equal? plthome-name "plt"))
+     (list (cons "PLTHOME" (path->string* plthome-normalized)))]
+    [else null]))
+
+(define (maybe-modernize-legacy-archsys! real-bin-dir)
+  (define plthome (maybe-parent real-bin-dir))
+  (define archsys (and plthome (build-path plthome "bin" "archsys")))
+  (when (and archsys (file-exists? archsys))
+    (define content (file->string archsys))
+    (define updated
+      (regexp-replace* #px"file /bin/ls \\| grep ELF \\| wc -l"
+                       content
+                       "file -L /bin/ls 2>/dev/null | grep ELF | wc -l"))
+    (unless (equal? updated content)
+      (write-string-file archsys updated)
+      (file-or-directory-permissions archsys #o755))))
+
+(define (toolchain-meta request id real-bin-dir executables [env-vars null])
   (hash 'id
         id
         'kind
@@ -569,6 +608,9 @@
         (path->string* (rackup-toolchain-bin-link id))
         'real-bin-dir
         (path->string* real-bin-dir)
+        'env-vars
+        (for/list ([kv (in-list env-vars)])
+          (list (car kv) (cdr kv)))
         'executables
         executables
         'installed-at
@@ -747,6 +789,20 @@
       [else
        (install-info "Default toolchain changed: ~a -> ~a" (or before "none") after)])))
 
+(define (preflight-request-install! request installer-ext)
+  (when (and (equal? installer-ext "sh")
+             (equal? (hash-ref request 'arch #f) "i386")
+             (equal? (hash-ref request 'platform #f) "linux")
+             (eq? (hash-ref request 'legacy-install-kind #f) 'shell-basic)
+             (not (or (equal? (normalized-host-arch) "i386")
+                      (linux-i386-loader-present?))))
+    (rackup-error
+     (string-append
+      "PLT Scheme ~a requires 32-bit Linux compatibility support during installation, but this host does not appear to provide it.\n"
+      "The historical installer runs a 32-bit helper while finishing installation.\n"
+      "Install 32-bit compatibility packages that provide ld-linux.so.2, or use a newer x86_64-capable release.")
+     (hash-ref request 'resolved-version))))
+
 (define (install-toolchain! spec opts)
   (ensure-rackup-layout!)
   (ensure-index!)
@@ -787,6 +843,7 @@
           (hash-ref request
                     'installer-filename
                     (path-basename-string (string->path (path->string* installer-path))))))
+       (preflight-request-install! request installer-ext)
        (with-handlers ([exn:fail? (lambda (e)
                                     (when (directory-exists? tc-dir)
                                       (delete-directory/files tc-dir))
@@ -802,11 +859,15 @@
             (rackup-error "unsupported installer format for Linux: ~a"
                           (or installer-ext "unknown"))])
          (define real-bin-dir (detect-bin-dir install-root))
+         (maybe-modernize-legacy-archsys! real-bin-dir)
          (make-bin-link! id real-bin-dir)
-         (delete-toolchain-env-file! id)
+         (define env-vars (installed-toolchain-env-vars real-bin-dir))
+         (if (pair? env-vars)
+             (write-toolchain-env-file! id env-vars)
+             (delete-toolchain-env-file! id))
          (ensure-toolchain-addon-dir! id)
          (define executables (enumerate-toolchain-executables real-bin-dir))
-         (define meta (toolchain-meta request id real-bin-dir executables))
+         (define meta (toolchain-meta request id real-bin-dir executables env-vars))
          (register-toolchain! id meta)
          (when explicit-default?
            (set-default-toolchain! id))

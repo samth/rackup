@@ -44,10 +44,23 @@
 
 (define-runtime-path rackup-bin "../bin/rackup")
 (define install-ns (module->namespace '(file "../libexec/rackup/install.rkt")))
+(define shell-ns (module->namespace '(file "../libexec/rackup/shell.rkt")))
 
 (define detect-bin-dir/private
   (parameterize ([current-namespace install-ns])
     (eval 'detect-bin-dir)))
+
+(define installed-toolchain-env-vars/private
+  (parameterize ([current-namespace install-ns])
+    (eval 'installed-toolchain-env-vars)))
+
+(define maybe-modernize-legacy-archsys!/private
+  (parameterize ([current-namespace install-ns])
+    (eval 'maybe-modernize-legacy-archsys!)))
+
+(define shell-helper-script/private
+  (parameterize ([current-namespace shell-ns])
+    (eval 'shell-helper-script)))
 
 (define (run-bin-rackup/capture args)
   (define out (open-output-string))
@@ -160,9 +173,110 @@
                                          (path->string (build-path (rackup-toolchain-bin-link id)
                                                                    "racket")))
 
+                           (define list-out (run-main/stdout '("list")))
+                           (check-true
+                            (string-contains? list-out
+                                              "[default,active] release-8.18-cs-x86_64-linux-full"))
+                           (check-false (string-contains? list-out "\n* "))
+                           (check-false (string-contains? list-out "\n    tags: "))
+
                            (reshim!)
                            (check-true (link-exists? (build-path (rackup-shims-dir) "racket")))
-                           (check-true (link-exists? (build-path (rackup-shims-dir) "rackup")))))
+                           (check-true (link-exists? (build-path (rackup-shims-dir) "rackup")))
+                           (define dispatcher-src (file->string (rackup-shim-dispatcher)))
+                           (check-true (string-contains? dispatcher-src "PLTHOME/.bin"))
+                           (check-true
+                            (string-contains? dispatcher-src "resolved underlying executable"))
+                           (check-true
+                            (string-contains?
+                             dispatcher-src
+                             "if rackup_print_missing_loader_message \"$TARGET\"; then"))
+                           (define helper-src (shell-helper-script/private))
+                           (check-true (string-contains? helper-src "_rackup_status"))
+                           (check-true (string-contains? helper-src "return \"$_rackup_status\"")))))
+
+  (with-temp-rackup-home
+   (lambda (tmp)
+     (ensure-index!)
+     (define id "release-103-bc-i386-linux-full")
+     (define install-root (build-path tmp "legacy-103"))
+     (define plthome (build-path install-root "plt"))
+     (define real-bin (build-path plthome "bin"))
+     (make-directory* (rackup-toolchain-dir id))
+     (make-directory* real-bin)
+     (define mzscheme-exe (build-path real-bin "mzscheme"))
+     (write-string-file
+      mzscheme-exe
+      @~a{#!/usr/bin/env bash
+          set -euo pipefail
+          printf 'PLTHOME=%s\n' "${PLTHOME:-}"
+          })
+     (file-or-directory-permissions mzscheme-exe #o755)
+     (make-file-or-directory-link real-bin (rackup-toolchain-bin-link id))
+     (define env-vars (installed-toolchain-env-vars/private real-bin))
+     (check-equal? env-vars (list (cons "PLTHOME" (path->string plthome))))
+     (write-string-file (rackup-toolchain-env-file id)
+                        (string-append "#!/usr/bin/env bash\n"
+                                       "export PLTHOME="
+                                       (format "'~a'\n" (path->string plthome))))
+     (define meta
+       (hash 'id
+             id
+             'kind
+             'release
+             'requested-spec
+             "103"
+             'resolved-version
+             "103"
+             'variant
+             'bc
+             'distribution
+             'full
+             'arch
+             "i386"
+             'platform
+             "linux"
+             'snapshot-site
+             #f
+             'snapshot-stamp
+             #f
+             'installer-url
+             "http://download.plt-scheme.org/bundles/103/plt/plt-103-bin-i386-linux.tgz"
+             'installer-filename
+             "plt-103-bin-i386-linux.tgz"
+             'install-root
+             (path->string install-root)
+             'bin-link
+             (path->string (rackup-toolchain-bin-link id))
+             'real-bin-dir
+             (path->string real-bin)
+             'env-vars
+             (for/list ([kv (in-list env-vars)])
+               (list (car kv) (cdr kv)))
+             'executables
+             '("mzscheme")
+             'installed-at
+             "2026-02-27T00:00:00Z"))
+     (register-toolchain! id meta)
+     (reshim!)
+     (let-values ([(status out err) (run-program/capture (build-path (rackup-shims-dir) "mzscheme") '())])
+       (check-equal? status 0)
+       (check-equal? err "")
+       (check-true (string-contains? out (format "PLTHOME=~a" (path->string plthome)))))))
+
+  (with-temp-rackup-home
+   (lambda (tmp)
+     (define real-bin (build-path tmp "plt" "bin"))
+     (make-directory* real-bin)
+     (define archsys (build-path real-bin "archsys"))
+     (write-string-file
+      archsys
+      "#!/bin/sh\nif [ `file /bin/ls | grep ELF | wc -l` = 1 ]; then\n  SYS=i386-linux\nelse\n  SYS=i386-linux-aout\nfi\n")
+     (file-or-directory-permissions archsys #o755)
+     (maybe-modernize-legacy-archsys!/private real-bin)
+     (define patched (file->string archsys))
+     (check-true (string-contains? patched "file -L /bin/ls 2>/dev/null | grep ELF | wc -l"))
+     (check-false (string-contains? patched "file /bin/ls | grep ELF | wc -l"))))
 
   (with-temp-rackup-home
    (lambda (tmp)
@@ -339,10 +453,10 @@
          (get-output-string out)))
      (check-true (regexp-match? (regexp (regexp-quote (format "PLTHOME=~a" (path->string plthome))))
                                 shim-out))
-     (check-true (regexp-match? (regexp (regexp-quote (format "PLTCOLLECTS=~a:~a"
-                                                              (path->string collects-dir)
-                                                              (path->string pkgs-dir))))
-                                shim-out)))))
+	     (check-true (regexp-match? (regexp (regexp-quote (format "PLTCOLLECTS=~a:~a"
+	                                                              (path->string collects-dir)
+	                                                              (path->string pkgs-dir))))
+	                                shim-out))))
 
   (with-temp-rackup-home
    (lambda (_tmp)

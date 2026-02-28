@@ -1,6 +1,7 @@
 #lang racket/base
 
 (require racket/list
+         racket/match
          racket/string
          "util.rkt")
 
@@ -16,6 +17,10 @@
   (hash
    "053"
    (hasheq 'reason "PLT Scheme v053 does not publish a Linux installer."
+           'artifacts null)
+   "102"
+   (hasheq 'reason
+           "PLT Scheme v102 is a historical release, but rackup does not have a supported Linux installer entry for it."
            'artifacts null)
    "103"
    (hasheq 'install-kind 'tgz
@@ -253,7 +258,16 @@
    ))
 
 (define (legacy-plt-version? v)
-  (and (string? v) (hash-has-key? legacy-plt-release-info v)))
+  (and (string? v)
+       (match (regexp-match #px"^([0-9]+(?:\\.[0-9]+){0,3})(?:p[0-9]+)?$" v)
+         [(list _ base)
+          (cond
+            [(string-contains? base ".")
+             (regexp-match? #px"^[1-4](?:[.][0-9]+){0,3}$" base)]
+            [else
+             (define n (string->number base))
+             (and (exact-integer? n) (<= 53 n 499))])]
+         [_ #f])))
 
 (define (legacy-plt-request-info version
                                  #:distribution distribution
@@ -265,7 +279,9 @@
     (rackup-error "PLT Scheme releases (~a) do not support platform ~a" version platform))
   (define release (hash-ref legacy-plt-release-info version #f))
   (unless release
-    (rackup-error "unknown PLT Scheme version: ~a" version))
+    (rackup-error
+     "PLT Scheme version ~a is in the historical release range, but rackup does not have a hardcoded Linux installer entry for it."
+     version))
   (define reason (hash-ref release 'reason #f))
   (when reason
     (rackup-error "~a" reason))

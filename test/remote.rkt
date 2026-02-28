@@ -252,5 +252,8 @@
 
   (check-exn exn:fail?
              (lambda () (resolve-install-request/runtime "053" #:arch "i386")))
+  (check-exn
+   #px"PLT Scheme v102|historical release range"
+   (lambda () (resolve-install-request/runtime "102" #:arch "i386")))
   (check-exn exn:fail?
              (lambda () (resolve-install-request/runtime "203" #:arch "i386"))))
