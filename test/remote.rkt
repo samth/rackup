@@ -4,9 +4,13 @@
          racket/format
          racket/file
          racket/path
+         racket/port
          racket/runtime-path
          racket/string
-         "../libexec/rackup/remote.rkt")
+         "../libexec/rackup/install.rkt"
+         "../libexec/rackup/legacy-plt-catalog.rkt"
+         "../libexec/rackup/remote.rkt"
+         "../libexec/rackup/runtime.rkt")
 
 (module+ test
   (define-runtime-path repo-root "..")
@@ -32,6 +36,40 @@
 
   (define resolve-install-request/runtime
     (dynamic-require '(file "../libexec/rackup/remote.rkt") 'resolve-install-request))
+
+  (define remote-ns (module->namespace '(file "../libexec/rackup/remote.rkt")))
+  (define install-ns (module->namespace '(file "../libexec/rackup/install.rkt")))
+  (define runtime-ns (module->namespace '(file "../libexec/rackup/runtime.rkt")))
+
+  (define current-http-sendrecv-proc/private
+    (parameterize ([current-namespace remote-ns])
+      (eval 'current-http-sendrecv-proc)))
+  (define http-get-string/private
+    (parameterize ([current-namespace remote-ns])
+      (eval 'http-get-string)))
+  (define http-get-rktd/private
+    (parameterize ([current-namespace remote-ns])
+      (eval 'http-get-rktd)))
+  (define ensure-installer-cached/install-private
+    (parameterize ([current-namespace install-ns])
+      (eval 'ensure-installer-cached!)))
+  (define ensure-installer-cached/runtime-private
+    (parameterize ([current-namespace runtime-ns])
+      (eval 'ensure-installer-cached!)))
+
+  (define tmp-root (string->path "/tmp"))
+
+  (define (with-temp-rackup-home proc)
+    (define tmp-home (make-temporary-file "rackup-remote-home-~a" 'directory tmp-root))
+    (define env (environment-variables-copy (current-environment-variables)))
+    (environment-variables-set! env #"RACKUP_HOME" (string->bytes/utf-8 (path->string tmp-home)))
+    (dynamic-wind
+     void
+     (lambda ()
+       (parameterize ([current-environment-variables env])
+         (proc tmp-home)))
+     (lambda ()
+       (delete-directory/files tmp-home #:must-exist? #f))))
 
   (define p1 (parse-installer-filename "racket-8.18-x86_64-linux-cs.sh"))
   (check-equal? (hash-ref p1 'distribution) 'full)
@@ -249,6 +287,60 @@
   (check-equal? (hash-ref legacy-req-4.2.5 'installer-url)
                 "http://download.plt-scheme.org/bundles/4.2.5/plt/plt-4.2.5-bin-x86_64-linux-f7.sh")
   (check-equal? (hash-ref legacy-req-4.2.5 'legacy-install-kind) 'shell-unixstyle)
+
+  (for* ([release-info (in-hash-values legacy-plt-release-info)]
+         [artifact (in-list (hash-ref release-info 'artifacts null))]
+         #:when (regexp-match? #px"^http://" (hash-ref artifact 'url "")))
+    (check-true (string? (hash-ref artifact 'sha256 #f)))
+    (check-false (string=? "" (string-trim (hash-ref artifact 'sha256 "")))))
+
+  (let ([in (open-input-string "ignored")])
+    (parameterize ([current-http-sendrecv-proc/private
+                    (make-keyword-procedure
+                     (lambda (_kws _kw-args . _args)
+                       (values "NOT HTTP" null in)))])
+      (check-exn
+       #px"could not parse HTTP status line while fetching http://example.invalid/bad"
+       (lambda ()
+         (http-get-string/private "http://example.invalid/bad"))))
+    (check-true (port-closed? in)))
+
+  (let ([in (open-input-string "#lang racket/base\n1\n")])
+    (parameterize ([current-http-sendrecv-proc/private
+                    (make-keyword-procedure
+                     (lambda (_kws _kw-args . _args)
+                       (values "HTTP/1.1 200 OK" null in)))])
+      (check-exn
+       #px"failed to read \\.rktd response from http://example.invalid/table.rktd"
+       (lambda ()
+         (http-get-rktd/private "http://example.invalid/table.rktd"))))
+    (check-true (port-closed? in)))
+
+  (let ([in (open-input-string "payload")]
+        [dest-dir (make-temporary-file "rackup-download-dest-~a" 'directory tmp-root)])
+    (parameterize ([current-http-sendrecv-proc/private
+                    (make-keyword-procedure
+                     (lambda (_kws _kw-args . _args)
+                       (values "HTTP/1.1 200 OK" null in)))])
+      (check-exn exn:fail?
+                 (lambda ()
+                   (download-url->file "http://example.invalid/file" dest-dir))))
+    (check-true (port-closed? in))
+    (delete-directory/files dest-dir))
+
+  (with-temp-rackup-home
+   (lambda (_tmp-home)
+     (check-exn
+      #px"refusing to download installer over HTTP without a hardcoded SHA-256 checksum"
+      (lambda ()
+        (ensure-installer-cached/install-private "http://download.plt-scheme.org/example.sh")))))
+
+  (with-temp-rackup-home
+   (lambda (_tmp-home)
+     (check-exn
+      #px"refusing to download installer over HTTP without a hardcoded SHA-256 checksum"
+      (lambda ()
+        (ensure-installer-cached/runtime-private "http://download.plt-scheme.org/example.sh")))))
 
   (check-exn exn:fail?
              (lambda () (resolve-install-request/runtime "053" #:arch "i386")))

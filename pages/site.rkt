@@ -353,10 +353,10 @@
           copyBtn.addEventListener("click", function (event) {
             event.preventDefault();
             navigator.clipboard.writeText(installCmd).then(function () {
-              var old = copyBtn.textContent;
-              copyBtn.textContent = "Copied";
+              var old = copyBtn.innerHTML;
+              copyBtn.innerHTML = "Copied";
               setTimeout(function () {
-                copyBtn.textContent = old;
+                copyBtn.innerHTML = old;
               }, 1200);
             });
           });

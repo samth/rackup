@@ -72,15 +72,14 @@
 
 (define (parse-install-spec spec)
   (cond
-    [(or (equal? spec "stable")) (hash 'input spec 'kind 'stable)]
+    [(equal? spec "stable") (hash 'input spec 'kind 'stable)]
     [(or (equal? spec "pre-release") (equal? spec "pre")) (hash 'input spec 'kind 'pre-release)]
     [(or (equal? spec "snapshot") (equal? spec "current"))
      (hash 'input spec 'kind 'snapshot 'snapshot-site 'auto)]
     [(regexp-match #px"^snapshot:(utah|northwestern)$" spec)
      =>
      (lambda (m) (hash 'input spec 'kind 'snapshot 'snapshot-site (string->symbol (list-ref m 1))))]
-    [(or (numeric-version? spec) (legacy-plt-version? spec))
-     (hash 'input spec 'kind 'release 'version spec)]
+    [(or (numeric-version? spec) (legacy-plt-version? spec)) (hash 'input spec 'kind 'release 'version spec)]
     [else (rackup-error "invalid version spec '~a'" spec)]))
 
 (define (sanitize-id-part s)

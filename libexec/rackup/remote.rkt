@@ -9,6 +9,7 @@
          net/http-client
          net/url
          "legacy-plt-catalog.rkt"
+         "rktd-io.rkt"
          "util.rkt"
          "versioning.rkt")
 
@@ -35,6 +36,9 @@
 (define plt-scheme-download-base "http://download.plt-scheme.org/")
 (define snapshot-sites
   (hash 'utah "https://users.cs.utah.edu/plt" 'northwestern "https://plt.cs.northwestern.edu"))
+
+(define current-http-sendrecv-proc
+  (make-parameter http-sendrecv))
 
 (define (status-code status-line)
   (define h
@@ -76,13 +80,16 @@
     (rackup-error "invalid URL: ~a" (if (url? url-str) (url->string url-str) url-str)))
   (define ssl? (equal? scheme "https"))
   (define-values (status-line headers in)
-    (http-sendrecv host
-                   (url->request-target u)
-                   #:ssl? ssl?
-                   #:port (or port (if ssl? 443 80))
-                   #:content-decode '(gzip deflate)))
+    ((current-http-sendrecv-proc) host
+                                  (url->request-target u)
+                                  #:ssl? ssl?
+                                  #:port (or port (if ssl? 443 80))
+                                  #:content-decode '(gzip deflate)))
   (define code (status-code status-line))
   (cond
+    [(not code)
+     (close-input-port in)
+     (rackup-error "could not parse HTTP status line while fetching ~a" (url->string u))]
     [(member code '(301 302 303 307 308))
      (define location (header-ref headers "Location"))
      (close-input-port in)
@@ -100,20 +107,38 @@
 
 (define (http-get-string url-str)
   (define in (http-open/input url-str))
-  (begin0 (port->string in)
-    (close-input-port in)))
+  (dynamic-wind void
+                (lambda ()
+                  (port->string in))
+                (lambda ()
+                  (close-input-port in))))
 
 (define (http-get-rktd url-str)
-  (define s (http-get-string url-str))
-  (define in (open-input-string s))
-  (begin0 (read in)
-    (close-input-port in)))
+  (define in (http-open/input url-str))
+  (dynamic-wind
+   void
+   (lambda ()
+     (with-handlers ([exn:fail?
+                      (lambda (e)
+                        (rackup-error "failed to read .rktd response from ~a: ~a"
+                                      url-str
+                                      (exn-message e)))])
+       (read-rktd/port in)))
+   (lambda ()
+     (close-input-port in))))
 
 (define (download-url->file url-str dest-path)
   (make-directory* (or (path-only dest-path) "."))
   (define in (http-open/input url-str))
-  (call-with-output-file* dest-path #:exists 'truncate/replace (lambda (out) (copy-port in out)))
-  (close-input-port in)
+  (dynamic-wind
+   void
+   (lambda ()
+     (call-with-output-file* dest-path
+       #:exists 'truncate/replace
+       (lambda (out)
+         (copy-port in out))))
+   (lambda ()
+     (close-input-port in)))
   dest-path)
 
 (define version-re #px"\\(stable \"([^\"]+)\"\\)")

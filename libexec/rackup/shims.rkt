@@ -157,10 +157,6 @@ rackup_print_missing_loader_message() {
   return 1
 }
 
-rackup_warn_missing_loader() {
-  rackup_print_missing_loader_message "$1" >/dev/null
-}
-
 rackup_print_qemu_i386_aslr_message() {
   local target="$1"
   local inspect_target host_machine
@@ -197,7 +193,7 @@ set +e
 STATUS=$?
 set -e
 case "$STATUS" in
-  126|127) rackup_warn_missing_loader "$TARGET" || true ;;
+  126|127) rackup_print_missing_loader_message "$TARGET" || true ;;
   139) rackup_print_qemu_i386_aslr_message "$TARGET" || true ;;
 esac
 exit "$STATUS"

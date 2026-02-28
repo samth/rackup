@@ -481,6 +481,23 @@
      (check-not-false (member "petite" (hash-ref linked-meta 'executables)))
      (check-true (file-exists? (rackup-toolchain-env-file linked-id)))
 
+     (write-exe "racket"
+                @~a{#!/usr/bin/env bash
+                    set -euo pipefail
+                    if [[ "$#" -ge 2 && "$1" == "-e" ]]; then
+                      case "$2" in
+                        *"(version)"*) printf '9.98-local'; exit 0 ;;
+                        *"system-type 'vm"*) printf 'cs'; exit 0 ;;
+                      esac
+                    fi
+                    printf 'PLTHOME=%s\n' "${PLTHOME:-}"
+                    printf 'PLTCOLLECTS=%s\n' "${PLTCOLLECTS:-}"
+                    printf 'PLTADDONDIR=%s\n' "${PLTADDONDIR:-}"
+                    printf 'ARGS=%s\n' "$*"
+                    })
+     (check-equal? (link-toolchain! "devsrc" (path->string src-root) '("--force")) linked-id)
+     (check-equal? (hash-ref (read-toolchain-meta linked-id) 'resolved-version) "9.98-local")
+
      (define shim-racket (build-path (rackup-shims-dir) "racket"))
      (define old-pltaddon (getenv "PLTADDONDIR"))
      (void (putenv "PLTADDONDIR" ""))
@@ -523,8 +540,8 @@
      (check-true (string-contains? activation "export PLTHOME="))
      (check-true (string-contains? activation "export PLTCOLLECTS="))
      (check-equal? (run-main/stdout (list "switch" "devsrc")) activation)
-     (check-equal? (run-main/stdout '("prompt")) "racket-local-9.99-local\n")
-     (check-equal? (run-main/stdout '("prompt" "--short")) "racket-local-9.99-local\n")
+     (check-equal? (run-main/stdout '("prompt")) "racket-local-9.98-local\n")
+     (check-equal? (run-main/stdout '("prompt" "--short")) "racket-local-9.98-local\n")
      (check-equal? (run-main/stdout '("prompt" "--long")) "[rk:local-devsrc]\n")
      (void (putenv "RACKUP_TOOLCHAIN" linked-id))
      (define deactivation (emit-shell-deactivation))

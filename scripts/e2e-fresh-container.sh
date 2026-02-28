@@ -600,29 +600,61 @@ fi
 if [[ "$HOST_RACKET" != "absent" ]]; then
   echo
   echo "== rackup uninstall smoke =="
+  keep_file="$HOME/keep-me.txt"
+  sibling_keep_dir="$HOME/rackup-e2e-keep-dir"
+  sibling_keep_file="$sibling_keep_dir/keep.txt"
+  local_src_keep_file="$local_src_root/keep-local.txt"
+  printf 'keep\n' > "$keep_file"
+  mkdir -p "$sibling_keep_dir"
+  printf 'keep\n' > "$sibling_keep_file"
+  printf 'keep\n' > "$local_src_keep_file"
   test -d "$RACKUP_HOME"
   [[ -f "$HOME/.bashrc" ]] || fail "expected ~/.bashrc before uninstall"
   [[ -f "$HOME/.zshrc" ]] || fail "expected ~/.zshrc before uninstall"
   grep -q "rackup initialize" "$HOME/.bashrc" || fail "expected rackup init block in ~/.bashrc before uninstall"
   grep -q "rackup initialize" "$HOME/.zshrc" || fail "expected rackup init block in ~/.zshrc before uninstall"
+  if home_uninstall_out="$(env RACKUP_HOME="$HOME" "$RACKUP_BIN" uninstall --yes 2>&1)"; then
+    printf '%s\n' "$home_uninstall_out" >&2
+    fail "rackup uninstall should refuse HOME as RACKUP_HOME"
+  fi
+  assert_contains "unsafe rackup home target equal to your home directory" \
+    "$home_uninstall_out" \
+    "uninstall should refuse HOME as RACKUP_HOME"
+  if root_uninstall_out="$(env RACKUP_HOME=/ "$RACKUP_BIN" uninstall --yes 2>&1)"; then
+    printf '%s\n' "$root_uninstall_out" >&2
+    fail "rackup uninstall should refuse / as RACKUP_HOME"
+  fi
+  assert_contains "unsafe rackup home target: /" \
+    "$root_uninstall_out" \
+    "uninstall should refuse / as RACKUP_HOME"
+  old_home="$RACKUP_HOME"
+  old_rackup_bin="$RACKUP_BIN"
+  old_racket_shim="$RACKUP_HOME/shims/racket"
+  old_raco_shim="$RACKUP_HOME/shims/raco"
   if ! uninstall_out="$(run_rackup uninstall --yes 2>&1)"; then
     printf '%s\n' "$uninstall_out" >&2
     fail "rackup uninstall --yes failed"
   fi
   assert_contains "WARNING:" "$uninstall_out" "uninstall should print warnings"
   assert_contains "rackup uninstalled." "$uninstall_out" "uninstall should confirm success"
-  for _ in $(seq 1 20); do
-    [[ ! -e "$RACKUP_HOME" ]] && break
-    sleep 0.2
-  done
-  [[ ! -e "$RACKUP_HOME" ]] || fail "RACKUP_HOME should be removed by uninstall (after background cleanup)"
+  assert_contains "completed synchronously" "$uninstall_out" "uninstall should report synchronous deletion"
+  if [[ "$uninstall_out" == *"Final file deletion may complete shortly"* ]]; then
+    fail "uninstall should not report deferred deletion anymore"
+  fi
+  [[ ! -e "$old_home" ]] || fail "RACKUP_HOME should be removed by uninstall before returning"
+  [[ ! -e "$old_rackup_bin" ]] || fail "rackup binary should be removed by uninstall"
+  [[ ! -e "$old_racket_shim" ]] || fail "racket shim should be removed by uninstall"
+  [[ ! -e "$old_raco_shim" ]] || fail "raco shim should be removed by uninstall"
   if grep -q "rackup initialize" "$HOME/.bashrc"; then
     fail "rackup uninstall should remove ~/.bashrc managed block"
   fi
   if grep -q "rackup initialize" "$HOME/.zshrc"; then
     fail "rackup uninstall should remove ~/.zshrc managed block"
   fi
+  [[ -f "$keep_file" ]] || fail "uninstall should not delete unrelated files in HOME"
+  [[ -f "$sibling_keep_file" ]] || fail "uninstall should not delete unrelated sibling directories"
   [[ -d "$local_src_root" ]] || fail "local linked source tree should not be deleted by uninstall"
+  [[ -f "$local_src_keep_file" ]] || fail "uninstall should not delete files in linked local source tree"
 else
   echo
   echo "== rackup uninstall smoke =="

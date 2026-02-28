@@ -115,6 +115,7 @@
                                   #:no-cache? [no-cache? #f]
                                   #:sha256 [expected-sha256 #f])
   (ensure-rackup-layout!)
+  (require-checksummed-http-installer! installer-url expected-sha256)
   (define cache-path (installer-cache-file installer-url))
   (when (and (file-exists? cache-path) expected-sha256)
     (with-handlers ([exn:fail? (lambda (_)
@@ -128,9 +129,6 @@
     (verify-installer-sha256! cache-path expected-sha256)
     (file-or-directory-permissions cache-path #o755))
   cache-path)
-
-(define (shell-exe)
-  (or (find-executable-path "sh") (string->path "/bin/sh")))
 
 (define (legacy-interactive-linux-installer? installer-file)
   (regexp-match? #px"(?:^|/)(?:racket(?:-textual)?|plt)-.+-bin-.+[.]sh$"
@@ -512,29 +510,6 @@
         (path-join/colon (list collects-dir))))
   (list (cons "PLTHOME" (hash-ref layout 'plthome)) (cons "PLTCOLLECTS" collects-path)))
 
-(define (capture-program-output #:env [env-vars null] exe . args)
-  (define old-vals
-    (for/list ([kv (in-list env-vars)])
-      (cons (car kv) (getenv (car kv)))))
-  (define out (open-output-string))
-  (define err (open-output-string))
-  (dynamic-wind (lambda ()
-                  (for ([kv (in-list env-vars)])
-                    (putenv (car kv) (cdr kv))))
-                (lambda ()
-                  (parameterize ([current-output-port out]
-                                 [current-error-port err])
-                    (if (apply system* exe args)
-                        (string-trim (get-output-string out))
-                        #f)))
-                (lambda ()
-                  (for ([kv (in-list old-vals)])
-                    (define k (car kv))
-                    (define v (cdr kv))
-                    (if v
-                        (putenv k v)
-                        (putenv k ""))))))
-
 (define (probe-local-racket-version+variant bin-dir env-vars)
   (define racket-exe (build-path (string->path bin-dir) "racket"))
   (define version-out (capture-program-output #:env env-vars racket-exe "-e" "(display (version))"))
@@ -746,6 +721,10 @@
   (define parsed-opts (parse-link-options opts))
   (define id (local-toolchain-id name))
   (define tc-dir (rackup-toolchain-dir id))
+  (when (and (directory-exists? tc-dir) (hash-ref parsed-opts 'force? #f))
+    (delete-directory/files tc-dir)
+    (when (directory-exists? tc-dir)
+      (rackup-error "failed to remove existing toolchain before relink: ~a" id)))
   (define layout (detect-local-source-layout local-path))
   (define real-bin-dir (string->path (hash-ref layout 'bin-dir)))
   (define racket-exe (build-path real-bin-dir "racket"))
@@ -754,12 +733,7 @@
                   (path->string* racket-exe)))
   (cond
     [(directory-exists? tc-dir)
-     (if (hash-ref parsed-opts 'force? #f)
-         (begin
-           (delete-directory/files tc-dir)
-           (link-toolchain! name local-path opts))
-         (begin
-           (rackup-error "toolchain already exists: ~a (use --force to relink)" id)))]
+     (rackup-error "toolchain already exists: ~a (use --force to relink)" id)]
     [else
      (with-handlers ([exn:fail? (lambda (e)
                                   (when (directory-exists? tc-dir)
@@ -819,19 +793,18 @@
   (parameterize ([current-install-verbosity (hash-ref parsed-opts 'verbosity 'normal)])
     (define default-before (get-default-toolchain))
     (define explicit-default? (hash-ref parsed-opts 'set-default? #f))
+    (when (and (directory-exists? tc-dir) (hash-ref parsed-opts 'force? #f))
+      (delete-directory/files tc-dir)
+      (when (directory-exists? tc-dir)
+        (rackup-error "failed to remove existing toolchain before reinstall: ~a" id)))
     (cond
       [(directory-exists? tc-dir)
-       (if (hash-ref parsed-opts 'force? #f)
-           (begin
-             (delete-directory/files tc-dir)
-             (install-toolchain! spec opts))
-           (begin
-             (install-ok "Already installed: ~a" id)
-             (when explicit-default?
-               (set-default-toolchain! id))
-             (reshim!)
-             (report-default-change! default-before (get-default-toolchain) id explicit-default?)
-             id))]
+       (install-ok "Already installed: ~a" id)
+       (when explicit-default?
+         (set-default-toolchain! id))
+       (reshim!)
+       (report-default-change! default-before (get-default-toolchain) id explicit-default?)
+       id]
       [else
        (install-info "Installing ~a..." id)
        (define installer-path

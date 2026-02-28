@@ -28,6 +28,7 @@ jobs:
           test -f /tmp/rackup-pages-site/index.html
           test -f /tmp/rackup-pages-site/install.sh
           test -f /tmp/rackup-pages-site/rackup-src.tar.gz
+          rg -F 'copyBtn.innerHTML' /tmp/rackup-pages-site/index.html
           if tar -tzf /tmp/rackup-pages-site/rackup-src.tar.gz | rg -n '(^|/)compiled(/|$)|\.(zo|dep)$'; then
             echo "rackup-src.tar.gz unexpectedly contains compiled artifacts" >&2
             exit 1
@@ -64,7 +65,7 @@ jobs:
         run: raco pkg install --auto recspecs
       - name: Test (includes local-link unit coverage)
         shell: bash
-        run: TMPDIR=/tmp raco test test/copy-filtered-tree.rkt test/versioning.rkt test/remote.rkt test/platform-targets.rkt test/state-shims.rkt
+        run: TMPDIR=/tmp raco test test/copy-filtered-tree.rkt test/rktd-io.rkt test/util.rkt test/versioning.rkt test/remote.rkt test/platform-targets.rkt test/state-shims.rkt test/uninstall.rkt
 
   docker-e2e-linux-distros:
     name: "Docker E2E (native ${{ matrix.arch_name }} / ${{ matrix.base_image }})"

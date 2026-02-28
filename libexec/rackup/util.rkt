@@ -13,9 +13,12 @@
          string-blank?
          executable-file?
          system*/check
+         shell-exe
+         capture-program-output
          current-iso8601
          path-basename-string
-         maybe-string->symbol
+         http-url?
+         require-checksummed-http-installer!
          sh-single-quote)
 
 (define (rackup-error fmt . args)
@@ -32,7 +35,7 @@
     [else (format "~a" p)]))
 
 (define (string-blank? s)
-  (regexp-match? #px"^\\s*$" s))
+  (string=? "" (string-trim s)))
 
 (define (executable-file? p)
   (and (file-exists? p)
@@ -43,6 +46,9 @@
   (define ok? (apply system* args))
   (unless ok?
     (rackup-error "~a failed: ~a" who (string-join (map path->string* args) " "))))
+
+(define (shell-exe)
+  (or (find-executable-path "sh") (string->path "/bin/sh")))
 
 (define (pad2 n)
   (~r n #:min-width 2 #:pad-string "0"))
@@ -66,13 +72,42 @@
                  "Z"))
 
 (define (path-basename-string p)
-  (path->string (file-name-from-path p)))
+  (define name (file-name-from-path p))
+  (if name
+      (path->string name)
+      (path->string* p)))
 
-(define (maybe-string->symbol v)
-  (cond
-    [(symbol? v) v]
-    [(string? v) (string->symbol v)]
-    [else #f]))
+(define (->env-bytes v)
+  (and v
+       (if (bytes? v)
+           v
+           (string->bytes/utf-8 (format "~a" v)))))
+
+(define (capture-program-output #:env [env-vars null] exe . args)
+  (define env (environment-variables-copy (current-environment-variables)))
+  (for ([kv (in-list env-vars)])
+    (environment-variables-set! env
+                                (string->bytes/utf-8 (format "~a" (car kv)))
+                                (->env-bytes (cdr kv))))
+  (define out (open-output-string))
+  (define err (open-output-string))
+  (parameterize ([current-environment-variables env]
+                 [current-output-port out]
+                 [current-error-port err])
+    (if (apply system* exe args)
+        (string-trim (get-output-string out))
+        #f)))
+
+(define (http-url? s)
+  (and (string? s) (regexp-match? #px"(?i:^http://)" s)))
+
+(define (require-checksummed-http-installer! installer-url expected-sha256)
+  (when (and (http-url? installer-url)
+             (or (not (string? expected-sha256))
+                 (string-blank? expected-sha256)))
+    (rackup-error
+     "refusing to download installer over HTTP without a hardcoded SHA-256 checksum: ~a"
+     installer-url)))
 
 (define (sh-single-quote s)
   (define str (format "~a" s))

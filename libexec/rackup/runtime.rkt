@@ -16,9 +16,6 @@
 (provide cmd-runtime
          hidden-runtime-status)
 
-(define (shell-exe)
-  (or (find-executable-path "sh") (string->path "/bin/sh")))
-
 (define (hidden-runtime-racket-path)
   (define p (build-path (rackup-runtime-current-link) "bin" "racket"))
   (and (executable-file? p) p))
@@ -51,8 +48,9 @@
   (build-path (rackup-download-cache-dir)
               (path-basename-string (string->path (car (reverse (string-split installer-url "/")))))))
 
-(define (ensure-installer-cached! installer-url)
+(define (ensure-installer-cached! installer-url #:sha256 [expected-sha256 #f])
   (ensure-rackup-layout!)
+  (require-checksummed-http-installer! installer-url expected-sha256)
   (define cache-path (runtime-cache-file installer-url))
   (unless (file-exists? cache-path)
     (displayln (format "Downloading hidden runtime installer: ~a" installer-url))
@@ -147,15 +145,6 @@
           "stable"))
   (write-rktd-file (rackup-runtime-meta-file id) meta)
   meta)
-
-(define (capture-program-output exe . args)
-  (define out (open-output-string))
-  (define err (open-output-string))
-  (parameterize ([current-output-port out]
-                 [current-error-port err])
-    (if (apply system* exe args)
-        (string-trim (get-output-string out))
-        #f)))
 
 (define (probe-runtime-version+variant racket-exe)
   (define version-out (capture-program-output racket-exe "-e" "(display (version))"))
@@ -299,7 +288,9 @@
                    [install-root (rackup-runtime-install-dir id)]
                    [bin-link (rackup-runtime-bin-link id)]
                    [installer-url (hash-ref req 'installer-url)]
-                   [installer-file (ensure-installer-cached! installer-url)]
+                   [installer-file
+                    (ensure-installer-cached! installer-url
+                                              #:sha256 (hash-ref req 'installer-sha256 #f))]
                    [installer-ext (installer-extension installer-file)])
               (if (and (directory-exists? version-dir) (file-exists? (build-path bin-link "racket")))
                   (begin

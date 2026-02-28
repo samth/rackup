@@ -766,9 +766,9 @@
 
 (define (installed-toolchain-metas/safe)
   (with-handlers ([exn:fail? (lambda (_) null)])
-    (for/list ([id (in-list (installed-toolchain-ids))])
-      (define m (read-toolchain-meta id))
-      (and (hash? m) m))))
+    (filter hash?
+            (for/list ([id (in-list (installed-toolchain-ids))])
+              (read-toolchain-meta id)))))
 
 (define (linked-source-paths/safe)
   (remove-duplicates
@@ -814,9 +814,54 @@
     (unless (and (string? answer) (equal? (string-trim answer) "DELETE"))
       (rackup-error "uninstall aborted"))))
 
+(define current-remove-shell-init-blocks-proc
+  (make-parameter remove-shell-init-blocks!))
+
+(define current-uninstall-system*-proc
+  (make-parameter system*))
+
+(define (normalized-path p)
+  (simplify-path (path->complete-path p) #t))
+
+(define (validate-uninstall-home-path! home-path)
+  (define normalized-home (normalized-path home-path))
+  (define user-home (normalized-path (find-system-path 'home-dir)))
+  (define env-home
+    (let ([h (getenv "HOME")])
+      (and h (not (string-blank? h)) (normalized-path h))))
+  (define current-dir (normalized-path (current-directory)))
+  (cond
+    [(not (absolute-path? normalized-home))
+     (rackup-error "refusing to uninstall non-absolute target: ~a" (path->string normalized-home))]
+    [(equal? normalized-home (string->path "/"))
+     (rackup-error "refusing to uninstall unsafe rackup home target: /")]
+    [(equal? normalized-home user-home)
+     (rackup-error
+      "refusing to uninstall unsafe rackup home target equal to your home directory: ~a"
+      (path->string normalized-home))]
+    [(and env-home (equal? normalized-home env-home))
+     (rackup-error
+      "refusing to uninstall unsafe rackup home target equal to your home directory: ~a"
+      (path->string normalized-home))]
+    [(equal? normalized-home current-dir)
+     (rackup-error
+      "refusing to uninstall unsafe rackup home target equal to the current directory: ~a"
+      (path->string normalized-home))]
+    [else normalized-home]))
+
+(define (uninstall-rm-exe)
+  (or (find-executable-path "rm") (string->path "/bin/rm")))
+
+(define (delete-rackup-home!/external home-path)
+  (define normalized-home (validate-uninstall-home-path! home-path))
+  (define ok? ((current-uninstall-system*-proc) (uninstall-rm-exe) "-rf" normalized-home))
+  (unless ok?
+    (rackup-error "failed to delete rackup home synchronously: ~a"
+                  (path->string normalized-home))))
+
 (define (cmd-uninstall rest)
   (define yes? (parse-uninstall-options rest))
-  (define home-path (rackup-home))
+  (define home-path (validate-uninstall-home-path! (rackup-home)))
   (warn-uninstall-summary home-path)
   (confirm-uninstall! home-path yes?)
   (define removed-rcs
@@ -824,20 +869,15 @@
                                  (eprintf "rackup: warning: failed to clean shell init blocks: ~a\n"
                                           (exn-message e))
                                  null)])
-      (remove-shell-init-blocks!)))
+      ((current-remove-shell-init-blocks-proc))))
   (when (directory-exists? home-path)
-    (define sh (or (find-executable-path "sh") (string->path "/bin/sh")))
-    ;; Delete after this process exits, since we're running code from this directory.
-    (define cleanup-cmd
-      (format "sleep 1; rm -rf ~a >/dev/null 2>&1" (sh-single-quote (path->string home-path))))
-    (with-handlers ([exn:fail? (lambda (_e) (void))])
-      (void (system* sh "-c" (string-append cleanup-cmd " &")))))
+    (delete-rackup-home!/external home-path))
   (displayln "rackup uninstalled.")
   (when (pair? removed-rcs)
     (displayln "Removed rackup shell init blocks from:")
     (for ([p (in-list removed-rcs)])
       (printf "  ~a\n" (path->string p))))
-  (displayln "Final file deletion may complete shortly after this command exits.")
+  (displayln "Rackup home deletion completed synchronously.")
   (displayln
    "Your current shell may still have rackup-related PATH/env changes until you start a new shell."))
 
@@ -857,9 +897,6 @@
        (loop more)]
       [(list flag _ ...)
        (rackup-error "usage: rackup self-upgrade [--with-init] (unknown flag ~a)" flag)])))
-
-(define (shell-exe/path)
-  (or (find-executable-path "sh") (string->path "/bin/sh")))
 
 (define (cmd-self-upgrade rest)
   (define opts (parse-self-upgrade-options rest))
@@ -884,14 +921,11 @@
                 null
                 (list "--no-init"))
             (list "--prefix" home-str)))
-  (define old-bootstrap-mode (getenv "RACKUP_BOOTSTRAP_MODE"))
-  (define ok? #f)
-  (dynamic-wind (lambda () (putenv "RACKUP_BOOTSTRAP_MODE" "self-upgrade"))
-                (lambda () (set! ok? (apply system* (shell-exe/path) script-path args)))
-                (lambda ()
-                  (if old-bootstrap-mode
-                      (putenv "RACKUP_BOOTSTRAP_MODE" old-bootstrap-mode)
-                      (putenv "RACKUP_BOOTSTRAP_MODE" ""))))
+  (define env (environment-variables-copy (current-environment-variables)))
+  (environment-variables-set! env #"RACKUP_BOOTSTRAP_MODE" #"self-upgrade")
+  (define ok?
+    (parameterize ([current-environment-variables env])
+      (apply system* (shell-exe) script-path args)))
   (when (and (url-like? source) (file-exists? script-path))
     (with-handlers ([exn:fail? (lambda (_) (void))])
       (delete-file script-path)))
