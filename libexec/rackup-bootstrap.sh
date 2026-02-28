@@ -149,6 +149,32 @@ rackup_prompt_shell() {
   esac
 }
 
+rackup_prompt_help_shell() {
+  cat <<'EOF'
+Usage: rackup prompt [--long|--short|--raw|--source]
+
+Print prompt/status information for the active toolchain.
+Prints nothing when no active/default toolchain is configured.
+Handled by the shell wrapper without starting Racket when possible.
+
+Default output:
+  racket-9.1
+
+Options:
+  --long                  Print the long bracketed form: "[rk:<toolchain-id>]".
+  --short                 Print a compact label like "racket-9.1" (same as default).
+  --raw                   Print only the active toolchain id.
+  --source                Print "<id><TAB><env|default>".
+
+Examples:
+  rackup prompt
+  rackup prompt --long
+  rackup prompt --short
+  rackup prompt --raw
+  PS1='$(rackup prompt) '$PS1
+EOF
+}
+
 rackup_mkdir_p() {
   mkdir -p "$1"
 }

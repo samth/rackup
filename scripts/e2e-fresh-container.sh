@@ -200,6 +200,15 @@ EOF
   echo "$pkg_dir"
 }
 
+require_local_test_package() {
+  shim_racket -e '(display (dynamic-require (quote rackup-e2e-pkg) (quote marker)))'
+}
+
+probe_local_test_package() {
+  local err_file="$1"
+  require_local_test_package 2>"$err_file" || true
+}
+
 create_fake_local_source_tree() {
   local root="${TMPDIR}/rackup-e2e-local-src"
   local plthome="$root/racket"
@@ -454,18 +463,34 @@ else
   run_rackup default "$primary_id"
   shim_raco pkg install --auto --batch --no-setup "$pkg_dir"
   shim_raco pkg show rackup-e2e-pkg >/dev/null
-  pkg_result="$(shim_racket -e '(require rackup-e2e-pkg) (display marker)')"
+  pkg_err="$(mktemp)"
+  pkg_result="$(probe_local_test_package "$pkg_err")"
+  if [[ -s "$pkg_err" ]]; then
+    cat "$pkg_err" >&2
+    rm -f "$pkg_err"
+    fail "local package probe emitted unexpected stderr in primary toolchain"
+  fi
+  rm -f "$pkg_err"
   assert_eq "rackup-e2e-package-ok" "$pkg_result" "local package should load in primary toolchain"
 
   if [[ ${#INSTALLED_IDS[@]} -ge 2 ]]; then
     secondary_id="${INSTALLED_IDS[$((${#INSTALLED_IDS[@]} - 1))]}"
     run_rackup default "$secondary_id"
-    if shim_racket -e '(require rackup-e2e-pkg) (display marker)' >/tmp/rackup-e2e-no-pkg.out 2>/tmp/rackup-e2e-no-pkg.err; then
+    secondary_result="$(probe_local_test_package /tmp/rackup-e2e-no-pkg.err)"
+    printf '%s' "$secondary_result" >/tmp/rackup-e2e-no-pkg.out
+    if [[ "$secondary_result" == "rackup-e2e-package-ok" ]] && [[ ! -s /tmp/rackup-e2e-no-pkg.err ]]; then
       fail "package installed in $primary_id unexpectedly visible in $secondary_id"
     else
       echo "Confirmed package isolation between $primary_id and $secondary_id"
     fi
-    run_pkg="$(run_rackup run "$primary_id" -- racket -e '(require rackup-e2e-pkg) (display marker)')"
+    run_pkg_err="$(mktemp)"
+    run_pkg="$(run_rackup run "$primary_id" -- racket -e '(display (dynamic-require (quote rackup-e2e-pkg) (quote marker)))' 2>"$run_pkg_err" || true)"
+    if [[ -s "$run_pkg_err" ]]; then
+      cat "$run_pkg_err" >&2
+      rm -f "$run_pkg_err"
+      fail "rackup run package probe emitted unexpected stderr in primary toolchain"
+    fi
+    rm -f "$run_pkg_err"
     assert_eq "rackup-e2e-package-ok" "$run_pkg" "rackup run should preserve package visibility for primary toolchain"
     run_rackup default "$secondary_id"
   fi

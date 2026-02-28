@@ -21,6 +21,10 @@ if [ "${1:-}" = "prompt" ]; then
       ;;
     2)
       case "${2:-}" in
+        -h|--help)
+          rackup_prompt_help_shell
+          exit 0
+          ;;
         --raw|--source|--short|--long)
           rackup_prompt_shell "$2"
           exit 0
@@ -28,6 +32,11 @@ if [ "${1:-}" = "prompt" ]; then
       esac
       ;;
   esac
+fi
+
+if [ "${1:-}" = "help" ] && [ "${2:-}" = "prompt" ] && [ "$#" -eq 2 ]; then
+  rackup_prompt_help_shell
+  exit 0
 fi
 
 RACKET_EXE="$(rackup_select_runtime_racket_or_fail)" || exit 1
