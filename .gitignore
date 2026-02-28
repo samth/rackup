@@ -4,6 +4,7 @@ compiled/
 
 # Tool output
 .rackup/
+.ci-cache/
 
 # Misc
 .DS_Store

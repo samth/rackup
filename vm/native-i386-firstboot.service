@@ -1,0 +1,14 @@
+[Unit]
+Description=Run native i386 rackup smoke test on first boot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/rackup-native-i386-firstboot
+StandardOutput=journal+console
+StandardError=journal+console
+RemainAfterExit=true
+
+[Install]
+WantedBy=multi-user.target

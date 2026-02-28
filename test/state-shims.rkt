@@ -102,6 +102,37 @@
          (check-true
           (string-contains? err "Inspect choices with: rackup list | rackup available --limit 20"))))))
 
+  (with-temp-rackup-home
+   (lambda (_tmp)
+     (ensure-index!)
+     (define id "release-8.18-cs-x86_64-linux-full")
+     (define install-root (rackup-toolchain-install-dir id))
+     (define real-bin (build-path install-root "bin"))
+     (make-directory* real-bin)
+     (write-string-file (build-path real-bin "racket")
+                        "#!/usr/bin/env bash\nexit 23\n")
+     (file-or-directory-permissions (build-path real-bin "racket") #o755)
+     (make-file-or-directory-link real-bin (rackup-toolchain-bin-link id))
+     (register-toolchain!
+      id
+      (hash 'id id
+            'kind 'release
+            'requested-spec "stable"
+            'resolved-version "8.18"
+            'variant 'cs
+            'distribution 'full
+            'arch "x86_64"
+            'platform "linux"
+            'executables '("racket")
+            'installed-at "2026-02-28T00:00:00Z"))
+     (set-default-toolchain! id)
+     (reshim!)
+     (let-values ([(status out err) (run-program/capture (build-path (rackup-shims-dir) "racket")
+                                                         '("--version"))])
+       (check-equal? status 23)
+       (check-equal? out "")
+       (check-equal? err ""))))
+
   (with-temp-rackup-home (lambda (tmp)
                            (ensure-index!)
                            (check-true (directory-exists? (rackup-home)))
@@ -224,6 +255,8 @@
                             (string-contains?
                              dispatcher-src
                              "if rackup_print_missing_loader_message \"$TARGET\"; then"))
+                           (check-true
+                            (string-contains? dispatcher-src "qemu-i386 via binfmt_misc"))
                            (define helper-src (shell-helper-script/private))
                            (check-true (string-contains? helper-src "_rackup_status"))
                            (check-true (string-contains? helper-src "return \"$_rackup_status\"")))))
@@ -296,6 +329,80 @@
        (check-equal? status 0)
        (check-equal? err "")
        (check-true (string-contains? out (format "PLTHOME=~a" (path->string plthome)))))))
+
+  (with-temp-rackup-home
+   (lambda (tmp)
+     (ensure-index!)
+     (define id "release-103p1-bc-i386-linux-full")
+     (define install-root (rackup-toolchain-install-dir id))
+     (define real-bin (build-path install-root "bin"))
+     (define plthome (build-path install-root "plt"))
+     (define legacy-bin (build-path plthome ".bin" "i386-linux"))
+     (define archsys (build-path plthome "bin" "archsys"))
+     (define fake-binfmt-dir (build-path tmp "binfmt"))
+     (make-directory* real-bin)
+     (make-directory* legacy-bin)
+     (make-directory* (build-path plthome "bin"))
+     (make-directory* fake-binfmt-dir)
+     (define racket-exe (build-path real-bin "racket"))
+     (write-string-file racket-exe "#!/usr/bin/env bash\nexit 139\n")
+     (file-or-directory-permissions racket-exe #o755)
+     (write-string-file archsys "#!/bin/sh\necho i386-linux\n")
+     (file-or-directory-permissions archsys #o755)
+     (call-with-output-file (build-path legacy-bin "racket")
+       (lambda (out)
+         (write-bytes #"\177ELF\1" out)
+         (write-bytes #"fake-legacy-racket\n" out))
+       #:exists 'truncate/replace)
+     (file-or-directory-permissions (build-path legacy-bin "racket") #o755)
+     (write-string-file (build-path fake-binfmt-dir "qemu-i386")
+                        "enabled\ninterpreter /usr/bin/qemu-i386\n")
+     (write-string-file (rackup-toolchain-env-file id)
+                        (format "#!/usr/bin/env bash\nexport PLTHOME='~a'\n"
+                                (path->string plthome)))
+     (make-file-or-directory-link real-bin (rackup-toolchain-bin-link id))
+     (register-toolchain!
+      id
+      (hash 'id id
+            'kind 'release
+            'requested-spec "103p1"
+            'resolved-version "103p1"
+            'variant 'bc
+            'distribution 'full
+            'arch "i386"
+            'platform "linux"
+            'install-root (path->string install-root)
+            'bin-link (path->string (rackup-toolchain-bin-link id))
+            'real-bin-dir (path->string real-bin)
+            'executables '("racket")
+            'installed-at "2026-02-28T00:00:00Z"))
+     (set-default-toolchain! id)
+     (reshim!)
+     (define old-binfmt-dir (getenv "RACKUP_TEST_BINFMT_MISC_DIR"))
+     (dynamic-wind
+      (lambda ()
+        (putenv "RACKUP_TEST_BINFMT_MISC_DIR" (path->string fake-binfmt-dir)))
+      (lambda ()
+        (let-values ([(status out err) (run-program/capture (build-path (rackup-shims-dir) "racket")
+                                                            '("--version"))])
+          (check-equal? status 139)
+          (check-equal? out "")
+          (check-true
+           (string-contains?
+            err
+            "appears to be running through qemu-i386 via binfmt_misc on this host."))
+          (check-true
+           (string-contains?
+            err
+            "setarch i386 -R' only helps when the binary is running natively, not through qemu-user."))
+          (check-true
+           (string-contains?
+            err
+            "disable qemu-i386 binfmt_misc and retry, or use a true native i386 environment/VM."))))
+      (lambda ()
+        (if old-binfmt-dir
+            (putenv "RACKUP_TEST_BINFMT_MISC_DIR" old-binfmt-dir)
+            (putenv "RACKUP_TEST_BINFMT_MISC_DIR" ""))))))
 
   (with-temp-rackup-home
    (lambda (tmp)

@@ -166,6 +166,43 @@ jobs:
         run: |
           scripts/docker-test-fresh-install.sh --spec pre-release
 
+  native-i386-vm-103p1:
+    name: Native i386 VM (103p1 smoke)
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install QEMU VM dependencies
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 qemu-utils xorriso cpio gzip curl
+      - name: Restore native i386 VM downloads cache
+        uses: actions/cache@v4
+        with:
+          path: .ci-cache/native-i386-vm/downloads
+          key: native-i386-vm-downloads-${{ hashFiles('scripts/native-i386-vm-test.sh') }}
+      - name: Restore native i386 VM guest disk cache
+        uses: actions/cache@v4
+        with:
+          path: .ci-cache/native-i386-vm/debian-i386.qcow2
+          key: native-i386-vm-disk-v1-${{ hashFiles('scripts/native-i386-vm-test.sh', 'scripts/ci-native-i386-vm-smoke.sh', 'vm/native-i386-firstboot.sh', 'vm/native-i386-firstboot.service') }}
+      - name: Native i386 103p1 smoke
+        shell: bash
+        run: |
+          chmod +x scripts/native-i386-vm-test.sh scripts/ci-native-i386-vm-smoke.sh
+          scripts/ci-native-i386-vm-smoke.sh
+      - name: Upload native i386 VM artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-i386-vm-103p1
+          path: |
+            .ci-cache/native-i386-vm/install-serial.log
+            .ci-cache/native-i386-vm/run-serial.log
+            .ci-cache/native-i386-vm/share/output
+          if-no-files-found: warn
+
   docker-e2e-bootstrap:
     name: Docker E2E (bootstrap + local link)
     runs-on: ubuntu-latest

@@ -70,17 +70,17 @@ if [[ -z "${PLTADDONDIR:-}" ]]; then
   export PLTADDONDIR="$HOME_DIR/addons/$ACTIVE"
 fi
 
-rackup_print_missing_loader_message() {
-  local target="$1"
-  local inspect_target host_machine sys candidate header
-  rackup_is_elf32() {
-    local probe="$1"
-    if ! command -v od >/dev/null 2>&1; then
-      return 1
-    fi
-    header="$(od -An -t u1 -N 5 "$probe" 2>/dev/null | tr -s "[:space:]" " " | sed "s/^ //")"
-    [[ "$header" == "127 69 76 70 1" ]]
-  }
+rackup_is_elf32() {
+  local probe="$1" header
+  if ! command -v od >/dev/null 2>&1; then
+    return 1
+  fi
+  header="$(od -An -t u1 -N 5 "$probe" 2>/dev/null | tr -s "[:space:]" " " | sed -e "s/^ //" -e "s/ $//")"
+  [[ "$header" == "127 69 76 70 1" ]]
+}
+
+rackup_resolve_inspect_target() {
+  local target="$1" inspect_target sys candidate
   inspect_target="$target"
   if ! rackup_is_elf32 "$inspect_target"; then
     if [[ -n "${PLTHOME:-}" && -d "$PLTHOME/.bin" ]]; then
@@ -100,6 +100,37 @@ rackup_print_missing_loader_message() {
       fi
     fi
   fi
+  printf '%s\n' "$inspect_target"
+}
+
+rackup_qemu_i386_binfmt_entry_path() {
+  local root="${RACKUP_TEST_BINFMT_MISC_DIR:-/proc/sys/fs/binfmt_misc}"
+  printf '%s/qemu-i386\n' "$root"
+}
+
+rackup_qemu_i386_binfmt_enabled() {
+  local entry
+  entry="$(rackup_qemu_i386_binfmt_entry_path)"
+  if [[ ! -r "$entry" ]]; then
+    return 1
+  fi
+  if ! grep -Fqx "enabled" "$entry" >/dev/null 2>&1; then
+    return 1
+  fi
+  if ! grep -Fq "interpreter /usr/bin/qemu-i386" "$entry" >/dev/null 2>&1; then
+    return 1
+  fi
+  return 0
+}
+
+rackup_aslr_sensitive_legacy_i386_toolchain() {
+  [[ "$ACTIVE" =~ ^release-(053|103|103p1)-bc-i386-linux- ]]
+}
+
+rackup_print_missing_loader_message() {
+  local target="$1"
+  local inspect_target host_machine
+  inspect_target="$(rackup_resolve_inspect_target "$target")"
   if ! rackup_is_elf32 "$inspect_target"; then
     return 1
   fi
@@ -130,16 +161,44 @@ rackup_warn_missing_loader() {
   rackup_print_missing_loader_message "$1" >/dev/null
 }
 
+rackup_print_qemu_i386_aslr_message() {
+  local target="$1"
+  local inspect_target host_machine
+  inspect_target="$(rackup_resolve_inspect_target "$target")"
+  if ! rackup_is_elf32 "$inspect_target"; then
+    return 1
+  fi
+  if ! rackup_aslr_sensitive_legacy_i386_toolchain; then
+    return 1
+  fi
+  host_machine="$(uname -m 2>/dev/null || true)"
+  case "$host_machine" in
+    x86_64|amd64) ;;
+    *) return 1 ;;
+  esac
+  if ! rackup_qemu_i386_binfmt_enabled; then
+    return 1
+  fi
+  echo "rackup: '$SHIM_NAME' from toolchain '$ACTIVE' appears to be running through qemu-i386 via binfmt_misc on this host." >&2
+  if [[ "$inspect_target" != "$target" ]]; then
+    echo "rackup: resolved underlying executable: $inspect_target" >&2
+  fi
+  echo "rackup: for very old i386 PLT releases such as 053/103/103p1, 'setarch i386 -R' only helps when the binary is running natively, not through qemu-user." >&2
+  echo "rackup: disable qemu-i386 binfmt_misc and retry, or use a true native i386 environment/VM." >&2
+  return 0
+}
+
 if rackup_print_missing_loader_message "$TARGET"; then
   exit 126
 fi
 
-if "$TARGET" "$@"; then
-  exit 0
-fi
+set +e
+"$TARGET" "$@"
 STATUS=$?
+set -e
 case "$STATUS" in
-  126|127) rackup_warn_missing_loader "$TARGET" ;;
+  126|127) rackup_warn_missing_loader "$TARGET" || true ;;
+  139) rackup_print_qemu_i386_aslr_message "$TARGET" || true ;;
 esac
 exit "$STATUS"
 EOF
