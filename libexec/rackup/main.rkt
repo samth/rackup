@@ -437,6 +437,18 @@
   (define ids (installed-toolchain-ids idx))
   (define default-id (get-default-toolchain idx))
   (define active-id (resolve-active-toolchain-id))
+  (define env-id (getenv "RACKUP_TOOLCHAIN"))
+  (define stale-env?
+    (and env-id
+         (not (string-blank? env-id))
+         (not (member env-id ids))))
+  (when stale-env?
+    (printf "Warning: RACKUP_TOOLCHAIN selects '~a', but that toolchain is not installed.\n" env-id)
+    (when (and default-id (member default-id ids))
+      (printf "It overrides the default toolchain '~a'.\n" default-id))
+    (displayln "Clear it with: rackup switch --unset")
+    (displayln "Or unset it manually with: unset RACKUP_TOOLCHAIN")
+    (newline))
   (if (null? ids)
       (displayln "No toolchains installed.")
       (for ([id ids])

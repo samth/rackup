@@ -30,10 +30,14 @@ LIBEXEC_DIR="$(cd -P "$(dirname "$SELF")" && pwd)"
 HOME_DIR="${RACKUP_HOME:-$(cd -P "$LIBEXEC_DIR/.." && pwd)}"
 SHIM_NAME="$(basename "$0")"
 DEFAULT_FILE="$HOME_DIR/state/default-toolchain"
+DEFAULT_ID=""
 ENV_FILE=""
 ACTIVE="${RACKUP_TOOLCHAIN:-}"
-if [[ -z "$ACTIVE" && -f "$DEFAULT_FILE" ]]; then
-  ACTIVE="$(tr -d '\r\n' < "$DEFAULT_FILE")"
+if [[ -f "$DEFAULT_FILE" ]]; then
+  DEFAULT_ID="$(tr -d '\r\n' < "$DEFAULT_FILE")"
+fi
+if [[ -z "$ACTIVE" && -n "$DEFAULT_ID" ]]; then
+  ACTIVE="$DEFAULT_ID"
 fi
 if [[ -z "$ACTIVE" ]]; then
   echo "rackup: '$SHIM_NAME' is managed by rackup, but no active toolchain is configured." >&2
@@ -46,6 +50,15 @@ TARGET="$HOME_DIR/toolchains/$ACTIVE/bin/$SHIM_NAME"
 ENV_FILE="$HOME_DIR/toolchains/$ACTIVE/env.sh"
 if [[ ! -x "$TARGET" ]]; then
   echo "rackup: executable '$SHIM_NAME' not found in toolchain '$ACTIVE'" >&2
+  if [[ -n "${RACKUP_TOOLCHAIN:-}" ]]; then
+    if [[ -n "$DEFAULT_ID" ]]; then
+      echo "rackup: active toolchain came from RACKUP_TOOLCHAIN and overrides default toolchain '$DEFAULT_ID'." >&2
+    else
+      echo "rackup: active toolchain came from RACKUP_TOOLCHAIN." >&2
+    fi
+    echo "Clear it with: rackup switch --unset" >&2
+    echo "Or unset it manually with: unset RACKUP_TOOLCHAIN" >&2
+  fi
   echo "Try: rackup which $SHIM_NAME --toolchain $ACTIVE" >&2
   exit 127
 fi

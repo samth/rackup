@@ -179,6 +179,35 @@
                                               "[default,active] release-8.18-cs-x86_64-linux-full"))
                            (check-false (string-contains? list-out "\n* "))
                            (check-false (string-contains? list-out "\n    tags: "))
+                           (define old-env-id (getenv "RACKUP_TOOLCHAIN"))
+                           (dynamic-wind
+                            (lambda () (putenv "RACKUP_TOOLCHAIN" "release-103-bc-i386-linux-full"))
+                            (lambda ()
+                              (define stale-list-out (run-main/stdout '("list")))
+                              (check-true
+                               (string-contains?
+                                stale-list-out
+                                "Warning: RACKUP_TOOLCHAIN selects 'release-103-bc-i386-linux-full', but that toolchain is not installed."))
+                              (check-true
+                               (string-contains?
+                                stale-list-out
+                                "It overrides the default toolchain 'release-8.18-cs-x86_64-linux-full'."))
+                              (check-true
+                               (string-contains?
+                                stale-list-out
+                                "Clear it with: rackup switch --unset"))
+                              (check-true
+                               (string-contains?
+                                stale-list-out
+                                "Or unset it manually with: unset RACKUP_TOOLCHAIN"))
+                              (check-true
+                               (string-contains?
+                                stale-list-out
+                                "[default] release-8.18-cs-x86_64-linux-full")))
+                            (lambda ()
+                              (if old-env-id
+                                  (putenv "RACKUP_TOOLCHAIN" old-env-id)
+                                  (putenv "RACKUP_TOOLCHAIN" ""))))
 
                            (reshim!)
                            (check-true (link-exists? (build-path (rackup-shims-dir) "racket")))
@@ -187,6 +216,10 @@
                            (check-true (string-contains? dispatcher-src "PLTHOME/.bin"))
                            (check-true
                             (string-contains? dispatcher-src "resolved underlying executable"))
+                           (check-true
+                            (string-contains?
+                             dispatcher-src
+                             "active toolchain came from RACKUP_TOOLCHAIN and overrides default toolchain"))
                            (check-true
                             (string-contains?
                              dispatcher-src
@@ -898,6 +931,103 @@
             (putenv "RACKUP_TOOLCHAIN" ""))))
      (check-equal? (run-main/stdout '("default" "clear")) "Cleared default toolchain.\n")
      (check-equal? (run-main/stdout '("default" "status")) "unset\n")))
+
+  (with-temp-rackup-home
+   (lambda (_tmp)
+     (ensure-index!)
+     (define old-env-id (getenv "RACKUP_TOOLCHAIN"))
+     (dynamic-wind
+      (lambda () (putenv "RACKUP_TOOLCHAIN" "release-103-bc-i386-linux-full"))
+      (lambda ()
+        (define list-out (run-main/stdout '("list")))
+        (check-true
+         (string-contains?
+          list-out
+          "Warning: RACKUP_TOOLCHAIN selects 'release-103-bc-i386-linux-full', but that toolchain is not installed."))
+        (check-true (string-contains? list-out "Clear it with: rackup switch --unset"))
+        (check-true
+         (string-contains? list-out "Or unset it manually with: unset RACKUP_TOOLCHAIN"))
+        (check-true (string-contains? list-out "No toolchains installed.")))
+      (lambda ()
+        (if old-env-id
+            (putenv "RACKUP_TOOLCHAIN" old-env-id)
+            (putenv "RACKUP_TOOLCHAIN" ""))))))
+
+  (with-temp-rackup-home
+   (lambda (_tmp)
+     (ensure-index!)
+     (define id "release-8.18-cs-x86_64-linux-full")
+     (define install-root (rackup-toolchain-install-dir id))
+     (define real-bin (build-path install-root "bin"))
+     (make-directory* real-bin)
+     (define racket-exe (build-path real-bin "racket"))
+     (write-string-file racket-exe "#!/usr/bin/env bash\necho test\n")
+     (file-or-directory-permissions racket-exe #o755)
+     (make-file-or-directory-link real-bin (rackup-toolchain-bin-link id))
+     (register-toolchain!
+      id
+      (hash 'id
+            id
+            'kind
+            'release
+            'requested-spec
+            "stable"
+            'resolved-version
+            "8.18"
+            'variant
+            'cs
+            'distribution
+            'full
+            'arch
+            "x86_64"
+            'platform
+            "linux"
+            'snapshot-site
+            #f
+            'snapshot-stamp
+            #f
+            'installer-url
+            "https://example.invalid/racket.sh"
+            'installer-filename
+            "racket.sh"
+            'install-root
+            (path->string install-root)
+            'bin-link
+            (path->string (rackup-toolchain-bin-link id))
+            'real-bin-dir
+            (path->string real-bin)
+            'executables
+            '("racket")
+            'installed-at
+            "2026-02-26T00:00:00Z"))
+     (reshim!)
+     (define old-env-id (getenv "RACKUP_TOOLCHAIN"))
+     (dynamic-wind
+      (lambda () (putenv "RACKUP_TOOLCHAIN" "release-103-bc-i386-linux-full"))
+      (lambda ()
+        (define shim (build-path (rackup-shims-dir) "racket"))
+        (let-values ([(status out err) (run-program/capture shim '("--version"))])
+          (check-equal? status 127)
+          (check-equal? out "")
+          (check-true
+           (string-contains?
+            err
+            "rackup: executable 'racket' not found in toolchain 'release-103-bc-i386-linux-full'"))
+          (check-true
+           (string-contains?
+            err
+            "rackup: active toolchain came from RACKUP_TOOLCHAIN and overrides default toolchain 'release-8.18-cs-x86_64-linux-full'."))
+          (check-true (string-contains? err "Clear it with: rackup switch --unset"))
+          (check-true
+           (string-contains? err "Or unset it manually with: unset RACKUP_TOOLCHAIN"))
+          (check-true
+           (string-contains?
+            err
+            "Try: rackup which racket --toolchain release-103-bc-i386-linux-full"))))
+      (lambda ()
+        (if old-env-id
+            (putenv "RACKUP_TOOLCHAIN" old-env-id)
+            (putenv "RACKUP_TOOLCHAIN" ""))))))
 
   (with-temp-rackup-home
    (lambda (_tmp)
