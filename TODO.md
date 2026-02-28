@@ -98,4 +98,7 @@ Deferred and future work that came up in `PLAN.md`, implementation, or follow-up
 - Should there be a `migrate` command to move packages between two
   installs?
   
-- 
+- refactor the code to move all of the pre-6.1.1 handling to a
+  separate file
+  
+- why libexec as a directory name?
