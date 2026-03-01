@@ -18,6 +18,8 @@ SOURCE_BUILD_TARGET="${RACKUP_E2E_SOURCE_BUILD_TARGET:-base}"
 SOURCE_BUILD_JOBS="${RACKUP_E2E_SOURCE_BUILD_JOBS:-2}"
 HOST_RACKET="${RACKUP_E2E_HOST_RACKET:-present}"
 PREBUILT_PAGES_DIR=""
+PREBUILT_PAGES_DIR_OWNED=0
+DOWNLOAD_CACHE_DIR=""
 
 usage() {
   cat <<'USAGE'
@@ -46,6 +48,8 @@ Options:
   --source-build-target T make target for source-build local-link mode (default: base)
   --source-build-jobs N   Parallel jobs for source-build local-link mode (default: 2)
   --host-racket MODE      present|absent system Racket in test image (default: present)
+  --download-cache-dir DIR
+                        Reuse a prepared rackup download cache from the host
   --skip-package-tests    Skip package-manager/isolation checks inside the container
   --unit-tests            Also run repo unit tests in container before install smoke test
   -h, --help              Show help
@@ -118,6 +122,10 @@ while [[ $# -gt 0 ]]; do
       HOST_RACKET="$2"
       shift 2
       ;;
+    --download-cache-dir)
+      DOWNLOAD_CACHE_DIR="$2"
+      shift 2
+      ;;
     --unit-tests)
       UNIT_TESTS=1
       shift
@@ -171,30 +179,43 @@ case "$HOST_RACKET" in
 esac
 
 ROOT_DIR="$(cd -P "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+base_tag="${BASE_IMAGE//\//-}"
+base_tag="${base_tag//:/-}"
+platform_tag="${DOCKER_PLATFORM:-native}"
+platform_tag="${platform_tag//\//-}"
+platform_tag="${platform_tag//:/-}"
 
 cleanup() {
-  if [[ -n "$PREBUILT_PAGES_DIR" ]]; then
+  if [[ "$PREBUILT_PAGES_DIR_OWNED" -eq 1 && -n "$PREBUILT_PAGES_DIR" ]]; then
     rm -rf "$PREBUILT_PAGES_DIR"
   fi
 }
 trap cleanup EXIT
 
 if [[ -z "$IMAGE_TAG" ]]; then
-  base_tag="${BASE_IMAGE//\//-}"
-  base_tag="${base_tag//:/-}"
-  platform_tag="${DOCKER_PLATFORM:-native}"
-  platform_tag="${platform_tag//\//-}"
-  platform_tag="${platform_tag//:/-}"
   IMAGE_TAG="rackup-e2e:${HOST_RACKET}-${base_tag}-${platform_tag}"
+fi
+
+if [[ -n "$DOWNLOAD_CACHE_DIR" ]]; then
+  mkdir -p "$DOWNLOAD_CACHE_DIR"
+  DOWNLOAD_CACHE_DIR="$(cd "$DOWNLOAD_CACHE_DIR" && pwd)"
 fi
 
 if [[ "$BUILD" -eq 1 ]]; then
   echo "Building Docker image ${IMAGE_TAG} (base=${BASE_IMAGE}, platform=${DOCKER_PLATFORM:-native})..."
-  build_cmd=(docker build)
+  use_gha_buildx_cache=0
+  if [[ "${GITHUB_ACTIONS:-}" == "true" ]] && docker buildx version >/dev/null 2>&1; then
+    use_gha_buildx_cache=1
+  fi
+  if [[ "$use_gha_buildx_cache" -eq 1 ]]; then
+    build_cmd=(docker buildx build --load)
+    cache_scope="rackup-e2e-${HOST_RACKET}-${base_tag}-${platform_tag}"
+    build_cmd+=(--cache-from "type=gha,scope=${cache_scope}"
+                --cache-to "type=gha,scope=${cache_scope},mode=max")
+  else
+    build_cmd=(docker build)
+  fi
   if [[ -n "$DOCKER_PLATFORM" ]]; then
-    if docker buildx version >/dev/null 2>&1; then
-      build_cmd=(docker buildx build --load)
-    fi
     build_cmd+=(--platform "$DOCKER_PLATFORM")
   fi
   if [[ "$HOST_RACKET" == "present" ]]; then
@@ -242,9 +263,18 @@ if [[ "$MODE" == "bootstrap-curl" ]]; then
     PREBUILT_PAGES_DIR="$RACKUP_E2E_PREBUILT_PAGES_DIR"
   else
     PREBUILT_PAGES_DIR="$(mktemp -d "${TMPDIR:-/tmp}/rackup-pages-prebuilt.XXXXXX")"
+    PREBUILT_PAGES_DIR_OWNED=1
     sh "$ROOT_DIR/scripts/build-pages-site.sh" "$PREBUILT_PAGES_DIR"
   fi
   run_cmd+=(-v "$PREBUILT_PAGES_DIR:/prebuilt-pages:ro")
+fi
+
+if [[ -n "$DOWNLOAD_CACHE_DIR" ]]; then
+  run_cmd+=(
+    -v "$DOWNLOAD_CACHE_DIR:/tmp/rackup-e2e-home/.rackup-direct/cache/downloads"
+    -v "$DOWNLOAD_CACHE_DIR:/tmp/rackup-e2e-home/.rackup-bootstrap/cache/downloads"
+    -v "$DOWNLOAD_CACHE_DIR:/tmp/rackup-e2e-home/.rackup-bootstrap-curl/cache/downloads"
+  )
 fi
 
 "${run_cmd[@]}" \
