@@ -10,6 +10,7 @@
          "install.rkt"
          "paths.rkt"
          "remote.rkt"
+         "rktd-io.rkt"
          "runtime.rkt"
          "shell.rkt"
          "shims.rkt"
@@ -587,10 +588,9 @@
       [(equal? (car rest) "--") (values (reverse left) (cdr rest))]
       [else (loop (cons (car rest) left) (cdr rest))])))
 
-(define (apply-toolchain-runtime-env! id)
-  (for ([kv (in-list (toolchain-env-vars id))])
-    (putenv (car kv) (cdr kv)))
-  (putenv "PLTADDONDIR" (path->string (rackup-addon-dir id))))
+(define (toolchain-runtime-env-vars id)
+  (append (toolchain-env-vars id)
+          (list (cons "PLTADDONDIR" (path->string (rackup-addon-dir id))))))
 
 (define (cmd-run rest)
   (ensure-index!)
@@ -600,16 +600,28 @@
      (unless (pair? tail)
        (rackup-error "usage: rackup run <toolchain> -- <command> [args...]"))
      (define id (resolve-toolchain-or-die spec))
-     (putenv "RACKUP_TOOLCHAIN" id)
-     (apply-toolchain-runtime-env! id)
+     (define env (environment-variables-copy (current-environment-variables)))
+     (environment-variables-set! env #"RACKUP_TOOLCHAIN" (string->bytes/utf-8 id))
+     (for ([kv (in-list (toolchain-runtime-env-vars id))])
+       (environment-variables-set! env
+                                   (string->bytes/utf-8 (car kv))
+                                   (string->bytes/utf-8 (cdr kv))))
      (define old-path (or (getenv "PATH") ""))
      (define shims (path->string (rackup-shims-dir)))
-     (unless (regexp-match? (pregexp (format "(^|:)~a(:|$)" (regexp-quote shims))) old-path)
-       (putenv "PATH" (string-append shims ":" old-path)))
+     (define runtime-path
+       (if (regexp-match? (pregexp (format "(^|:)~a(:|$)" (regexp-quote shims))) old-path)
+           old-path
+           (string-append shims ":" old-path)))
+     (environment-variables-set! env #"PATH" (string->bytes/utf-8 runtime-path))
      (define cmd (car tail))
      (define args (cdr tail))
-     (define exe (or (find-executable-path cmd) cmd))
-     (exit (if (apply system* exe args) 0 1))]
+     (define exe
+       (or (resolve-executable-path cmd id)
+           (resolve-command-path cmd runtime-path)
+           cmd))
+     (exit
+      (parameterize ([current-environment-variables env])
+        (if (apply system* exe args) 0 1)))]
     [_ (rackup-error "usage: rackup run <toolchain> -- <command> [args...]")]))
 
 (define (cmd-remove rest)
@@ -820,6 +832,24 @@
 (define current-uninstall-system*-proc
   (make-parameter system*))
 
+(define (uninstall-request-file)
+  (define raw (getenv "RACKUP_UNINSTALL_REQUEST_FILE"))
+  (and raw
+       (not (string-blank? raw))
+       (string->path raw)))
+
+(define (write-uninstall-request! request-path home-path removed-rcs)
+  (write-string-file
+   request-path
+   (string-append
+    (path->string home-path)
+    "\n"
+    (if (null? removed-rcs)
+        ""
+        (string-append
+         (string-join (map path->string removed-rcs) "\n")
+         "\n")))))
+
 (define (normalized-path p)
   (simplify-path (path->complete-path p) #t))
 
@@ -870,16 +900,21 @@
                                           (exn-message e))
                                  null)])
       ((current-remove-shell-init-blocks-proc))))
-  (when (directory-exists? home-path)
-    (delete-rackup-home!/external home-path))
-  (displayln "rackup uninstalled.")
-  (when (pair? removed-rcs)
-    (displayln "Removed rackup shell init blocks from:")
-    (for ([p (in-list removed-rcs)])
-      (printf "  ~a\n" (path->string p))))
-  (displayln "Rackup home deletion completed synchronously.")
-  (displayln
-   "Your current shell may still have rackup-related PATH/env changes until you start a new shell."))
+  (define request-file (uninstall-request-file))
+  (cond
+    [request-file
+     (write-uninstall-request! request-file home-path removed-rcs)]
+    [else
+     (when (directory-exists? home-path)
+       (delete-rackup-home!/external home-path))
+     (displayln "rackup uninstalled.")
+     (when (pair? removed-rcs)
+       (displayln "Removed rackup shell init blocks from:")
+       (for ([p (in-list removed-rcs)])
+         (printf "  ~a\n" (path->string p))))
+     (displayln "Rackup home deletion completed synchronously.")
+     (displayln
+      "Your current shell may still have rackup-related PATH/env changes until you start a new shell.")]))
 
 (define (self-upgrade-script-source)
   (or (getenv "RACKUP_SELF_UPGRADE_INSTALL_SH") "https://samth.github.io/rackup/install.sh"))

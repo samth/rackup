@@ -77,6 +77,16 @@
       (apply system* rackup-bin args)))
   (values ok? (get-output-string out) (get-output-string err)))
 
+(define (run-bin-rackup/capture/env env args)
+  (define out (open-output-string))
+  (define err (open-output-string))
+  (define ok?
+    (parameterize ([current-environment-variables env]
+                   [current-output-port out]
+                   [current-error-port err])
+      (apply system* rackup-bin args)))
+  (values ok? (get-output-string out) (get-output-string err)))
+
 (define (run-program/capture program args)
   (define-values (proc stdout stdin stderr)
     (apply subprocess #f #f #f program args))
@@ -824,6 +834,59 @@
                          (path->string (rackup-runtime-addon-dir))))
      (check-true (string-suffix? (list-ref argv 3) "libexec/rackup-core.rkt"))
      (check-equal? (drop argv 4) '("current" "id"))))
+
+  (with-temp-rackup-home
+   (lambda (tmp)
+     (ensure-rackup-layout!)
+     (define fake-bin-dir (build-path tmp "fake-system-bin"))
+     (define captured-argv (build-path tmp "captured-system-runtime-argv.txt"))
+     (define captured-env (build-path tmp "captured-system-runtime-env.txt"))
+     (make-directory* fake-bin-dir)
+     (define fake-racket (build-path fake-bin-dir "racket"))
+     (write-string-file fake-racket
+                        (string-append
+                         "#!/usr/bin/env bash\n"
+                         "set -euo pipefail\n"
+                         "printf '%s\\n' \"$@\" > "
+                         (path->string captured-argv)
+                         "\n"
+                         "printf 'PLTHOME=%s\\nPLTCOLLECTS=%s\\nPLTADDONDIR=%s\\n' "
+                         "\"${PLTHOME:-}\" "
+                         "\"${PLTCOLLECTS:-}\" "
+                         "\"${PLTADDONDIR:-}\" > "
+                         (path->string captured-env)
+                         "\n"))
+     (file-or-directory-permissions fake-racket #o755)
+     (define env (environment-variables-copy (current-environment-variables)))
+     (environment-variables-set! env
+                                 #"PATH"
+                                 (string->bytes/utf-8
+                                  (string-append (path->string fake-bin-dir)
+                                                 ":"
+                                                 (or (getenv "PATH") "/usr/bin:/bin"))))
+     (environment-variables-set! env #"PLTHOME" #"poison-plthome")
+     (environment-variables-set! env #"PLTCOLLECTS" #"poison-collects")
+     (environment-variables-set! env #"PLTADDONDIR" #"poison-addon")
+     (let-values ([(ok? out err) (run-bin-rackup/capture/env env '("current" "id"))])
+       (check-true ok?)
+       (check-equal? out "")
+       (check-equal? err ""))
+     (define argv
+       (string-split (string-trim (file->string captured-argv)) "\n"))
+     (check-equal? (take argv 4)
+                   (list "-y"
+                         "-U"
+                         "-A"
+                         (list-ref argv 3)))
+     (check-false (string-prefix? (path->string (rackup-home)) (list-ref argv 3)))
+     (check-true (directory-exists? (string->path (list-ref argv 3))))
+     (check-true (string-suffix? (list-ref argv 4) "libexec/rackup-core.rkt"))
+     (check-equal? (drop argv 5) '("current" "id"))
+     (define env-lines (string-split (string-trim (file->string captured-env)) "\n"))
+     (check-equal? env-lines
+                   '("PLTHOME="
+                     "PLTCOLLECTS="
+                     "PLTADDONDIR="))))
 
   (let* ([rc-before (format "~a\n"
                             @~a{export FOO=1

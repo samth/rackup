@@ -12,6 +12,7 @@
          path->string*
          string-blank?
          executable-file?
+         resolve-command-path
          system*/check
          shell-exe
          capture-program-output
@@ -41,6 +42,20 @@
   (and (file-exists? p)
        (with-handlers ([exn:fail? (lambda (_) #f)])
          (member 'execute (file-or-directory-permissions p)))))
+
+(define (resolve-command-path cmd path-string)
+  (cond
+    [(or (path? cmd)
+         (and (string? cmd) (regexp-match? #px"/" cmd)))
+     cmd]
+    [else
+     (for/or ([dir (in-list (string-split (or path-string "") ":" #:trim? #f))])
+       (define base
+         (if (string-blank? dir)
+             (current-directory)
+             (string->path dir)))
+       (define candidate (build-path base (format "~a" cmd)))
+       (and (executable-file? candidate) candidate))]))
 
 (define (system*/check who . args)
   (define ok? (apply system* args))

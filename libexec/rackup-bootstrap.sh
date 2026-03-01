@@ -20,6 +20,18 @@ rackup_runtime_addon_dir() {
   printf '%s\n' "$(rackup_runtime_dir)/addon"
 }
 
+rackup_system_runtime_addon_dir() {
+  uid_part="${UID:-}"
+  if [ -z "$uid_part" ] && command -v id >/dev/null 2>&1; then
+    uid_part="$(id -u 2>/dev/null || true)"
+  fi
+  if [ -n "$uid_part" ]; then
+    printf '%s\n' "${TMPDIR:-/tmp}/rackup-system-addon-$uid_part"
+  else
+    printf '%s\n' "${TMPDIR:-/tmp}/rackup-system-addon"
+  fi
+}
+
 rackup_runtime_versions_dir() {
   printf '%s\n' "$(rackup_runtime_dir)/versions"
 }
