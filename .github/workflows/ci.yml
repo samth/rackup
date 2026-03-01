@@ -28,16 +28,17 @@ jobs:
           test -f /tmp/rackup-pages-site/index.html
           test -f /tmp/rackup-pages-site/install.sh
           test -f /tmp/rackup-pages-site/rackup-src.tar.gz
-          rg -F 'copyBtn.innerHTML' /tmp/rackup-pages-site/index.html
-          if tar -tzf /tmp/rackup-pages-site/rackup-src.tar.gz | rg -n '(^|/)compiled(/|$)|\.(zo|dep)$'; then
+          grep -Fq 'copyBtn.innerHTML' /tmp/rackup-pages-site/index.html
+          if tar -tzf /tmp/rackup-pages-site/rackup-src.tar.gz | grep -En '(^|/)compiled(/|$)|\.(zo|dep)$'; then
             echo "rackup-src.tar.gz unexpectedly contains compiled artifacts" >&2
             exit 1
           fi
+          tar -C /tmp/rackup-pages-site -czf /tmp/pages-site-ci.tar.gz .
       - name: Upload Pages site artifact
         uses: actions/upload-artifact@v4
         with:
           name: pages-site-ci
-          path: /tmp/rackup-pages-site/.
+          path: /tmp/pages-site-ci.tar.gz
           if-no-files-found: error
 
   prepare-download-cache:
@@ -55,12 +56,14 @@ jobs:
           version: stable
       - name: Pre-download installer payloads
         shell: bash
-        run: racket scripts/prepare-ci-download-cache.rkt --output .ci-cache/downloads
+        run: |
+          racket scripts/prepare-ci-download-cache.rkt --output .ci-cache/downloads
+          tar -C .ci-cache/downloads -czf /tmp/rackup-download-cache.tar.gz .
       - name: Upload prepared download cache
         uses: actions/upload-artifact@v4
         with:
           name: rackup-download-cache
-          path: .ci-cache/downloads/.
+          path: /tmp/rackup-download-cache.tar.gz
           if-no-files-found: error
 
   unit-tests:
@@ -132,7 +135,12 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: rackup-download-cache
-          path: .ci-cache/downloads
+          path: .ci-cache/download-cache-artifact
+      - name: Extract prepared installer cache
+        shell: bash
+        run: |
+          mkdir -p .ci-cache/downloads
+          tar -xzf .ci-cache/download-cache-artifact/rackup-download-cache.tar.gz -C .ci-cache/downloads
       - name: Docker bootstrap install smoke on distro
         run: |
           scripts/docker-test-fresh-install.sh \
@@ -190,7 +198,12 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: rackup-download-cache
-          path: .ci-cache/downloads
+          path: .ci-cache/download-cache-artifact
+      - name: Extract prepared installer cache
+        shell: bash
+        run: |
+          mkdir -p .ci-cache/downloads
+          tar -xzf .ci-cache/download-cache-artifact/rackup-download-cache.tar.gz -C .ci-cache/downloads
       - name: Docker fresh-container installs and local-link smoke
         run: |
           scripts/docker-test-fresh-install.sh \
@@ -211,7 +224,12 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: rackup-download-cache
-          path: .ci-cache/downloads
+          path: .ci-cache/download-cache-artifact
+      - name: Extract prepared installer cache
+        shell: bash
+        run: |
+          mkdir -p .ci-cache/downloads
+          tar -xzf .ci-cache/download-cache-artifact/rackup-download-cache.tar.gz -C .ci-cache/downloads
       - name: Docker legacy 6.0 install smoke
         run: |
           scripts/docker-test-fresh-install.sh \
@@ -231,7 +249,12 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: rackup-download-cache
-          path: .ci-cache/downloads
+          path: .ci-cache/download-cache-artifact
+      - name: Extract prepared installer cache
+        shell: bash
+        run: |
+          mkdir -p .ci-cache/downloads
+          tar -xzf .ci-cache/download-cache-artifact/rackup-download-cache.tar.gz -C .ci-cache/downloads
       - name: Docker pre-release fresh-container install
         run: |
           scripts/docker-test-fresh-install.sh \
@@ -287,7 +310,12 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: rackup-download-cache
-          path: .ci-cache/downloads
+          path: .ci-cache/download-cache-artifact
+      - name: Extract prepared installer cache
+        shell: bash
+        run: |
+          mkdir -p .ci-cache/downloads
+          tar -xzf .ci-cache/download-cache-artifact/rackup-download-cache.tar.gz -C .ci-cache/downloads
       - name: Docker bootstrap fresh-container install and local-link smoke
         run: |
           scripts/docker-test-fresh-install.sh \
@@ -307,7 +335,12 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: rackup-download-cache
-          path: .ci-cache/downloads
+          path: .ci-cache/download-cache-artifact
+      - name: Extract prepared installer cache
+        shell: bash
+        run: |
+          mkdir -p .ci-cache/downloads
+          tar -xzf .ci-cache/download-cache-artifact/rackup-download-cache.tar.gz -C .ci-cache/downloads
       - name: Docker bootstrap without host racket (hidden runtime)
         run: |
           scripts/docker-test-fresh-install.sh \
@@ -331,12 +364,22 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: rackup-download-cache
-          path: .ci-cache/downloads
+          path: .ci-cache/download-cache-artifact
+      - name: Extract prepared installer cache
+        shell: bash
+        run: |
+          mkdir -p .ci-cache/downloads
+          tar -xzf .ci-cache/download-cache-artifact/rackup-download-cache.tar.gz -C .ci-cache/downloads
       - name: Download Pages site artifact
         uses: actions/download-artifact@v4
         with:
           name: pages-site-ci
-          path: .ci-cache/pages-site
+          path: .ci-cache/pages-site-artifact
+      - name: Extract Pages site artifact
+        shell: bash
+        run: |
+          mkdir -p .ci-cache/pages-site
+          tar -xzf .ci-cache/pages-site-artifact/pages-site-ci.tar.gz -C .ci-cache/pages-site
       - name: Docker curl-pipe-sh bootstrap smoke (no host racket)
         run: |
           RACKUP_E2E_PREBUILT_PAGES_DIR="$PWD/.ci-cache/pages-site" \
@@ -358,7 +401,12 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: rackup-download-cache
-          path: .ci-cache/downloads
+          path: .ci-cache/download-cache-artifact
+      - name: Extract prepared installer cache
+        shell: bash
+        run: |
+          mkdir -p .ci-cache/downloads
+          tar -xzf .ci-cache/download-cache-artifact/rackup-download-cache.tar.gz -C .ci-cache/downloads
       - name: Docker source-build local-link smoke
         run: |
           scripts/docker-test-fresh-install.sh \

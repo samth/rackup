@@ -379,9 +379,11 @@
      (set-default-toolchain! id)
      (reshim!)
      (define old-binfmt-dir (getenv "RACKUP_TEST_BINFMT_MISC_DIR"))
+     (define old-host-machine (getenv "RACKUP_TEST_HOST_MACHINE"))
      (dynamic-wind
       (lambda ()
-        (putenv "RACKUP_TEST_BINFMT_MISC_DIR" (path->string fake-binfmt-dir)))
+        (putenv "RACKUP_TEST_BINFMT_MISC_DIR" (path->string fake-binfmt-dir))
+        (putenv "RACKUP_TEST_HOST_MACHINE" "x86_64"))
       (lambda ()
         (let-values ([(status out err) (run-program/capture (build-path (rackup-shims-dir) "racket")
                                                             '("--version"))])
@@ -400,6 +402,9 @@
             err
             "disable qemu-i386 binfmt_misc and retry, or use a true native i386 environment/VM."))))
       (lambda ()
+        (if old-host-machine
+            (putenv "RACKUP_TEST_HOST_MACHINE" old-host-machine)
+            (putenv "RACKUP_TEST_HOST_MACHINE" ""))
         (if old-binfmt-dir
             (putenv "RACKUP_TEST_BINFMT_MISC_DIR" old-binfmt-dir)
             (putenv "RACKUP_TEST_BINFMT_MISC_DIR" ""))))))
@@ -614,6 +619,76 @@
 	                                                              (path->string collects-dir)
 	                                                              (path->string pkgs-dir))))
 	                                shim-out))))
+
+  (with-temp-rackup-home
+   (lambda (tmp)
+     (ensure-index!)
+     (define src-root (build-path tmp "linked-src"))
+     (define plthome (build-path src-root "racket"))
+     (define bin-dir (build-path plthome "bin"))
+     (define collects-dir (build-path plthome "collects"))
+     (define pkgs-dir (build-path src-root "pkgs"))
+     (make-directory* bin-dir)
+     (make-directory* collects-dir)
+     (make-directory* pkgs-dir)
+     (define runtime-id "runtime-test")
+     (define runtime-version-dir (rackup-runtime-version-dir runtime-id))
+     (define runtime-real-bin (build-path tmp "runtime-real-bin"))
+     (make-directory* runtime-real-bin)
+     (make-file-or-directory-link (find-system-path 'exec-file)
+                                  (build-path runtime-real-bin "racket"))
+     (make-directory* runtime-version-dir)
+     (make-file-or-directory-link runtime-real-bin (rackup-runtime-bin-link runtime-id))
+     (make-file-or-directory-link runtime-version-dir (rackup-runtime-current-link))
+     (define racket-bin (build-path bin-dir "racket"))
+     (write-string-file racket-bin
+                        @~a{#!/usr/bin/env bash
+                            set -euo pipefail
+                            if [[ "$#" -ge 2 && "$1" == "-e" ]]; then
+                              case "$2" in
+                                *"(version)"*) printf '9.90-local'; exit 0 ;;
+                                *"system-type 'vm"*) printf 'cs'; exit 0 ;;
+                              esac
+                            fi
+                            printf 'linked-toolchain-racket\n'
+                            })
+     (file-or-directory-permissions racket-bin #o755)
+     (define linked-id (link-toolchain! "devsrc-wrapper" (path->string src-root) '("--set-default")))
+     (define poisoned-collects (build-path tmp "poisoned-collects"))
+     (make-directory* (build-path poisoned-collects "racket"))
+     (write-string-file (build-path poisoned-collects "racket" "runtime-config.rkt")
+                        "#lang racket/base\n(error 'bad-runtime-config \"should not be loaded\")\n")
+     (define current-collects
+       (string-join (map path->string (current-library-collection-paths)) ":"))
+     (define old-toolchain (getenv "RACKUP_TOOLCHAIN"))
+     (define old-plthome (getenv "PLTHOME"))
+     (define old-pltcollects (getenv "PLTCOLLECTS"))
+     (define old-pltaddondir (getenv "PLTADDONDIR"))
+     (dynamic-wind
+      (lambda ()
+        (putenv "RACKUP_TOOLCHAIN" linked-id)
+        (putenv "PLTHOME" (path->string plthome))
+        (putenv "PLTCOLLECTS"
+                (string-append (path->string poisoned-collects) ":" current-collects))
+        (putenv "PLTADDONDIR" (path->string (build-path tmp "poisoned-addon"))))
+      (lambda ()
+        (let-values ([(ok? out err) (run-bin-rackup/capture '("current" "id"))])
+          (check-true ok?)
+          (check-equal? out (format "~a\n" linked-id))
+          (check-equal? err "")))
+      (lambda ()
+        (if old-toolchain
+            (putenv "RACKUP_TOOLCHAIN" old-toolchain)
+            (putenv "RACKUP_TOOLCHAIN" ""))
+        (if old-plthome
+            (putenv "PLTHOME" old-plthome)
+            (putenv "PLTHOME" ""))
+        (if old-pltcollects
+            (putenv "PLTCOLLECTS" old-pltcollects)
+            (putenv "PLTCOLLECTS" ""))
+        (if old-pltaddondir
+            (putenv "PLTADDONDIR" old-pltaddondir)
+            (putenv "PLTADDONDIR" ""))))))
 
   (with-temp-rackup-home
    (lambda (_tmp)

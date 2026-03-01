@@ -40,4 +40,5 @@ if [ "${1:-}" = "help" ] && [ "${2:-}" = "prompt" ] && [ "$#" -eq 2 ]; then
 fi
 
 RACKET_EXE="$(rackup_select_runtime_racket_or_fail)" || exit 1
+unset PLTHOME PLTCOLLECTS PLTADDONDIR
 exec "$RACKET_EXE" "$CORE" "$@"

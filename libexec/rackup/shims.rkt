@@ -123,6 +123,14 @@ rackup_qemu_i386_binfmt_enabled() {
   return 0
 }
 
+rackup_host_machine() {
+  if [[ -n "${RACKUP_TEST_HOST_MACHINE:-}" ]]; then
+    printf '%s\n' "$RACKUP_TEST_HOST_MACHINE"
+  else
+    uname -m 2>/dev/null || true
+  fi
+}
+
 rackup_aslr_sensitive_legacy_i386_toolchain() {
   [[ "$ACTIVE" =~ ^release-(053|103|103p1)-bc-i386-linux- ]]
 }
@@ -134,7 +142,7 @@ rackup_print_missing_loader_message() {
   if ! rackup_is_elf32 "$inspect_target"; then
     return 1
   fi
-  host_machine="$(uname -m 2>/dev/null || true)"
+  host_machine="$(rackup_host_machine)"
   case "$host_machine" in
     x86_64|amd64)
       for loader in /lib/ld-linux.so.2 \
@@ -167,7 +175,7 @@ rackup_print_qemu_i386_aslr_message() {
   if ! rackup_aslr_sensitive_legacy_i386_toolchain; then
     return 1
   fi
-  host_machine="$(uname -m 2>/dev/null || true)"
+  host_machine="$(rackup_host_machine)"
   case "$host_machine" in
     x86_64|amd64) ;;
     *) return 1 ;;
