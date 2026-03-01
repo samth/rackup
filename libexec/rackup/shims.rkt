@@ -131,6 +131,23 @@ rackup_host_machine() {
   fi
 }
 
+rackup_i386_loader_present() {
+  if [[ -n "${RACKUP_TEST_ASSUME_I386_LOADER:-}" ]]; then
+    [[ "$RACKUP_TEST_ASSUME_I386_LOADER" == "1" ]]
+    return
+  fi
+  for loader in /lib/ld-linux.so.2 \
+                /lib32/ld-linux.so.2 \
+                /lib/i386-linux-gnu/ld-linux.so.2 \
+                /lib/i686-linux-gnu/ld-linux.so.2 \
+                /usr/i386-linux-gnu/lib/ld-linux.so.2; do
+    if [[ -e "$loader" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
 rackup_aslr_sensitive_legacy_i386_toolchain() {
   [[ "$ACTIVE" =~ ^release-(053|103|103p1)-bc-i386-linux- ]]
 }
@@ -145,15 +162,9 @@ rackup_print_missing_loader_message() {
   host_machine="$(rackup_host_machine)"
   case "$host_machine" in
     x86_64|amd64)
-      for loader in /lib/ld-linux.so.2 \
-                    /lib32/ld-linux.so.2 \
-                    /lib/i386-linux-gnu/ld-linux.so.2 \
-                    /lib/i686-linux-gnu/ld-linux.so.2 \
-                    /usr/i386-linux-gnu/lib/ld-linux.so.2; do
-        if [[ -e "$loader" ]]; then
-          return 1
-        fi
-      done
+      if rackup_i386_loader_present; then
+        return 1
+      fi
       echo "rackup: '$SHIM_NAME' from toolchain '$ACTIVE' needs 32-bit Linux runtime support, but this host appears to lack the 32-bit loader/runtime needed to start it." >&2
       if [[ "$inspect_target" != "$target" ]]; then
         echo "rackup: resolved underlying executable: $inspect_target" >&2

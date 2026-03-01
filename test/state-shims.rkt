@@ -380,10 +380,12 @@
      (reshim!)
      (define old-binfmt-dir (getenv "RACKUP_TEST_BINFMT_MISC_DIR"))
      (define old-host-machine (getenv "RACKUP_TEST_HOST_MACHINE"))
+     (define old-assume-loader (getenv "RACKUP_TEST_ASSUME_I386_LOADER"))
      (dynamic-wind
       (lambda ()
         (putenv "RACKUP_TEST_BINFMT_MISC_DIR" (path->string fake-binfmt-dir))
-        (putenv "RACKUP_TEST_HOST_MACHINE" "x86_64"))
+        (putenv "RACKUP_TEST_HOST_MACHINE" "x86_64")
+        (putenv "RACKUP_TEST_ASSUME_I386_LOADER" "1"))
       (lambda ()
         (let-values ([(status out err) (run-program/capture (build-path (rackup-shims-dir) "racket")
                                                             '("--version"))])
@@ -402,6 +404,9 @@
             err
             "disable qemu-i386 binfmt_misc and retry, or use a true native i386 environment/VM."))))
       (lambda ()
+        (if old-assume-loader
+            (putenv "RACKUP_TEST_ASSUME_I386_LOADER" old-assume-loader)
+            (putenv "RACKUP_TEST_ASSUME_I386_LOADER" ""))
         (if old-host-machine
             (putenv "RACKUP_TEST_HOST_MACHINE" old-host-machine)
             (putenv "RACKUP_TEST_HOST_MACHINE" ""))
