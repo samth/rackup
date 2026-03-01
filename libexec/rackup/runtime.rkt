@@ -16,6 +16,20 @@
 (provide cmd-runtime
          hidden-runtime-status)
 
+(define (hidden-runtime-invocation-prefix racket-exe)
+  (list racket-exe
+        "-U"
+        "-A"
+        (path->string* (ensure-directory* (rackup-runtime-addon-dir)))))
+
+(define (capture-hidden-runtime-output racket-exe . args)
+  (apply capture-program-output
+         (append (hidden-runtime-invocation-prefix racket-exe) args)))
+
+(define (run-hidden-runtime/quiet racket-exe . args)
+  (apply run-quiet-program
+         (append (hidden-runtime-invocation-prefix racket-exe) args)))
+
 (define (hidden-runtime-racket-path)
   (define p (build-path (rackup-runtime-current-link) "bin" "racket"))
   (and (executable-file? p) p))
@@ -147,9 +161,10 @@
   meta)
 
 (define (probe-runtime-version+variant racket-exe)
-  (define version-out (capture-program-output racket-exe "-e" "(display (version))"))
+  (define version-out
+    (capture-hidden-runtime-output racket-exe "-e" "(display (version))"))
   (define variant-out
-    (capture-program-output
+    (capture-hidden-runtime-output
      racket-exe
      "-e"
      "(display (let ([v (system-type 'vm)]) (if (symbol? v) (symbol->string v) (format \"~a\" v))))"))
@@ -249,7 +264,7 @@
          "    (managed-compile-zo (path->complete-path (string->path arg)))))")
        " "))
     (let-values ([(ok? details)
-                  (apply run-quiet-program
+                  (apply run-hidden-runtime/quiet
                          racket-exe
                          "-e"
                          compile-expression

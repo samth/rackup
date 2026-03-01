@@ -4,6 +4,7 @@
          recspecs
          racket/file
          racket/format
+         racket/list
          racket/port
          racket/path
          racket/runtime-path
@@ -45,6 +46,7 @@
 (define-runtime-path rackup-bin "../bin/rackup")
 (define install-ns (module->namespace '(file "../libexec/rackup/install.rkt")))
 (define shell-ns (module->namespace '(file "../libexec/rackup/shell.rkt")))
+(define runtime-ns (module->namespace '(file "../libexec/rackup/runtime.rkt")))
 
 (define detect-bin-dir/private
   (parameterize ([current-namespace install-ns])
@@ -61,6 +63,10 @@
 (define shell-helper-script/private
   (parameterize ([current-namespace shell-ns])
     (eval 'shell-helper-script)))
+
+(define hidden-runtime-invocation-prefix/private
+  (parameterize ([current-namespace runtime-ns])
+    (eval 'hidden-runtime-invocation-prefix)))
 
 (define (run-bin-rackup/capture args)
   (define out (open-output-string))
@@ -436,11 +442,13 @@
      (define bin-dir (build-path plthome "bin"))
      (define collects-dir (build-path plthome "collects"))
      (define pkgs-dir (build-path src-root "pkgs"))
+     (define addon-dir (build-path src-root "add-on" "development"))
      (define chez-bin-dir
        (build-path src-root "racket" "src" "build" "cs" "c" "ChezScheme" "pb" "bin" "pb"))
      (make-directory* bin-dir)
      (make-directory* collects-dir)
      (make-directory* pkgs-dir)
+     (make-directory* addon-dir)
      (make-directory* chez-bin-dir)
 
      (define (write-exe name body)
@@ -456,6 +464,7 @@
                       case "$2" in
                         *"(version)"*) printf '9.99-local'; exit 0 ;;
                         *"system-type 'vm"*) printf 'cs'; exit 0 ;;
+                        *"find-system-path 'addon-dir"*) printf '@|addon-dir|'; exit 0 ;;
                       esac
                     fi
                     printf 'PLTHOME=%s\n' "${PLTHOME:-}"
@@ -498,6 +507,7 @@
                       case "$2" in
                         *"(version)"*) printf '9.98-local'; exit 0 ;;
                         *"system-type 'vm"*) printf 'cs'; exit 0 ;;
+                        *"find-system-path 'addon-dir"*) printf '@|addon-dir|'; exit 0 ;;
                       esac
                     fi
                     printf 'PLTHOME=%s\n' "${PLTHOME:-}"
@@ -528,7 +538,7 @@
                                 shim-out))
      (check-true (regexp-match?
                   (regexp (regexp-quote (format "PLTADDONDIR=~a"
-                                                (path->string (rackup-addon-dir linked-id)))))
+                                                (path->string addon-dir))))
                   shim-out))
 
      (define scheme-out
@@ -549,6 +559,7 @@
      (define activation (emit-shell-activation linked-id))
      (check-true (string-contains? activation "export PLTHOME="))
      (check-true (string-contains? activation "export PLTCOLLECTS="))
+     (check-true (string-contains? activation (format "export PLTADDONDIR='~a'" (path->string addon-dir))))
      (check-equal? (run-main/stdout (list "switch" "devsrc")) activation)
      (check-equal? (run-main/stdout '("prompt")) "racket-local-9.98-local\n")
      (check-equal? (run-main/stdout '("prompt" "--short")) "racket-local-9.98-local\n")
@@ -568,9 +579,11 @@
      (define bin-dir (build-path plthome "bin"))
      (define collects-dir (build-path plthome "share" "racket" "collects"))
      (define pkgs-dir (build-path plthome "share" "racket" "pkgs"))
+     (define addon-dir (build-path install-root "add-on" "8.18-installed"))
      (make-directory* bin-dir)
      (make-directory* collects-dir)
      (make-directory* pkgs-dir)
+     (make-directory* addon-dir)
 
      (define (write-bin-exe name body)
        (define p (build-path bin-dir name))
@@ -585,10 +598,12 @@
                           case "$2" in
                             *"(version)"*) printf '8.18-installed'; exit 0 ;;
                             *"system-type 'vm"*) printf 'cs'; exit 0 ;;
+                            *"find-system-path 'addon-dir"*) printf '@|addon-dir|'; exit 0 ;;
                           esac
                         fi
                         printf 'PLTHOME=%s\n' "${PLTHOME:-}"
                         printf 'PLTCOLLECTS=%s\n' "${PLTCOLLECTS:-}"
+                        printf 'PLTADDONDIR=%s\n' "${PLTADDONDIR:-}"
                         })
      (write-bin-exe "raco"
                     @~a{#!/usr/bin/env bash
@@ -620,10 +635,13 @@
          (get-output-string out)))
      (check-true (regexp-match? (regexp (regexp-quote (format "PLTHOME=~a" (path->string plthome))))
                                 shim-out))
-	     (check-true (regexp-match? (regexp (regexp-quote (format "PLTCOLLECTS=~a:~a"
-	                                                              (path->string collects-dir)
-	                                                              (path->string pkgs-dir))))
-	                                shim-out))))
+     (check-true (regexp-match? (regexp (regexp-quote (format "PLTCOLLECTS=~a:~a"
+                                                              (path->string collects-dir)
+                                                              (path->string pkgs-dir))))
+                                shim-out))
+     (check-true (regexp-match? (regexp (regexp-quote (format "PLTADDONDIR=~a"
+                                                              (path->string addon-dir))))
+                                shim-out))))
 
   (with-temp-rackup-home
    (lambda (tmp)
@@ -762,6 +780,50 @@
            (get-output-string out))))
      (check-true (string-contains? doctor-out "runtime-present: #t"))
      (check-true (string-contains? doctor-out (format "runtime-id: ~a" runtime-id)))))
+
+  (with-temp-rackup-home
+   (lambda (_tmp)
+     (ensure-rackup-layout!)
+     (define prefix (hidden-runtime-invocation-prefix/private "/tmp/fake-racket"))
+     (check-equal? prefix
+                   (list "/tmp/fake-racket"
+                         "-U"
+                         "-A"
+                         (path->string (rackup-runtime-addon-dir))))
+     (check-true (directory-exists? (rackup-runtime-addon-dir)))))
+
+  (with-temp-rackup-home
+   (lambda (tmp)
+     (ensure-rackup-layout!)
+     (define runtime-id "runtime-9.1-cs-x86_64-linux-minimal")
+     (define version-dir (rackup-runtime-version-dir runtime-id))
+     (define fake-bin-dir (build-path tmp "fake-hidden-runtime-bin"))
+     (define captured-argv (build-path tmp "captured-hidden-runtime-argv.txt"))
+     (make-directory* fake-bin-dir)
+     (define fake-racket (build-path fake-bin-dir "racket"))
+     (write-string-file fake-racket
+                        (string-append
+                         "#!/usr/bin/env bash\n"
+                         "set -euo pipefail\n"
+                         "printf '%s\\n' \"$@\" > "
+                         (path->string captured-argv)
+                         "\n"))
+     (file-or-directory-permissions fake-racket #o755)
+     (make-directory* version-dir)
+     (make-file-or-directory-link fake-bin-dir (rackup-runtime-bin-link runtime-id))
+     (make-file-or-directory-link version-dir (rackup-runtime-current-link))
+     (let-values ([(ok? out err) (run-bin-rackup/capture '("current" "id"))])
+       (check-true ok?)
+       (check-equal? out "")
+       (check-equal? err ""))
+     (define argv
+       (string-split (string-trim (file->string captured-argv)) "\n"))
+     (check-equal? (take argv 3)
+                   (list "-U"
+                         "-A"
+                         (path->string (rackup-runtime-addon-dir))))
+     (check-true (string-suffix? (list-ref argv 3) "libexec/rackup-core.rkt"))
+     (check-equal? (drop argv 4) '("current" "id"))))
 
   (let* ([rc-before (format "~a\n"
                             @~a{export FOO=1

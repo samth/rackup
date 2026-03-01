@@ -40,5 +40,7 @@ if [ "${1:-}" = "help" ] && [ "${2:-}" = "prompt" ] && [ "$#" -eq 2 ]; then
 fi
 
 RACKET_EXE="$(rackup_select_runtime_racket_or_fail)" || exit 1
+RUNTIME_ADDON_DIR="$(rackup_runtime_addon_dir)"
+rackup_mkdir_p "$RUNTIME_ADDON_DIR"
 unset PLTHOME PLTCOLLECTS PLTADDONDIR
-exec "$RACKET_EXE" "$CORE" "$@"
+exec "$RACKET_EXE" -U -A "$RUNTIME_ADDON_DIR" "$CORE" "$@"

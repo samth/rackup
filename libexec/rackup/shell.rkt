@@ -73,14 +73,17 @@
     (rackup-error "toolchain not installed: ~a" toolchain-id))
   (define extra-env (toolchain-env-vars toolchain-id))
   (define addon (path->string* (rackup-addon-dir toolchain-id)))
+  (define has-addon? (assoc "PLTADDONDIR" extra-env))
   (string-append (emit-path-prepend)
                  (emit-env-exports extra-env)
                  "export RACKUP_TOOLCHAIN="
                  (sh-single-quote toolchain-id)
                  "\n"
-                 "export PLTADDONDIR="
-                 (sh-single-quote addon)
-                 "\n"))
+                 (if has-addon?
+                     ""
+                     (string-append "export PLTADDONDIR="
+                                    (sh-single-quote addon)
+                                    "\n"))))
 
 (define (deactivation-extra-vars)
   (define active (getenv "RACKUP_TOOLCHAIN"))

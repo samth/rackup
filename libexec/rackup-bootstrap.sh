@@ -16,6 +16,10 @@ rackup_runtime_dir() {
   printf '%s\n' "$(rackup_home)/runtime"
 }
 
+rackup_runtime_addon_dir() {
+  printf '%s\n' "$(rackup_runtime_dir)/addon"
+}
+
 rackup_runtime_versions_dir() {
   printf '%s\n' "$(rackup_runtime_dir)/versions"
 }

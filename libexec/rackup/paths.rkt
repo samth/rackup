@@ -15,6 +15,7 @@
          rackup-download-cache-dir
          rackup-state-dir
          rackup-runtime-dir
+         rackup-runtime-addon-dir
          rackup-runtime-versions-dir
          rackup-runtime-current-link
          rackup-runtime-lock-dir
@@ -62,6 +63,8 @@
   (build-path (rackup-home) "state"))
 (define (rackup-runtime-dir)
   (build-path (rackup-home) "runtime"))
+(define (rackup-runtime-addon-dir)
+  (build-path (rackup-runtime-dir) "addon"))
 (define (rackup-runtime-versions-dir)
   (build-path (rackup-runtime-dir) "versions"))
 (define (rackup-runtime-current-link)
@@ -114,6 +117,7 @@
                  (rackup-toolchains-dir)
                  (rackup-addons-dir)
                  (rackup-runtime-dir)
+                 (rackup-runtime-addon-dir)
                  (rackup-runtime-versions-dir)
                  (rackup-download-cache-dir)
                  (rackup-state-dir))])

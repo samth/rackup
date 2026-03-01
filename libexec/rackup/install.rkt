@@ -501,16 +501,20 @@
               'pkgs-dir
               (and (directory-exists? pkgs) (path-complete-string pkgs)))])]))
 
-(define (local-layout-env-vars layout)
+(define (local-layout-env-vars layout [addon-dir #f])
   (define collects-dir (hash-ref layout 'collects-dir))
   (define pkgs-dir (hash-ref layout 'pkgs-dir #f))
   (define collects-path
     (if pkgs-dir
         (path-join/colon (list collects-dir pkgs-dir))
         (path-join/colon (list collects-dir))))
-  (list (cons "PLTHOME" (hash-ref layout 'plthome)) (cons "PLTCOLLECTS" collects-path)))
+  (append (list (cons "PLTHOME" (hash-ref layout 'plthome))
+                (cons "PLTCOLLECTS" collects-path))
+          (if (and (string? addon-dir) (not (string-blank? addon-dir)))
+              (list (cons "PLTADDONDIR" addon-dir))
+              null)))
 
-(define (probe-local-racket-version+variant bin-dir env-vars)
+(define (probe-local-racket-version+variant+addon-dir bin-dir env-vars)
   (define racket-exe (build-path (string->path bin-dir) "racket"))
   (define version-out (capture-program-output #:env env-vars racket-exe "-e" "(display (version))"))
   (define variant-out
@@ -519,8 +523,15 @@
      racket-exe
      "-e"
      "(display (let ([v (system-type 'vm)]) (if (symbol? v) (symbol->string v) (format \"~a\" v))))"))
+  (define addon-out
+    (capture-program-output
+     #:env env-vars
+     racket-exe
+     "-e"
+     "(display (find-system-path 'addon-dir))"))
   (values (and version-out (not (string-blank? version-out)) version-out)
-          (and variant-out (not (string-blank? variant-out)) (string-downcase variant-out))))
+          (and variant-out (not (string-blank? variant-out)) (string-downcase variant-out))
+          (and addon-out (not (string-blank? addon-out)) addon-out)))
 
 (define (installed-toolchain-env-vars real-bin-dir)
   (define plthome (maybe-parent real-bin-dir))
@@ -658,10 +669,7 @@
 (define (local-toolchain-id name)
   (string-append "local-" (sanitize-id-part name)))
 
-(define (local-toolchain-meta id name layout real-bin-dir executables)
-  (define env-vars (local-layout-env-vars layout))
-  (define-values (version* variant*)
-    (probe-local-racket-version+variant (path->string* real-bin-dir) env-vars))
+(define (local-toolchain-meta id name layout real-bin-dir executables env-vars version* variant*)
   (define platform-raw (system-type 'os))
   (define platform
     (if (symbol? platform-raw)
@@ -741,11 +749,15 @@
                                   (raise e))])
        (make-directory* tc-dir)
        (define extra-exes (find-local-chez-extra-executables layout))
+       (define base-env-vars (local-layout-env-vars layout))
+       (define-values (version* variant* addon-dir*)
+         (probe-local-racket-version+variant+addon-dir (path->string* real-bin-dir) base-env-vars))
+       (define env-vars (local-layout-env-vars layout addon-dir*))
        (make-bin-overlay! id real-bin-dir extra-exes)
-       (write-toolchain-env-file! id (local-layout-env-vars layout))
+       (write-toolchain-env-file! id env-vars)
        (ensure-toolchain-addon-dir! id)
        (define executables (enumerate-toolchain-executables (rackup-toolchain-bin-link id)))
-       (define meta (local-toolchain-meta id name layout real-bin-dir executables))
+       (define meta (local-toolchain-meta id name layout real-bin-dir executables env-vars version* variant*))
        (register-toolchain! id meta)
        (when (hash-ref parsed-opts 'set-default? #f)
          (set-default-toolchain! id))
