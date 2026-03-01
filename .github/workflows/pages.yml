@@ -6,10 +6,13 @@ on:
     paths:
       - .github/workflows/pages.yml
       - bin/**
+      - docker/**
       - libexec/**
       - pages/**
       - scripts/build-pages-site.sh
       - scripts/copy-filtered-tree.sh
+      - scripts/docker-test-fresh-install.sh
+      - scripts/e2e-fresh-container.sh
       - scripts/install.sh
   workflow_dispatch:
 
