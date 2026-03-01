@@ -229,7 +229,7 @@ create_fake_local_source_tree() {
   local root="${TMPDIR}/rackup-e2e-local-src"
   local plthome="$root/racket"
   local bin_dir="$plthome/bin"
-  local chez_bin_dir="$root/racket/src/build/cs/c/ChezScheme/pb/bin/pb"
+  local chez_bin_dir="$root/racket/src/build/cs/c/ChezScheme/ta6le/bin/ta6le"
   local addon_dir="$root/add-on/development"
   rm -rf "$root"
   mkdir -p "$bin_dir" "$plthome/collects" "$root/pkgs" "$chez_bin_dir" "$addon_dir"
