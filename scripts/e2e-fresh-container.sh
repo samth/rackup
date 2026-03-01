@@ -28,6 +28,15 @@ fail() {
   exit 1
 }
 
+link_external_download_cache() {
+  local target_home="$1"
+  local external_cache="${RACKUP_E2E_DOWNLOAD_CACHE_DIR:-}"
+  [[ -n "$external_cache" ]] || return 0
+  mkdir -p "$target_home/cache"
+  rm -rf "$target_home/cache/downloads"
+  ln -s "$external_cache" "$target_home/cache/downloads"
+}
+
 assert_eq() {
   local expected="$1"
   local actual="$2"
@@ -95,6 +104,7 @@ if [[ "$MODE" == "bootstrap" ]]; then
   echo "== Installing rackup via bootstrap script =="
   export RACKUP_HOME="$HOME/.rackup-bootstrap"
   rm -rf "$RACKUP_HOME"
+  link_external_download_cache "$RACKUP_HOME"
   bash "$RUN_SRC/scripts/install.sh" -y --from-local "$RUN_SRC"
   RACKUP_BIN="$RACKUP_HOME/bin/rackup"
 elif [[ "$MODE" == "bootstrap-curl" ]]; then
@@ -102,6 +112,7 @@ elif [[ "$MODE" == "bootstrap-curl" ]]; then
   echo "== Installing rackup via curl | sh (local Pages server) =="
   export RACKUP_HOME="$HOME/.rackup-bootstrap-curl"
   rm -rf "$RACKUP_HOME"
+  link_external_download_cache "$RACKUP_HOME"
   if [[ -n "${RACKUP_E2E_PREBUILT_PAGES_DIR:-}" ]]; then
     PAGES_DIR="$RACKUP_E2E_PREBUILT_PAGES_DIR"
   else
@@ -139,6 +150,7 @@ else
   export RACKUP_HOME="$HOME/.rackup-direct"
   rm -rf "$RACKUP_HOME"
   mkdir -p "$RACKUP_HOME/bin" "$RACKUP_HOME/libexec"
+  link_external_download_cache "$RACKUP_HOME"
   "$RUN_SRC/scripts/copy-filtered-tree.sh" "$RUN_SRC" "$RACKUP_HOME" bin libexec
   chmod +x "$RACKUP_HOME/bin/rackup"
   RACKUP_BIN="$RACKUP_HOME/bin/rackup"

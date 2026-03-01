@@ -270,11 +270,7 @@ if [[ "$MODE" == "bootstrap-curl" ]]; then
 fi
 
 if [[ -n "$DOWNLOAD_CACHE_DIR" ]]; then
-  run_cmd+=(
-    -v "$DOWNLOAD_CACHE_DIR:/tmp/rackup-e2e-home/.rackup-direct/cache/downloads"
-    -v "$DOWNLOAD_CACHE_DIR:/tmp/rackup-e2e-home/.rackup-bootstrap/cache/downloads"
-    -v "$DOWNLOAD_CACHE_DIR:/tmp/rackup-e2e-home/.rackup-bootstrap-curl/cache/downloads"
-  )
+  run_cmd+=(-v "$DOWNLOAD_CACHE_DIR:/tmp/rackup-download-cache")
 fi
 
 "${run_cmd[@]}" \
@@ -292,6 +288,7 @@ fi
   -e RACKUP_E2E_UNIT_TESTS="$UNIT_TESTS" \
   -e RACKUP_E2E_SKIP_PACKAGE_TESTS="$SKIP_PACKAGE_TESTS" \
   -e RACKUP_E2E_PREBUILT_PAGES_DIR="${PREBUILT_PAGES_DIR:+/prebuilt-pages}" \
+  -e RACKUP_E2E_DOWNLOAD_CACHE_DIR="${DOWNLOAD_CACHE_DIR:+/tmp/rackup-download-cache}" \
   -v "$ROOT_DIR:/work" \
   -w /work \
   "$IMAGE_TAG" \
