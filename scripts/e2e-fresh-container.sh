@@ -226,15 +226,18 @@ create_fake_local_source_tree() {
   local plthome="$root/racket"
   local bin_dir="$plthome/bin"
   local chez_bin_dir="$root/racket/src/build/cs/c/ChezScheme/pb/bin/pb"
+  local addon_dir="$root/add-on/development"
   rm -rf "$root"
-  mkdir -p "$bin_dir" "$plthome/collects" "$root/pkgs" "$chez_bin_dir"
+  mkdir -p "$bin_dir" "$plthome/collects" "$root/pkgs" "$chez_bin_dir" "$addon_dir"
   cat > "$bin_dir/racket" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
+default_addon_dir="$(cd "$(dirname "$0")/../.." && pwd)/add-on/development"
 if [[ "$#" -ge 2 && "$1" == "-e" ]]; then
   case "$2" in
     *"(version)"*) printf '9.99-local'; exit 0 ;;
     *"system-type 'vm"*) printf 'cs'; exit 0 ;;
+    *"find-system-path"*addon-dir*) printf '%s' "${PLTADDONDIR:-$default_addon_dir}"; exit 0 ;;
     *'getenv "PLTHOME"'*) printf '%s' "${PLTHOME:-}"; exit 0 ;;
     *'getenv "PLTCOLLECTS"'*) printf '%s' "${PLTCOLLECTS:-}"; exit 0 ;;
     *'getenv "PLTADDONDIR"'*) printf '%s' "${PLTADDONDIR:-}"; exit 0 ;;
@@ -581,7 +584,9 @@ assert_eq "${local_src_root}/racket" "$linked_plthome" "linked shim should expor
 linked_collects="$(shim_racket -e '(display (or (getenv "PLTCOLLECTS") ""))')"
 assert_contains "${local_collects_dir}" "$linked_collects" "linked shim should export PLTCOLLECTS"
 linked_addon="$(shim_racket -e '(display (or (getenv "PLTADDONDIR") ""))')"
-assert_eq "${RACKUP_HOME}/addons/${linked_id}" "$linked_addon" "linked shim should export PLTADDONDIR"
+assert_nonempty "$linked_addon" "linked shim should export PLTADDONDIR"
+linked_addon_path="$(shim_racket -e '(display (find-system-path (quote addon-dir)))')"
+assert_eq "$linked_addon_path" "$linked_addon" "linked shim PLTADDONDIR should match the linked installation addon dir"
 link_run_plthome="$(run_rackup run localsrc -- racket -e '(display (or (getenv "PLTHOME") ""))')"
 assert_eq "${local_src_root}/racket" "$link_run_plthome" "rackup run should apply linked toolchain env"
 if [[ "$LOCAL_LINK_MODE" == "build" ]]; then
