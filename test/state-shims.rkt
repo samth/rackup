@@ -453,13 +453,19 @@
      (define collects-dir (build-path plthome "collects"))
      (define pkgs-dir (build-path src-root "pkgs"))
      (define addon-dir (build-path src-root "add-on" "development"))
+     (define boot-dir (build-path plthome "lib" "racket"))
+     (define petite-boot (build-path boot-dir "petite.boot"))
+     (define scheme-boot (build-path boot-dir "scheme.boot"))
      (define chez-bin-dir
-       (build-path src-root "racket" "src" "build" "cs" "c" "ChezScheme" "pb" "bin" "pb"))
+       (build-path src-root "racket" "src" "build" "cs" "c" "ChezScheme" "ta6le" "bin" "ta6le"))
      (make-directory* bin-dir)
      (make-directory* collects-dir)
      (make-directory* pkgs-dir)
      (make-directory* addon-dir)
+     (make-directory* boot-dir)
      (make-directory* chez-bin-dir)
+     (write-string-file petite-boot "fake petite boot\n")
+     (write-string-file scheme-boot "fake scheme boot\n")
 
      (define (write-exe name body)
        (define p (build-path bin-dir name))
@@ -563,8 +569,11 @@
          (define out (current-output-port))
          (check-true (system* (build-path (rackup-shims-dir) "petite") "--version"))
          (get-output-string out)))
-     (check-true (string-contains? scheme-out "scheme-ok --version"))
-     (check-true (string-contains? petite-out "petite-ok --version"))
+     (check-true (string-contains? scheme-out (format "scheme-ok -B ~a -B ~a --version"
+                                                      (path->string petite-boot)
+                                                      (path->string scheme-boot))))
+     (check-true (string-contains? petite-out (format "petite-ok -B ~a --version"
+                                                      (path->string petite-boot))))
 
      (define activation (emit-shell-activation linked-id))
      (check-true (string-contains? activation "export PLTHOME="))

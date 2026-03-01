@@ -14,6 +14,7 @@ SNAPSHOT_SITE="${RACKUP_E2E_SNAPSHOT_SITE:-auto}"
 LOCAL_LINK_MODE="${RACKUP_E2E_LOCAL_LINK_MODE:-fake}"
 SOURCE_BUILD_REPO="${RACKUP_E2E_SOURCE_BUILD_REPO:-https://github.com/racket/racket.git}"
 SOURCE_BUILD_REF="${RACKUP_E2E_SOURCE_BUILD_REF:-v8.18}"
+SOURCE_BUILD_COMMIT="${RACKUP_E2E_SOURCE_BUILD_COMMIT:-}"
 SOURCE_BUILD_TARGET="${RACKUP_E2E_SOURCE_BUILD_TARGET:-base}"
 SOURCE_BUILD_JOBS="${RACKUP_E2E_SOURCE_BUILD_JOBS:-2}"
 HOST_RACKET="${RACKUP_E2E_HOST_RACKET:-present}"
@@ -45,6 +46,8 @@ Options:
   --local-link-mode MODE  fake|build (default: fake)
   --source-build-repo URL Racket source repo to clone for local-link build mode
   --source-build-ref REF  Git ref/tag for source-build local-link mode (default: v8.18)
+  --source-build-commit SHA
+                        Exact upstream commit for source-build image caching
   --source-build-target T make target for source-build local-link mode (default: base)
   --source-build-jobs N   Parallel jobs for source-build local-link mode (default: 2)
   --host-racket MODE      present|absent system Racket in test image (default: present)
@@ -108,6 +111,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --source-build-ref)
       SOURCE_BUILD_REF="$2"
+      shift 2
+      ;;
+    --source-build-commit)
+      SOURCE_BUILD_COMMIT="$2"
       shift 2
       ;;
     --source-build-target)
@@ -184,6 +191,10 @@ base_tag="${base_tag//:/-}"
 platform_tag="${DOCKER_PLATFORM:-native}"
 platform_tag="${platform_tag//\//-}"
 platform_tag="${platform_tag//:/-}"
+source_cache_tag=""
+if [[ "$LOCAL_LINK_MODE" == "build" && -n "$SOURCE_BUILD_COMMIT" ]]; then
+  source_cache_tag="localsrc-${SOURCE_BUILD_COMMIT//[^A-Za-z0-9_.-]/-}"
+fi
 
 cleanup() {
   if [[ "$PREBUILT_PAGES_DIR_OWNED" -eq 1 && -n "$PREBUILT_PAGES_DIR" ]]; then
@@ -194,11 +205,23 @@ trap cleanup EXIT
 
 if [[ -z "$IMAGE_TAG" ]]; then
   IMAGE_TAG="rackup-e2e:${HOST_RACKET}-${base_tag}-${platform_tag}"
+  if [[ -n "$source_cache_tag" ]]; then
+    IMAGE_TAG="${IMAGE_TAG}-${source_cache_tag}"
+  fi
 fi
 
 if [[ -n "$DOWNLOAD_CACHE_DIR" ]]; then
   mkdir -p "$DOWNLOAD_CACHE_DIR"
   DOWNLOAD_CACHE_DIR="$(cd "$DOWNLOAD_CACHE_DIR" && pwd)"
+fi
+
+include_system_racket=0
+if [[ "$HOST_RACKET" == "present" ]]; then
+  include_system_racket=1
+fi
+prebuilt_local_source_dir=""
+if [[ "$LOCAL_LINK_MODE" == "build" && -n "$SOURCE_BUILD_COMMIT" ]]; then
+  prebuilt_local_source_dir="/opt/rackup-prebuilt-local-src"
 fi
 
 if [[ "$BUILD" -eq 1 ]]; then
@@ -210,29 +233,32 @@ if [[ "$BUILD" -eq 1 ]]; then
   if [[ "$use_gha_buildx_cache" -eq 1 ]]; then
     build_cmd=(docker buildx build --load)
     cache_scope="rackup-e2e-${HOST_RACKET}-${base_tag}-${platform_tag}"
+    if [[ -n "$source_cache_tag" ]]; then
+      cache_scope="${cache_scope}-${source_cache_tag}"
+    fi
     build_cmd+=(--cache-from "type=gha,scope=${cache_scope}"
                 --cache-to "type=gha,scope=${cache_scope},mode=max")
   else
     build_cmd=(docker build)
   fi
+  build_args=(--build-arg BASE_IMAGE="$BASE_IMAGE"
+              --build-arg INCLUDE_SYSTEM_RACKET="$include_system_racket")
+  if [[ "$LOCAL_LINK_MODE" == "build" && -n "$SOURCE_BUILD_COMMIT" ]]; then
+    build_args+=(--build-arg PREBUILD_LOCAL_SOURCE=1
+                 --build-arg PREBUILD_SOURCE_REPO="$SOURCE_BUILD_REPO"
+                 --build-arg PREBUILD_SOURCE_REF="$SOURCE_BUILD_REF"
+                 --build-arg PREBUILD_SOURCE_COMMIT="$SOURCE_BUILD_COMMIT"
+                 --build-arg PREBUILD_SOURCE_TARGET="$SOURCE_BUILD_TARGET"
+                 --build-arg PREBUILD_SOURCE_JOBS="$SOURCE_BUILD_JOBS")
+  fi
   if [[ -n "$DOCKER_PLATFORM" ]]; then
     build_cmd+=(--platform "$DOCKER_PLATFORM")
   fi
-  if [[ "$HOST_RACKET" == "present" ]]; then
-    "${build_cmd[@]}" \
-      --build-arg BASE_IMAGE="$BASE_IMAGE" \
-      --build-arg INCLUDE_SYSTEM_RACKET=1 \
-      -t "$IMAGE_TAG" \
-      -f "$ROOT_DIR/docker/Dockerfile.e2e" \
-      "$ROOT_DIR"
-  else
-    "${build_cmd[@]}" \
-      --build-arg BASE_IMAGE="$BASE_IMAGE" \
-      --build-arg INCLUDE_SYSTEM_RACKET=0 \
-      -t "$IMAGE_TAG" \
-      -f "$ROOT_DIR/docker/Dockerfile.e2e" \
-      "$ROOT_DIR"
-  fi
+  "${build_cmd[@]}" \
+    "${build_args[@]}" \
+    -t "$IMAGE_TAG" \
+    -f "$ROOT_DIR/docker/Dockerfile.e2e" \
+    "$ROOT_DIR"
 else
   if ! docker image inspect "$IMAGE_TAG" >/dev/null 2>&1; then
     echo "Docker image not found: $IMAGE_TAG" >&2
@@ -282,8 +308,10 @@ fi
   -e RACKUP_E2E_LOCAL_LINK_MODE="$LOCAL_LINK_MODE" \
   -e RACKUP_E2E_SOURCE_BUILD_REPO="$SOURCE_BUILD_REPO" \
   -e RACKUP_E2E_SOURCE_BUILD_REF="$SOURCE_BUILD_REF" \
+  -e RACKUP_E2E_SOURCE_BUILD_COMMIT="$SOURCE_BUILD_COMMIT" \
   -e RACKUP_E2E_SOURCE_BUILD_TARGET="$SOURCE_BUILD_TARGET" \
   -e RACKUP_E2E_SOURCE_BUILD_JOBS="$SOURCE_BUILD_JOBS" \
+  -e RACKUP_E2E_PREBUILT_LOCAL_SOURCE_DIR="$prebuilt_local_source_dir" \
   -e RACKUP_E2E_HOST_RACKET="$HOST_RACKET" \
   -e RACKUP_E2E_UNIT_TESTS="$UNIT_TESTS" \
   -e RACKUP_E2E_SKIP_PACKAGE_TESTS="$SKIP_PACKAGE_TESTS" \

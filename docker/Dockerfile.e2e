@@ -2,6 +2,12 @@ ARG BASE_IMAGE=ubuntu:24.04
 FROM ${BASE_IMAGE}
 
 ARG INCLUDE_SYSTEM_RACKET=1
+ARG PREBUILD_LOCAL_SOURCE=0
+ARG PREBUILD_SOURCE_REPO=https://github.com/racket/racket.git
+ARG PREBUILD_SOURCE_REF=v8.18
+ARG PREBUILD_SOURCE_COMMIT=
+ARG PREBUILD_SOURCE_TARGET=base
+ARG PREBUILD_SOURCE_JOBS=2
 
 ENV DEBIAN_FRONTEND=noninteractive \
     LANG=C.UTF-8 \
@@ -35,5 +41,44 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /work
+
+RUN if [ "$PREBUILD_LOCAL_SOURCE" = "1" ]; then \
+      root=/opt/rackup-prebuilt-local-src && \
+      rm -rf "$root" && \
+      mkdir -p "$root" && \
+      if [ "$PREBUILD_SOURCE_REPO" = "https://github.com/racket/racket.git" ] && \
+         printf '%s' "$PREBUILD_SOURCE_REF" | grep -Eq '^v?([0-9][0-9A-Za-z._-]*)$'; then \
+        version="$(printf '%s' "$PREBUILD_SOURCE_REF" | sed -E 's/^v//')" && \
+        archive="https://download.racket-lang.org/installers/${version}/racket-minimal-${version}-src-builtpkgs.tgz" && \
+        curl -fsSL "$archive" -o "$root/racket-src-builtpkgs.tgz" && \
+        tar -xzf "$root/racket-src-builtpkgs.tgz" -C "$root" && \
+        srcdist_root="$(find "$root" -mindepth 1 -maxdepth 1 -type d -name 'racket-*' | head -n 1)" && \
+        test -n "$srcdist_root" && \
+        mkdir -p "$srcdist_root/src/build" && \
+        cd "$srcdist_root/src/build" && \
+        ../configure --prefix="$root/racket" && \
+        if [ "$PREBUILD_SOURCE_TARGET" = "base" ]; then \
+          make -j"$PREBUILD_SOURCE_JOBS"; \
+        else \
+          make -j"$PREBUILD_SOURCE_JOBS" "$PREBUILD_SOURCE_TARGET"; \
+        fi && \
+        make install && \
+        rm -f "$root/racket-src-builtpkgs.tgz"; \
+      else \
+        git clone --depth 1 "$PREBUILD_SOURCE_REPO" "$root" && \
+        cd "$root" && \
+        if [ -n "$PREBUILD_SOURCE_COMMIT" ]; then \
+          git fetch --depth 1 origin "$PREBUILD_SOURCE_COMMIT" && \
+          git checkout "$PREBUILD_SOURCE_COMMIT"; \
+        else \
+          git checkout "$PREBUILD_SOURCE_REF"; \
+        fi && \
+        make -j"$PREBUILD_SOURCE_JOBS" "$PREBUILD_SOURCE_TARGET"; \
+      fi && \
+      printf '%s\n' "$PREBUILD_SOURCE_REPO" > "$root/.rackup-source-build-repo" && \
+      printf '%s\n' "$PREBUILD_SOURCE_REF" > "$root/.rackup-source-build-ref" && \
+      printf '%s\n' "$PREBUILD_SOURCE_COMMIT" > "$root/.rackup-source-build-commit" && \
+      chmod -R a+rX "$root"; \
+    fi
 
 CMD ["bash"]

@@ -296,6 +296,48 @@
       (link-executable-into-dir! overlay src name)))
   overlay)
 
+(define (local-chez-wrapper-targets layout)
+  (define plthome (string->path (hash-ref layout 'plthome)))
+  (define petite-boot (build-path plthome "lib" "racket" "petite.boot"))
+  (define scheme-boot (build-path plthome "lib" "racket" "scheme.boot"))
+  (if (file-exists? petite-boot)
+      (append (list (cons "petite" (list "-B" (path->string* petite-boot))))
+              (if (file-exists? scheme-boot)
+                  (list (cons "scheme"
+                              (list "-B"
+                                    (path->string* petite-boot)
+                                    "-B"
+                                    (path->string* scheme-boot))))
+                  null))
+      null))
+
+(define (write-exec-wrapper! dest exe args)
+  (define body
+    (string-append
+     "#!/usr/bin/env bash\n"
+     "set -euo pipefail\n"
+     "exec "
+     (sh-single-quote (path->string* exe))
+     (apply string-append
+            (for/list ([arg (in-list args)])
+              (string-append " " (sh-single-quote arg))))
+     " \"$@\"\n"))
+  (write-string-file dest body)
+  (file-or-directory-permissions dest #o755))
+
+(define (maybe-wrap-local-chez-extra-executables! id extra-exes layout)
+  (define overlay (rackup-toolchain-bin-link id))
+  (define wrapper-targets (local-chez-wrapper-targets layout))
+  (for ([wrapper (in-list wrapper-targets)])
+    (define name (car wrapper))
+    (define boot-args (cdr wrapper))
+    (define src (assoc name extra-exes))
+    (when src
+      (define dest (build-path overlay name))
+      (when (or (link-exists? dest) (file-exists? dest))
+        (delete-file dest))
+      (write-exec-wrapper! dest (cdr src) boot-args))))
+
 (define (write-toolchain-env-file! id env-vars)
   (define p (rackup-toolchain-env-file id))
   (define body
@@ -368,6 +410,7 @@
         (find-files (lambda (p)
                       (and (file-exists? p)
                            (member (path-basename-string p) chez-extra-names)
+                           (not (path-contains? p #rx"/ChezScheme/pb/"))
                            (file-executable?/safe p)))
                     root)))
      equal?))
@@ -754,6 +797,7 @@
          (probe-local-racket-version+variant+addon-dir (path->string* real-bin-dir) base-env-vars))
        (define env-vars (local-layout-env-vars layout addon-dir*))
        (make-bin-overlay! id real-bin-dir extra-exes)
+       (maybe-wrap-local-chez-extra-executables! id extra-exes layout)
        (write-toolchain-env-file! id env-vars)
        (ensure-toolchain-addon-dir! id)
        (define executables (enumerate-toolchain-executables (rackup-toolchain-bin-link id)))

@@ -41,31 +41,6 @@ jobs:
           path: /tmp/pages-site-ci.tar.gz
           if-no-files-found: error
 
-  prepare-download-cache:
-    name: Prepare Download Cache
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v4
-      - name: Setup Racket
-        uses: Bogdanp/setup-racket@v1.14
-        with:
-          architecture: x64
-          distribution: full
-          variant: CS
-          version: stable
-      - name: Pre-download installer payloads
-        shell: bash
-        run: |
-          racket scripts/prepare-ci-download-cache.rkt --output .ci-cache/downloads
-          tar -C .ci-cache/downloads -czf /tmp/rackup-download-cache.tar.gz .
-      - name: Upload prepared download cache
-        uses: actions/upload-artifact@v4
-        with:
-          name: rackup-download-cache
-          path: /tmp/rackup-download-cache.tar.gz
-          if-no-files-found: error
-
   unit-tests:
     name: Unit Tests (${{ matrix.arch_name }})
     runs-on: ${{ matrix.runs_on }}
@@ -102,45 +77,30 @@ jobs:
   docker-e2e-linux-distros:
     name: "Docker E2E (native ${{ matrix.arch_name }} / ${{ matrix.base_image }})"
     runs-on: ${{ matrix.runs_on }}
-    needs: prepare-download-cache
     strategy:
       fail-fast: false
       matrix:
         include:
           - runs_on: ubuntu-latest
             arch_name: x64
-            cache_arch: x86_64
             docker_arch: amd64
             base_image: "ubuntu:24.04"
           - runs_on: ubuntu-latest
             arch_name: x64
-            cache_arch: x86_64
             docker_arch: amd64
             base_image: "debian:12"
           - runs_on: ubuntu-24.04-arm
             arch_name: arm64
-            cache_arch: aarch64
             docker_arch: arm64
             base_image: "ubuntu:24.04"
           - runs_on: ubuntu-24.04-arm
             arch_name: arm64
-            cache_arch: aarch64
             docker_arch: arm64
             base_image: "debian:12"
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
-      - name: Download prepared installer cache
-        uses: actions/download-artifact@v4
-        with:
-          name: rackup-download-cache
-          path: .ci-cache/download-cache-artifact
-      - name: Extract prepared installer cache
-        shell: bash
-        run: |
-          mkdir -p .ci-cache/downloads
-          tar -xzf .ci-cache/download-cache-artifact/rackup-download-cache.tar.gz -C .ci-cache/downloads
       - name: Docker bootstrap install smoke on distro
         run: |
           scripts/docker-test-fresh-install.sh \
@@ -148,7 +108,6 @@ jobs:
             --host-racket absent \
             --base-image "${{ matrix.base_image }}" \
             --platform "linux/${{ matrix.docker_arch }}" \
-            --download-cache-dir ".ci-cache/downloads/${{ matrix.cache_arch }}" \
             --spec stable \
             --spec 8.18
 
@@ -189,25 +148,13 @@ jobs:
   docker-e2e-direct:
     name: Docker E2E (direct, stable + older + local link)
     runs-on: ubuntu-latest
-    needs: prepare-download-cache
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
-      - name: Download prepared installer cache
-        uses: actions/download-artifact@v4
-        with:
-          name: rackup-download-cache
-          path: .ci-cache/download-cache-artifact
-      - name: Extract prepared installer cache
-        shell: bash
-        run: |
-          mkdir -p .ci-cache/downloads
-          tar -xzf .ci-cache/download-cache-artifact/rackup-download-cache.tar.gz -C .ci-cache/downloads
       - name: Docker fresh-container installs and local-link smoke
         run: |
           scripts/docker-test-fresh-install.sh \
-            --download-cache-dir .ci-cache/downloads/x86_64 \
             --spec stable \
             --spec 8.18 \
             --spec 7.9
@@ -215,50 +162,26 @@ jobs:
   docker-e2e-legacy-6_0:
     name: Docker E2E (legacy 6.0 install smoke)
     runs-on: ubuntu-latest
-    needs: prepare-download-cache
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
-      - name: Download prepared installer cache
-        uses: actions/download-artifact@v4
-        with:
-          name: rackup-download-cache
-          path: .ci-cache/download-cache-artifact
-      - name: Extract prepared installer cache
-        shell: bash
-        run: |
-          mkdir -p .ci-cache/downloads
-          tar -xzf .ci-cache/download-cache-artifact/rackup-download-cache.tar.gz -C .ci-cache/downloads
       - name: Docker legacy 6.0 install smoke
         run: |
           scripts/docker-test-fresh-install.sh \
-            --download-cache-dir .ci-cache/downloads/x86_64 \
             --spec 6.0 \
             --skip-package-tests
 
   docker-e2e-prerelease:
     name: Docker E2E (pre-release.racket-lang.org)
     runs-on: ubuntu-latest
-    needs: prepare-download-cache
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
-      - name: Download prepared installer cache
-        uses: actions/download-artifact@v4
-        with:
-          name: rackup-download-cache
-          path: .ci-cache/download-cache-artifact
-      - name: Extract prepared installer cache
-        shell: bash
-        run: |
-          mkdir -p .ci-cache/downloads
-          tar -xzf .ci-cache/download-cache-artifact/rackup-download-cache.tar.gz -C .ci-cache/downloads
       - name: Docker pre-release fresh-container install
         run: |
           scripts/docker-test-fresh-install.sh \
-            --download-cache-dir .ci-cache/downloads/x86_64 \
             --spec pre-release
 
   native-i386-vm-103p1:
@@ -301,52 +224,28 @@ jobs:
   docker-e2e-bootstrap:
     name: Docker E2E (bootstrap + local link)
     runs-on: ubuntu-latest
-    needs: prepare-download-cache
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
-      - name: Download prepared installer cache
-        uses: actions/download-artifact@v4
-        with:
-          name: rackup-download-cache
-          path: .ci-cache/download-cache-artifact
-      - name: Extract prepared installer cache
-        shell: bash
-        run: |
-          mkdir -p .ci-cache/downloads
-          tar -xzf .ci-cache/download-cache-artifact/rackup-download-cache.tar.gz -C .ci-cache/downloads
       - name: Docker bootstrap fresh-container install and local-link smoke
         run: |
           scripts/docker-test-fresh-install.sh \
             --mode bootstrap \
-            --download-cache-dir .ci-cache/downloads/x86_64 \
             --spec stable
 
   docker-e2e-bootstrap-no-host-racket:
     name: Docker E2E (bootstrap, no system Racket + hidden runtime)
     runs-on: ubuntu-latest
-    needs: prepare-download-cache
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
-      - name: Download prepared installer cache
-        uses: actions/download-artifact@v4
-        with:
-          name: rackup-download-cache
-          path: .ci-cache/download-cache-artifact
-      - name: Extract prepared installer cache
-        shell: bash
-        run: |
-          mkdir -p .ci-cache/downloads
-          tar -xzf .ci-cache/download-cache-artifact/rackup-download-cache.tar.gz -C .ci-cache/downloads
       - name: Docker bootstrap without host racket (hidden runtime)
         run: |
           scripts/docker-test-fresh-install.sh \
             --mode bootstrap \
             --host-racket absent \
-            --download-cache-dir .ci-cache/downloads/x86_64 \
             --spec stable \
             --spec 8.18
 
@@ -355,21 +254,10 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - pages-build
-      - prepare-download-cache
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
-      - name: Download prepared installer cache
-        uses: actions/download-artifact@v4
-        with:
-          name: rackup-download-cache
-          path: .ci-cache/download-cache-artifact
-      - name: Extract prepared installer cache
-        shell: bash
-        run: |
-          mkdir -p .ci-cache/downloads
-          tar -xzf .ci-cache/download-cache-artifact/rackup-download-cache.tar.gz -C .ci-cache/downloads
       - name: Download Pages site artifact
         uses: actions/download-artifact@v4
         with:
@@ -386,33 +274,21 @@ jobs:
           scripts/docker-test-fresh-install.sh \
             --mode bootstrap-curl \
             --host-racket absent \
-            --download-cache-dir .ci-cache/downloads/x86_64 \
             --spec stable
 
   docker-e2e-source-build-link:
     name: Docker E2E (real source build local link)
     runs-on: ubuntu-latest
-    needs: prepare-download-cache
     timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
-      - name: Download prepared installer cache
-        uses: actions/download-artifact@v4
-        with:
-          name: rackup-download-cache
-          path: .ci-cache/download-cache-artifact
-      - name: Extract prepared installer cache
-        shell: bash
-        run: |
-          mkdir -p .ci-cache/downloads
-          tar -xzf .ci-cache/download-cache-artifact/rackup-download-cache.tar.gz -C .ci-cache/downloads
       - name: Docker source-build local-link smoke
         run: |
           scripts/docker-test-fresh-install.sh \
-            --download-cache-dir .ci-cache/downloads/x86_64 \
             --spec stable \
             --local-link-mode build \
             --source-build-ref v8.18 \
+            --source-build-commit 657a006747c199241b2569b56e07f26585eb0437 \
             --source-build-target base \
             --source-build-jobs "$(nproc)"

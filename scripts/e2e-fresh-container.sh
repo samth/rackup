@@ -9,8 +9,10 @@ SKIP_PACKAGE_TESTS="${RACKUP_E2E_SKIP_PACKAGE_TESTS:-0}"
 LOCAL_LINK_MODE="${RACKUP_E2E_LOCAL_LINK_MODE:-fake}"
 SOURCE_BUILD_REPO="${RACKUP_E2E_SOURCE_BUILD_REPO:-https://github.com/racket/racket.git}"
 SOURCE_BUILD_REF="${RACKUP_E2E_SOURCE_BUILD_REF:-v8.18}"
+SOURCE_BUILD_COMMIT="${RACKUP_E2E_SOURCE_BUILD_COMMIT:-}"
 SOURCE_BUILD_TARGET="${RACKUP_E2E_SOURCE_BUILD_TARGET:-base}"
 SOURCE_BUILD_JOBS="${RACKUP_E2E_SOURCE_BUILD_JOBS:-2}"
+PREBUILT_LOCAL_SOURCE_DIR="${RACKUP_E2E_PREBUILT_LOCAL_SOURCE_DIR:-}"
 HOST_RACKET="${RACKUP_E2E_HOST_RACKET:-present}"
 
 WORKDIR="${WORKDIR:-/work}"
@@ -67,8 +69,10 @@ echo "host_racket_mode=$HOST_RACKET"
 if [[ "$LOCAL_LINK_MODE" == "build" ]]; then
   echo "source_build_repo=$SOURCE_BUILD_REPO"
   echo "source_build_ref=$SOURCE_BUILD_REF"
+  echo "source_build_commit=${SOURCE_BUILD_COMMIT:-}"
   echo "source_build_target=$SOURCE_BUILD_TARGET"
   echo "source_build_jobs=$SOURCE_BUILD_JOBS"
+  echo "prebuilt_local_source_dir=${PREBUILT_LOCAL_SOURCE_DIR:-}"
 fi
 echo "HOME=$HOME"
 echo "PWD=$(pwd)"
@@ -272,6 +276,24 @@ create_real_local_source_tree() {
   local archive version srcdist_root
   local -a build_args=()
   rm -rf "$root"
+  if [[ -n "$PREBUILT_LOCAL_SOURCE_DIR" && -d "$PREBUILT_LOCAL_SOURCE_DIR" ]]; then
+    echo "Reusing prebuilt local source tree from image: $PREBUILT_LOCAL_SOURCE_DIR" >&2
+    if [[ -f "$PREBUILT_LOCAL_SOURCE_DIR/.rackup-source-build-ref" ]]; then
+      local recorded_ref
+      recorded_ref="$(tr -d '\n' < "$PREBUILT_LOCAL_SOURCE_DIR/.rackup-source-build-ref")"
+      [[ "$recorded_ref" == "$SOURCE_BUILD_REF" ]] || fail "prebuilt local source ref mismatch: expected '$SOURCE_BUILD_REF' got '$recorded_ref'"
+    fi
+    if [[ -n "$SOURCE_BUILD_COMMIT" && -f "$PREBUILT_LOCAL_SOURCE_DIR/.rackup-source-build-commit" ]]; then
+      local recorded_commit
+      recorded_commit="$(tr -d '\n' < "$PREBUILT_LOCAL_SOURCE_DIR/.rackup-source-build-commit")"
+      [[ "$recorded_commit" == "$SOURCE_BUILD_COMMIT" ]] || fail "prebuilt local source commit mismatch: expected '$SOURCE_BUILD_COMMIT' got '$recorded_commit'"
+    fi
+    mkdir -p "$root"
+    cp -a "$PREBUILT_LOCAL_SOURCE_DIR"/. "$root"/
+    [[ -x "$root/racket/bin/racket" ]] || fail "expected prebuilt racket at $root/racket/bin/racket"
+    echo "$root"
+    return 0
+  fi
   if [[ "$SOURCE_BUILD_REPO" == "https://github.com/racket/racket.git" && "$SOURCE_BUILD_REF" =~ ^v?([0-9][0-9A-Za-z._-]*)$ ]]; then
     version="${BASH_REMATCH[1]}"
     archive="https://download.racket-lang.org/installers/${version}/racket-minimal-${version}-src-builtpkgs.tgz"
@@ -573,16 +595,19 @@ else
 fi
 linked_id="$(run_rackup link localsrc "$local_src_root" --set-default | tail -n 1)"
 assert_eq "local-localsrc" "$linked_id" "unexpected linked toolchain id"
+echo "linked_id=$linked_id"
 run_rackup which racket --toolchain localsrc
 run_rackup which raco --toolchain localsrc
 run_rackup which scheme --toolchain localsrc
 run_rackup which petite --toolchain localsrc
+echo "linked executables resolved"
 linked_version="$(shim_racket -e '(display (version))')"
 if [[ "$LOCAL_LINK_MODE" == "fake" ]]; then
   assert_contains "9.99-local" "$linked_version" "linked fake source tree should report fake version"
 else
   assert_nonempty "$linked_version" "linked source-built racket should report a version"
 fi
+echo "linked racket version=$linked_version"
 linked_plthome="$(shim_racket -e '(display (or (getenv "PLTHOME") ""))')"
 assert_eq "${local_src_root}/racket" "$linked_plthome" "linked shim should export PLTHOME"
 linked_collects="$(shim_racket -e '(display (or (getenv "PLTCOLLECTS") ""))')"
@@ -591,13 +616,19 @@ linked_addon="$(shim_racket -e '(display (or (getenv "PLTADDONDIR") ""))')"
 assert_nonempty "$linked_addon" "linked shim should export PLTADDONDIR"
 linked_addon_path="$(shim_racket -e '(display (find-system-path (quote addon-dir)))')"
 assert_eq "$linked_addon_path" "$linked_addon" "linked shim PLTADDONDIR should match the linked installation addon dir"
+echo "linked shim environment verified"
 link_run_plthome="$(run_rackup run localsrc -- racket -e '(display (or (getenv "PLTHOME") ""))')"
 assert_eq "${local_src_root}/racket" "$link_run_plthome" "rackup run should apply linked toolchain env"
+echo "rackup run environment verified"
 if [[ "$LOCAL_LINK_MODE" == "build" ]]; then
   run_rackup run localsrc -- raco help >/dev/null
+  echo "linked raco ok"
   run_rackup run localsrc -- racket -e '(display "ok")' >/dev/null
-  run_rackup run localsrc -- scheme --version >/dev/null
-  run_rackup run localsrc -- petite --version >/dev/null
+  echo "linked racket ok"
+  printf '(exit)\n' | run_rackup run localsrc -- scheme >/dev/null
+  echo "linked scheme ok"
+  printf '(exit)\n' | run_rackup run localsrc -- petite >/dev/null
+  echo "linked petite ok"
 else
   fake_scheme_out="$(run_rackup run localsrc -- scheme --version)"
   fake_petite_out="$(run_rackup run localsrc -- petite --version)"
