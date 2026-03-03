@@ -618,6 +618,7 @@
        (rackup-error "usage: rackup run <toolchain> -- <command> [args...]"))
      (define id (resolve-toolchain-or-die spec))
      (define env (environment-variables-copy (current-environment-variables)))
+     (restore-saved-racket-env-vars! env)
      (environment-variables-set! env #"RACKUP_TOOLCHAIN" (string->bytes/utf-8 id))
      (for ([kv (in-list (toolchain-runtime-env-vars id))])
        (environment-variables-set! env

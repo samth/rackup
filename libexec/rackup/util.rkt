@@ -22,7 +22,9 @@
          require-checksummed-http-installer!
          sh-single-quote
          color-enabled?
-         ansi)
+         ansi
+         sanitized-racket-env-vars
+         restore-saved-racket-env-vars!)
 
 (define (rackup-error fmt . args)
   (raise-user-error 'rackup (apply format fmt args)))
@@ -129,6 +131,21 @@
 (define (sh-single-quote s)
   (define str (format "~a" s))
   (string-append "'" (regexp-replace* #px"'" str "'\"'\"'") "'"))
+
+;; Racket env vars that bin/rackup saves as _RACKUP_ORIG_* and clears
+;; so the hidden runtime is not affected. restore-saved-racket-env-vars!
+;; puts them back for user toolchain subprocesses (rackup run).
+(define sanitized-racket-env-vars
+  '("PLTHOME" "PLTCOLLECTS" "PLTADDONDIR" "PLTCOMPILEDROOTS"
+    "PLTUSERHOME" "RACKET_XPATCH" "PLT_COMPILED_FILE_CHECK"))
+
+(define (restore-saved-racket-env-vars! env)
+  (for ([var (in-list sanitized-racket-env-vars)])
+    (define saved-key (string->bytes/utf-8 (string-append "_RACKUP_ORIG_" var)))
+    (define saved-val (environment-variables-ref env saved-key))
+    (when saved-val
+      (environment-variables-set! env (string->bytes/utf-8 var) saved-val))
+    (environment-variables-set! env saved-key #f)))
 
 (define (color-enabled?)
   (and (terminal-port? (current-output-port)) (not (getenv "NO_COLOR"))))

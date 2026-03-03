@@ -17,7 +17,8 @@
          "../libexec/rackup/runtime.rkt"
          "../libexec/rackup/shell.rkt"
          "../libexec/rackup/shims.rkt"
-         "../libexec/rackup/state.rkt")
+         "../libexec/rackup/state.rkt"
+         "../libexec/rackup/util.rkt")
 
 (define (with-temp-rackup-home proc)
   (define tmp (make-temporary-file "rackup-test~a" 'directory))
@@ -1459,3 +1460,123 @@
      ;; Exact match still works
      (check-equal? (find-local-toolchain id-full) id-full)
      (check-equal? (find-local-toolchain id-minimal) id-minimal)))
+
+  ;; Unit test: restore-saved-racket-env-vars! restores saved vars and cleans up
+  (let ([env (environment-variables-copy (current-environment-variables))])
+    ;; Simulate what bin/rackup does: save as _RACKUP_ORIG_*, clear originals
+    (environment-variables-set! env #"PLTCOMPILEDROOTS" #f)
+    (environment-variables-set! env #"PLTUSERHOME" #f)
+    (environment-variables-set! env #"_RACKUP_ORIG_PLTCOMPILEDROOTS" #"test-roots")
+    (environment-variables-set! env #"_RACKUP_ORIG_PLTUSERHOME" #"test-home")
+    (restore-saved-racket-env-vars! env)
+    (check-equal? (environment-variables-ref env #"PLTCOMPILEDROOTS") #"test-roots"
+                  "PLTCOMPILEDROOTS should be restored")
+    (check-equal? (environment-variables-ref env #"PLTUSERHOME") #"test-home"
+                  "PLTUSERHOME should be restored")
+    (check-false (environment-variables-ref env #"_RACKUP_ORIG_PLTCOMPILEDROOTS")
+                 "_RACKUP_ORIG_ prefix should be removed")
+    (check-false (environment-variables-ref env #"_RACKUP_ORIG_PLTUSERHOME")
+                 "_RACKUP_ORIG_ prefix should be removed"))
+
+  ;; Unit test: restore cleans _RACKUP_ORIG_ even when no saved value exists
+  (let ([env (environment-variables-copy (current-environment-variables))])
+    (environment-variables-set! env #"PLTCOMPILEDROOTS" #f)
+    (environment-variables-set! env #"_RACKUP_ORIG_PLTCOMPILEDROOTS" #f)
+    (restore-saved-racket-env-vars! env)
+    (check-false (environment-variables-ref env #"PLTCOMPILEDROOTS")
+                 "unsaved var should remain unset")
+    (check-false (environment-variables-ref env #"_RACKUP_ORIG_PLTCOMPILEDROOTS")
+                 "_RACKUP_ORIG_ should be cleaned up"))
+
+  ;; Helper: set up a hidden runtime in temp RACKUP_HOME so bin/rackup
+  ;; can find a real racket binary (the system racket may be a wrapper
+  ;; script that requires PLTHOME).
+  (define (setup-hidden-runtime! tmp)
+    (define runtime-id "runtime-test-env")
+    (define runtime-version-dir (rackup-runtime-version-dir runtime-id))
+    (define runtime-real-bin (build-path tmp "runtime-real-bin"))
+    (make-directory* runtime-real-bin)
+    (make-file-or-directory-link (find-system-path 'exec-file)
+                                 (build-path runtime-real-bin "racket"))
+    (make-directory* runtime-version-dir)
+    (make-file-or-directory-link runtime-real-bin (rackup-runtime-bin-link runtime-id))
+    (make-file-or-directory-link runtime-version-dir (rackup-runtime-current-link)))
+
+  ;; Integration test: poisoned Racket env vars don't affect rackup itself
+  (with-temp-rackup-home
+   (lambda (tmp)
+     (ensure-index!)
+     (setup-hidden-runtime! tmp)
+     (define id "release-9.0-cs-x86_64-linux-full")
+     (define install-root (rackup-toolchain-install-dir id))
+     (define real-bin (build-path install-root "bin"))
+     (make-directory* real-bin)
+     (define racket-exe (build-path real-bin "racket"))
+     (write-string-file racket-exe "#!/usr/bin/env bash\necho test\n")
+     (file-or-directory-permissions racket-exe #o755)
+     (make-file-or-directory-link real-bin (rackup-toolchain-bin-link id))
+     (register-toolchain! id
+                          (hash 'id id 'kind 'release 'requested-spec "9.0"
+                                'resolved-version "9.0" 'variant 'cs 'distribution 'full
+                                'arch "x86_64" 'platform "linux"
+                                'executables '("racket") 'installed-at "2026-02-26T00:00:00Z"))
+
+     ;; Poison all sanitized Racket env vars
+     (define saved-vars
+       (for/list ([var (in-list sanitized-racket-env-vars)])
+         (cons var (getenv var))))
+     (dynamic-wind
+      (lambda ()
+        (for ([var sanitized-racket-env-vars])
+          (putenv var "/nonexistent/poisoned")))
+      (lambda ()
+        ;; rackup list should still work
+        (let-values ([(ok? out err) (run-bin-rackup/capture '("list"))])
+          (check-true ok? "rackup list should work with all PLT vars poisoned")
+          (check-true (string-contains? out "release-9.0")
+                      "rackup list output should contain the toolchain")))
+      (lambda ()
+        (for ([kv saved-vars])
+          (if (cdr kv)
+              (putenv (car kv) (cdr kv))
+              (putenv (car kv) "")))))))
+
+  ;; Integration test: env vars pass through to rackup run subprocesses
+  (with-temp-rackup-home
+   (lambda (tmp)
+     (ensure-index!)
+     (setup-hidden-runtime! tmp)
+     (define id "release-9.0-cs-x86_64-linux-full")
+     (define install-root (rackup-toolchain-install-dir id))
+     (define real-bin (build-path install-root "bin"))
+     (make-directory* real-bin)
+     (define racket-exe (build-path real-bin "racket"))
+     (write-string-file racket-exe "#!/usr/bin/env bash\necho test\n")
+     (file-or-directory-permissions racket-exe #o755)
+     (define print-env (build-path real-bin "print-compiled-roots"))
+     (write-string-file print-env
+                        "#!/usr/bin/env bash\nprintf 'PLTCOMPILEDROOTS=%s\\n' \"${PLTCOMPILEDROOTS:-}\"\n")
+     (file-or-directory-permissions print-env #o755)
+     (make-file-or-directory-link real-bin (rackup-toolchain-bin-link id))
+     (register-toolchain! id
+                          (hash 'id id 'kind 'release 'requested-spec "9.0"
+                                'resolved-version "9.0" 'variant 'cs 'distribution 'full
+                                'arch "x86_64" 'platform "linux"
+                                'executables '("racket" "print-compiled-roots")
+                                'installed-at "2026-02-26T00:00:00Z"))
+
+     (define old-cr (getenv "PLTCOMPILEDROOTS"))
+     (dynamic-wind
+      (lambda ()
+        (putenv "PLTCOMPILEDROOTS" "test-compiled-roots-passthrough"))
+      (lambda ()
+        (let-values ([(ok? out err)
+                      (run-bin-rackup/capture
+                       (list "run" id "--" "print-compiled-roots"))])
+          (check-true ok? "rackup run should succeed")
+          (check-true (string-contains? out "PLTCOMPILEDROOTS=test-compiled-roots-passthrough")
+                      "PLTCOMPILEDROOTS should pass through to rackup run subprocess")))
+      (lambda ()
+        (if old-cr
+            (putenv "PLTCOMPILEDROOTS" old-cr)
+            (putenv "PLTCOMPILEDROOTS" ""))))))

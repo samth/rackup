@@ -49,7 +49,15 @@ else
   USE_Y=1
 fi
 rackup_mkdir_p "$RUNTIME_ADDON_DIR"
-unset PLTHOME PLTCOLLECTS PLTADDONDIR
+# Save user's Racket env vars for pass-through (rackup run), then clear
+# so the hidden runtime is not affected.
+for _rackup_v in PLTHOME PLTCOLLECTS PLTADDONDIR PLTCOMPILEDROOTS PLTUSERHOME RACKET_XPATCH PLT_COMPILED_FILE_CHECK; do
+  eval "_rackup_val=\${$_rackup_v:-}"
+  if [ -n "$_rackup_val" ]; then
+    eval "export _RACKUP_ORIG_$_rackup_v=\"\$_rackup_val\""
+  fi
+done
+unset PLTHOME PLTCOLLECTS PLTADDONDIR PLTCOMPILEDROOTS PLTUSERHOME RACKET_XPATCH PLT_COMPILED_FILE_CHECK
 
 rackup_run_core() {
   if [ "$USE_Y" -eq 1 ]; then
