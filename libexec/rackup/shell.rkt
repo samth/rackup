@@ -234,7 +234,7 @@
    "  esac\n"
    "}\n"
    "\n"
-   "compdef _rackup rackup\n"))
+   "if (( $+functions[compdef] )); then compdef _rackup rackup; fi\n"))
 
 (define (shell-helper-script shell-name)
   (string-append "# rackup shell helper\n"
