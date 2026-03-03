@@ -20,7 +20,9 @@
          path-basename-string
          http-url?
          require-checksummed-http-installer!
-         sh-single-quote)
+         sh-single-quote
+         color-enabled?
+         ansi)
 
 (define (rackup-error fmt . args)
   (raise-user-error 'rackup (apply format fmt args)))
@@ -127,3 +129,11 @@
 (define (sh-single-quote s)
   (define str (format "~a" s))
   (string-append "'" (regexp-replace* #px"'" str "'\"'\"'") "'"))
+
+(define (color-enabled?)
+  (and (terminal-port? (current-output-port)) (not (getenv "NO_COLOR"))))
+
+(define (ansi code s)
+  (if (color-enabled?)
+      (string-append "\e[" code "m" s "\e[0m")
+      s))

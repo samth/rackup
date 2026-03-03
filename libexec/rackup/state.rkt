@@ -156,6 +156,22 @@
                                               (equal? name (hash-ref m 'resolved-version #f))))))
                           id)])
            (unique matches))
+         ;; Match by metadata parts: split name on "-" and check if each part
+         ;; matches a metadata field (version, variant, or distribution).
+         ;; e.g. "9.0-minimal" matches version=9.0 + distribution=minimal
+         (let ([parts (string-split name "-")])
+           (and (>= (length parts) 2)
+                (unique
+                 (for/list ([id ids]
+                            #:when
+                            (let ([m (read-toolchain-meta id)])
+                              (and (hash? m)
+                                   (let ([vals (list (hash-ref m 'resolved-version #f)
+                                                     (format "~a" (hash-ref m 'variant #f))
+                                                     (format "~a" (hash-ref m 'distribution #f)))])
+                                     (for/and ([part (in-list parts)])
+                                       (member part vals))))))
+                   id))))
          #f)]))
 
 (define (ensure-toolchain-addon-dir! id)

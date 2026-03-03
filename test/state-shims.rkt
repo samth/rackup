@@ -1415,3 +1415,47 @@
         (if old-override
             (putenv "RACKUP_SELF_UPGRADE_INSTALL_SH" old-override)
             (putenv "RACKUP_SELF_UPGRADE_INSTALL_SH" ""))))))
+
+  ;; Metadata-parts matching: "9.0-minimal" should resolve when both full and minimal exist
+  (with-temp-rackup-home
+   (lambda (tmp)
+     (ensure-index!)
+     (define (register-fake-toolchain! id version variant distribution)
+       (define tc-dir (rackup-toolchain-dir id))
+       (define install-root (rackup-toolchain-install-dir id))
+       (define real-bin (build-path install-root "bin"))
+       (make-directory* real-bin)
+       (define racket-exe (build-path real-bin "racket"))
+       (write-string-file racket-exe "#!/usr/bin/env bash\necho test\n")
+       (file-or-directory-permissions racket-exe #o755)
+       (make-file-or-directory-link real-bin (rackup-toolchain-bin-link id))
+       (register-toolchain! id
+                            (hash 'id id
+                                  'kind 'release
+                                  'requested-spec version
+                                  'resolved-version version
+                                  'variant variant
+                                  'distribution distribution
+                                  'arch "x86_64"
+                                  'platform "linux"
+                                  'executables '("racket")
+                                  'installed-at "2026-02-26T00:00:00Z")))
+
+     (define id-full "release-9.0-cs-x86_64-linux-full")
+     (define id-minimal "release-9.0-cs-x86_64-linux-minimal")
+     (register-fake-toolchain! id-full "9.0" 'cs 'full)
+     (register-fake-toolchain! id-minimal "9.0" 'cs 'minimal)
+
+     ;; "9.0" alone is ambiguous (two matches)
+     (check-false (find-local-toolchain "9.0"))
+     ;; "9.0-minimal" disambiguates via metadata parts
+     (check-equal? (find-local-toolchain "9.0-minimal") id-minimal)
+     ;; "9.0-full" disambiguates the other way
+     (check-equal? (find-local-toolchain "9.0-full") id-full)
+     ;; "9.0-cs-minimal" also works
+     (check-equal? (find-local-toolchain "9.0-cs-minimal") id-minimal)
+     ;; "9.0-bc" doesn't match anything (no bc toolchain installed)
+     (check-false (find-local-toolchain "9.0-bc"))
+     ;; Exact match still works
+     (check-equal? (find-local-toolchain id-full) id-full)
+     (check-equal? (find-local-toolchain id-minimal) id-minimal)))

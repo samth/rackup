@@ -37,13 +37,8 @@
 (define (install-verbose?)
   (eq? (install-verbosity) 'verbose))
 
-(define (install-color-enabled?)
-  (and (terminal-port? (current-output-port)) (not (getenv "NO_COLOR"))))
-
 (define (ansi-color code s)
-  (if (install-color-enabled?)
-      (string-append "\u001b[" code "m" s "\u001b[0m")
-      s))
+  (ansi code s))
 
 (define (install-info fmt . args)
   (unless (install-quiet?)
@@ -898,11 +893,12 @@
           (cons 'runtime-racket (hash-ref runtime-status 'racket-path #f))
           (cons 'wrapper-runtime-source wrapper-runtime-source)))
   (for ([kv findings])
-    (printf "~a: ~a\n" (car kv) (cdr kv)))
+    (printf "~a: ~a\n" (ansi "1" (format "~a" (car kv))) (cdr kv)))
   (for ([id ids])
     (define m (read-toolchain-meta id))
-    (printf "toolchain ~a => ~a (~a, ~a)\n"
+    (printf "toolchain ~a => ~a\n"
             id
-            (hash-ref m 'resolved-version #f)
-            (hash-ref m 'variant #f)
-            (hash-ref m 'distribution #f))))
+            (ansi "90" (format "(~a, ~a, ~a)"
+                                (hash-ref m 'resolved-version #f)
+                                (hash-ref m 'variant #f)
+                                (hash-ref m 'distribution #f))))))

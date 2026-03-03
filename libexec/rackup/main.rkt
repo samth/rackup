@@ -454,9 +454,9 @@
          (not (string-blank? env-id))
          (not (member env-id ids))))
   (when stale-env?
-    (printf "Warning: RACKUP_TOOLCHAIN selects '~a', but that toolchain is not installed.\n" env-id)
+    (displayln (ansi "33" (format "Warning: RACKUP_TOOLCHAIN selects '~a', but that toolchain is not installed." env-id)))
     (when (and default-id (member default-id ids))
-      (printf "It overrides the default toolchain '~a'.\n" default-id))
+      (displayln (ansi "33" (format "It overrides the default toolchain '~a'." default-id))))
     (displayln "Clear it with: rackup switch --unset")
     (displayln "Or unset it manually with: unset RACKUP_TOOLCHAIN")
     (newline))
@@ -464,17 +464,24 @@
       (displayln "No toolchains installed.")
       (for ([id ids])
         (define m (read-toolchain-meta id))
+        (define is-default? (equal? id default-id))
+        (define is-active? (equal? id active-id))
         (define tags
           (filter values
-                  (list (and (equal? id default-id) "default") (and (equal? id active-id) "active"))))
-        (printf "~a~a  (~a, ~a, ~a)\n"
-                (if (null? tags)
-                    ""
-                    (format "[~a] " (string-join tags ",")))
-                id
-                (hash-ref m 'resolved-version "?")
-                (hash-ref m 'variant "?")
-                (hash-ref m 'distribution "?")))))
+                  (list (and is-default? "default") (and is-active? "active"))))
+        (define tag-str
+          (if (null? tags)
+              ""
+              (string-append
+               (ansi (if is-active? "32" "36")
+                     (format "[~a]" (string-join tags ",")))
+               " ")))
+        (define meta-str
+          (ansi "90" (format "(~a, ~a, ~a)"
+                             (hash-ref m 'resolved-version "?")
+                             (hash-ref m 'variant "?")
+                             (hash-ref m 'distribution "?"))))
+        (printf "~a~a  ~a\n" tag-str id meta-str))))
 
 (define (default-id->line)
   (define id (get-default-toolchain))
@@ -520,7 +527,7 @@
   (match rest
     ['()
      (cond
-       [id (printf "~a\t(~a)\n" id src)]
+       [id (printf "~a\t~a\n" id (ansi "90" (format "(~a)" src)))]
        [else (displayln "none")])]
     [(list "id")
      (if id
@@ -733,9 +740,9 @@
 
 (define (display-available-alias label spec)
   (with-handlers ([exn:fail? (lambda (e)
-                               (printf "  ~a -> unavailable (~a)\n" label (exn-message e)))])
+                               (printf "  ~a -> ~a\n" label (ansi "33" (format "unavailable (~a)" (exn-message e)))))])
     (define req (resolve-install-request spec))
-    (printf "  ~a -> ~a\n" label (fmt-req-summary req))))
+    (printf "  ~a -> ~a\n" (ansi "1" label) (ansi "90" (fmt-req-summary req)))))
 
 (define (cmd-available rest)
   (define limit (parse-available-options rest))
