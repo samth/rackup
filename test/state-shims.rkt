@@ -2,6 +2,7 @@
 
 (require rackunit
          recspecs
+         recspecs/shell
          racket/file
          racket/format
          racket/list
@@ -31,18 +32,9 @@
                       (putenv "RACKUP_HOME" ""))
                   (delete-directory/files tmp #:must-exist? #f))))
 
-(define (run-main/capture args)
-  (define out (open-output-string))
-  (define err (open-output-string))
-  (parameterize ([current-command-line-arguments (list->vector args)]
-                 [current-output-port out]
-                 [current-error-port err])
-    (main))
-  (values (get-output-string out) (get-output-string err)))
-
-(define (run-main/stdout args)
-  (define-values (out _err) (run-main/capture args))
-  out)
+(define (run-main args)
+  (parameterize ([current-command-line-arguments (list->vector args)])
+    (main)))
 
 (define-runtime-path rackup-bin "../bin/rackup")
 (define install-ns (module->namespace '(file "../libexec/rackup/install.rkt")))
@@ -69,24 +61,6 @@
   (parameterize ([current-namespace runtime-ns])
     (eval 'hidden-runtime-invocation-prefix)))
 
-(define (run-bin-rackup/capture args)
-  (define out (open-output-string))
-  (define err (open-output-string))
-  (define ok?
-    (parameterize ([current-output-port out]
-                   [current-error-port err])
-      (apply system* rackup-bin args)))
-  (values ok? (get-output-string out) (get-output-string err)))
-
-(define (run-bin-rackup/capture/env env args)
-  (define out (open-output-string))
-  (define err (open-output-string))
-  (define ok?
-    (parameterize ([current-environment-variables env]
-                   [current-output-port out]
-                   [current-error-port err])
-      (apply system* rackup-bin args)))
-  (values ok? (get-output-string out) (get-output-string err)))
 
 (define (run-program/capture program args)
   (define-values (proc stdout stdin stderr)
@@ -203,25 +177,21 @@
                            (register-toolchain! id meta)
                            (check-equal? (get-default-toolchain) id)
                            (check-equal? (find-local-toolchain "release-8.18") id)
-                           (check-equal? (run-main/stdout '("prompt"))
-                                         "racket-8.18\n")
-                           (check-equal? (run-main/stdout '("prompt" "--short"))
-                                         "racket-8.18\n")
-                           (check-equal? (run-main/stdout '("prompt" "--long"))
-                                         "[rk:release-8.18-cs-x86_64-linux-full]\n")
-                           (let-values ([(ok? out err) (run-bin-rackup/capture '("prompt" "--short"))])
-                             (check-true ok?)
-                             (check-equal? out "racket-8.18\n")
-                             (check-equal? err ""))
-                           (let-values ([(ok? out err) (run-bin-rackup/capture '("prompt"))])
-                             (check-true ok?)
-                             (check-equal? out "racket-8.18\n")
-                             (check-equal? err ""))
+                           @expect[(run-main '("prompt"))]{racket-8.18
+}
+                           @expect[(run-main '("prompt" "--short"))]{racket-8.18
+}
+                           @expect[(run-main '("prompt" "--long"))]{[rk:release-8.18-cs-x86_64-linux-full]
+}
+                           @expect/shell[(list (path->string rackup-bin) "prompt" "--short")]{racket-8.18
+}
+                           @expect/shell[(list (path->string rackup-bin) "prompt")]{racket-8.18
+}
                            (check-equal? (path->string (resolve-executable-path "racket"))
                                          (path->string (build-path (rackup-toolchain-bin-link id)
                                                                    "racket")))
 
-                           (define list-out (run-main/stdout '("list")))
+                           (define list-out (capture-output (lambda () (run-main '("list")))))
                            (check-true
                             (string-contains? list-out
                                               "[default,active] release-8.18-cs-x86_64-linux-full"))
@@ -231,7 +201,7 @@
                            (dynamic-wind
                             (lambda () (putenv "RACKUP_TOOLCHAIN" "release-103-bc-i386-linux-full"))
                             (lambda ()
-                              (define stale-list-out (run-main/stdout '("list")))
+                              (define stale-list-out (capture-output (lambda () (run-main '("list")))))
                               (check-true
                                (string-contains?
                                 stale-list-out
@@ -342,10 +312,10 @@
              "2026-02-27T00:00:00Z"))
      (register-toolchain! id meta)
      (reshim!)
-     (let-values ([(status out err) (run-program/capture (build-path (rackup-shims-dir) "mzscheme") '())])
-       (check-equal? status 0)
-       (check-equal? err "")
-       (check-true (string-contains? out (format "PLTHOME=~a" (path->string plthome)))))))
+     (define mzscheme-out
+       (capture-output
+        (lambda () (system* (build-path (rackup-shims-dir) "mzscheme")))))
+     (check-true (string-contains? mzscheme-out (format "PLTHOME=~a" (path->string plthome))))))
 
   (with-temp-rackup-home
    (lambda (tmp)
@@ -539,11 +509,7 @@
      (define old-pltaddon (getenv "PLTADDONDIR"))
      (void (putenv "PLTADDONDIR" ""))
      (define shim-out
-       (parameterize ([current-output-port (open-output-string)]
-                      [current-error-port (open-output-string)])
-         (define out (current-output-port))
-         (check-true (system* shim-racket))
-         (get-output-string out)))
+       (capture-output (lambda () (system* shim-racket))))
      (void (if old-pltaddon
                (putenv "PLTADDONDIR" old-pltaddon)
                (putenv "PLTADDONDIR" "")))
@@ -559,17 +525,11 @@
                   shim-out))
 
      (define scheme-out
-       (parameterize ([current-output-port (open-output-string)]
-                      [current-error-port (open-output-string)])
-         (define out (current-output-port))
-         (check-true (system* (build-path (rackup-shims-dir) "scheme") "--version"))
-         (get-output-string out)))
+       (capture-output
+        (lambda () (system* (build-path (rackup-shims-dir) "scheme") "--version"))))
      (define petite-out
-       (parameterize ([current-output-port (open-output-string)]
-                      [current-error-port (open-output-string)])
-         (define out (current-output-port))
-         (check-true (system* (build-path (rackup-shims-dir) "petite") "--version"))
-         (get-output-string out)))
+       (capture-output
+        (lambda () (system* (build-path (rackup-shims-dir) "petite") "--version"))))
      (check-true (string-contains? scheme-out (format "scheme-ok -B ~a -B ~a --version"
                                                       (path->string petite-boot)
                                                       (path->string scheme-boot))))
@@ -580,15 +540,18 @@
      (check-true (string-contains? activation "export PLTHOME="))
      (check-true (string-contains? activation "export PLTCOLLECTS="))
      (check-true (string-contains? activation (format "export PLTADDONDIR='~a'" (path->string addon-dir))))
-     (check-equal? (run-main/stdout (list "switch" "devsrc")) activation)
-     (check-equal? (run-main/stdout '("prompt")) "racket-local-9.98-local\n")
-     (check-equal? (run-main/stdout '("prompt" "--short")) "racket-local-9.98-local\n")
-     (check-equal? (run-main/stdout '("prompt" "--long")) "[rk:local-devsrc]\n")
+     (expect (run-main (list "switch" "devsrc")) activation)
+     @expect[(run-main '("prompt"))]{racket-local-9.98-local
+}
+     @expect[(run-main '("prompt" "--short"))]{racket-local-9.98-local
+}
+     @expect[(run-main '("prompt" "--long"))]{[rk:local-devsrc]
+}
      (void (putenv "RACKUP_TOOLCHAIN" linked-id))
      (define deactivation (emit-shell-deactivation))
      (check-true (string-contains? deactivation "unset PLTHOME"))
      (check-true (string-contains? deactivation "unset PLTCOLLECTS"))
-     (check-equal? (run-main/stdout '("switch" "--unset")) deactivation)
+     (expect (run-main '("switch" "--unset")) deactivation)
      (void (putenv "RACKUP_TOOLCHAIN" ""))))
 
   (with-temp-rackup-home
@@ -648,11 +611,8 @@
      (check-not-false (member "petite" (hash-ref linked-meta 'executables)))
 
      (define shim-out
-       (parameterize ([current-output-port (open-output-string)]
-                      [current-error-port (open-output-string)])
-         (define out (current-output-port))
-         (check-true (system* (build-path (rackup-shims-dir) "racket")))
-         (get-output-string out)))
+       (capture-output
+        (lambda () (system* (build-path (rackup-shims-dir) "racket")))))
      (check-true (regexp-match? (regexp (regexp-quote (format "PLTHOME=~a" (path->string plthome))))
                                 shim-out))
      (check-true (regexp-match? (regexp (regexp-quote (format "PLTCOLLECTS=~a:~a"
@@ -715,10 +675,8 @@
                 (string-append (path->string poisoned-collects) ":" current-collects))
         (putenv "PLTADDONDIR" (path->string (build-path tmp "poisoned-addon"))))
       (lambda ()
-        (let-values ([(ok? out err) (run-bin-rackup/capture '("current" "id"))])
-          (check-true ok?)
-          (check-equal? out (format "~a\n" linked-id))
-          (check-equal? err "")))
+        (expect (begin (system* rackup-bin "current" "id") (void))
+                (format "~a\n" linked-id)))
       (lambda ()
         (if old-toolchain
             (putenv "RACKUP_TOOLCHAIN" old-toolchain)
@@ -784,20 +742,12 @@
      (check-equal? (hash-ref (hash-ref rs 'meta) 'resolved-version) "9.1")
 
      (define runtime-status-out
-       (let ([out (open-output-string)])
-         (parameterize ([current-output-port out]
-                        [current-error-port (open-output-string)])
-           (cmd-runtime '("status"))
-           (get-output-string out))))
+       (capture-output (lambda () (cmd-runtime '("status")))))
      (check-true (string-contains? runtime-status-out "present: yes"))
      (check-true (string-contains? runtime-status-out (format "id: ~a" runtime-id)))
 
      (define doctor-out
-       (let ([out (open-output-string)])
-         (parameterize ([current-output-port out]
-                        [current-error-port (open-output-string)])
-           (doctor-report)
-           (get-output-string out))))
+       (capture-output (lambda () (doctor-report))))
      (check-true (string-contains? doctor-out "runtime-present: #t"))
      (check-true (string-contains? doctor-out (format "runtime-id: ~a" runtime-id)))))
 
@@ -832,10 +782,7 @@
      (make-directory* version-dir)
      (make-file-or-directory-link fake-bin-dir (rackup-runtime-bin-link runtime-id))
      (make-file-or-directory-link version-dir (rackup-runtime-current-link))
-     (let-values ([(ok? out err) (run-bin-rackup/capture '("current" "id"))])
-       (check-true ok?)
-       (check-equal? out "")
-       (check-equal? err ""))
+     @expect/shell[(list (path->string rackup-bin) "current" "id")]{}
      (define argv
        (string-split (string-trim (file->string captured-argv)) "\n"))
      (check-equal? (take argv 3)
@@ -877,10 +824,10 @@
      (environment-variables-set! env #"PLTHOME" #"poison-plthome")
      (environment-variables-set! env #"PLTCOLLECTS" #"poison-collects")
      (environment-variables-set! env #"PLTADDONDIR" #"poison-addon")
-     (let-values ([(ok? out err) (run-bin-rackup/capture/env env '("current" "id"))])
-       (check-true ok?)
-       (check-equal? out "")
-       (check-equal? err ""))
+     (expect (parameterize ([current-environment-variables env])
+               (system* rackup-bin "current" "id")
+               (void))
+             "" #:port 'both)
      (define argv
        (string-split (string-trim (file->string captured-argv)) "\n"))
      (check-equal? (take argv 4)
@@ -1101,9 +1048,9 @@
      (check-equal? (path->string (detect-bin-dir/private install-root))
                    (path->string (build-path install-root "plt" "bin")))))
 
-  (check-equal? (run-main/stdout '("install" "--help"))
-                (run-main/stdout '("help" "install")))
-  (expect (display (run-main/stdout '("install" "--help")))
+  (check-equal? (capture-output (lambda () (run-main '("install" "--help"))))
+                (capture-output (lambda () (run-main '("help" "install")))))
+  (expect (run-main '("install" "--help"))
           @~a{
             Usage: rackup install <spec> [flags]
 
@@ -1129,9 +1076,9 @@
               rackup install 8.18 --variant cs
               rackup install snapshot --snapshot-site utah
           })
-  (check-equal? (run-main/stdout '("switch" "--help"))
-                (run-main/stdout '("help" "switch")))
-  (expect (display (run-main/stdout '("switch" "--help")))
+  (check-equal? (capture-output (lambda () (run-main '("switch" "--help"))))
+                (capture-output (lambda () (run-main '("help" "switch")))))
+  (expect (run-main '("switch" "--help"))
           @~a{
             Usage: rackup switch <toolchain> | switch --unset
 
@@ -1144,9 +1091,9 @@
               rackup switch 8.18
               rackup switch --unset
           })
-  (check-equal? (run-main/stdout '("prompt" "--help"))
-                (run-main/stdout '("help" "prompt")))
-  (expect (display (run-main/stdout '("prompt" "--help")))
+  (check-equal? (capture-output (lambda () (run-main '("prompt" "--help"))))
+                (capture-output (lambda () (run-main '("help" "prompt")))))
+  (expect (run-main '("prompt" "--help"))
           @~a{
             Usage: rackup prompt [--long|--short|--raw|--source]
 
@@ -1173,12 +1120,30 @@
   (with-temp-rackup-home
    (lambda (_tmp)
      (ensure-index!)
-     (define-values (help-ok? help-out help-err)
-       (run-bin-rackup/capture '("prompt" "--help")))
-     (check-true help-ok?)
-     (check-equal? help-err "")
-     (check-true (string-contains? help-out "Usage: rackup prompt [--long|--short|--raw|--source]"))))
-  (expect (display (run-main/stdout '("runtime" "--help")))
+     @expect/shell[(list (path->string rackup-bin) "prompt" "--help")]{
+Usage: rackup prompt [--long|--short|--raw|--source]
+
+Print prompt/status information for the active toolchain.
+Prints nothing when no active/default toolchain is configured.
+Handled by the shell wrapper without starting Racket when possible.
+
+Default output:
+  racket-9.1
+
+Options:
+  --long                  Print the long bracketed form: "[rk:<toolchain-id>]".
+  --short                 Print a compact label like "racket-9.1" (same as default).
+  --raw                   Print only the active toolchain id.
+  --source                Print "<id><TAB><env|default>".
+
+Examples:
+  rackup prompt
+  rackup prompt --long
+  rackup prompt --short
+  rackup prompt --raw
+  PS1='$(rackup prompt) '$PS1
+}))
+  (expect (run-main '("runtime" "--help"))
           @~a{
             Usage: rackup runtime status|install|upgrade
 
@@ -1189,9 +1154,9 @@
               install                 Install the hidden runtime if missing (or adopt existing).
               upgrade                 Install a newer hidden runtime if one is available.
           })
-  (check-equal? (run-main/stdout '("self-upgrade" "--help"))
-                (run-main/stdout '("help" "self-upgrade")))
-  (expect (display (run-main/stdout '("self-upgrade" "--help")))
+  (check-equal? (capture-output (lambda () (run-main '("self-upgrade" "--help"))))
+                (capture-output (lambda () (run-main '("help" "self-upgrade")))))
+  (expect (run-main '("self-upgrade" "--help"))
           @~a{
             Usage: rackup self-upgrade [--with-init]
 
@@ -1253,23 +1218,27 @@
              'installed-at
              "2026-02-26T00:00:00Z"))
      (register-toolchain! id meta)
-     (check-equal? (run-main/stdout '("current" "id")) (format "~a\n" id))
-     (check-equal? (run-main/stdout '("current" "source")) "default\n")
-     (check-equal? (run-main/stdout '("current" "line")) (format "~a\tdefault\n" id))
-     (check-equal? (run-main/stdout '("default" "id")) (format "~a\n" id))
-     (check-equal? (run-main/stdout '("default" "status")) (format "set\t~a\n" id))
+     (expect (run-main '("current" "id")) (format "~a\n" id))
+     @expect[(run-main '("current" "source"))]{default
+}
+     (expect (run-main '("current" "line")) (format "~a\tdefault\n" id))
+     (expect (run-main '("default" "id")) (format "~a\n" id))
+     (expect (run-main '("default" "status")) (format "set\t~a\n" id))
      (define old-env-id (getenv "RACKUP_TOOLCHAIN"))
      (dynamic-wind
       (lambda () (putenv "RACKUP_TOOLCHAIN" id))
       (lambda ()
-        (check-equal? (run-main/stdout '("current" "source")) "env\n")
-        (check-equal? (run-main/stdout '("current" "line")) (format "~a\tenv\n" id)))
+        @expect[(run-main '("current" "source"))]{env
+}
+        (expect (run-main '("current" "line")) (format "~a\tenv\n" id)))
      (lambda ()
         (if old-env-id
             (putenv "RACKUP_TOOLCHAIN" old-env-id)
             (putenv "RACKUP_TOOLCHAIN" ""))))
-     (check-equal? (run-main/stdout '("default" "clear")) "Cleared default toolchain.\n")
-     (check-equal? (run-main/stdout '("default" "status")) "unset\n")))
+     @expect[(run-main '("default" "clear"))]{Cleared default toolchain.
+}
+     @expect[(run-main '("default" "status"))]{unset
+}))
 
   (with-temp-rackup-home
    (lambda (_tmp)
@@ -1278,7 +1247,7 @@
      (dynamic-wind
       (lambda () (putenv "RACKUP_TOOLCHAIN" "release-103-bc-i386-linux-full"))
       (lambda ()
-        (define list-out (run-main/stdout '("list")))
+        (define list-out (capture-output (lambda () (run-main '("list")))))
         (check-true
          (string-contains?
           list-out
@@ -1377,7 +1346,7 @@
      (make-directory* (build-path tc-dir "install"))
      (write-string-file (build-path tc-dir "partial.txt") "leftover")
      (make-directory* addon-dir)
-     (expect (display (run-main/stdout '("remove" "5.2")))
+     (expect (run-main '("remove" "5.2"))
        (format "Removed orphan/partial toolchain directory ~a\n" orphan-id))
      (check-false (directory-exists? tc-dir))
      (check-false (directory-exists? addon-dir))
@@ -1400,7 +1369,7 @@
      (dynamic-wind
       (lambda () (putenv "RACKUP_SELF_UPGRADE_INSTALL_SH" (path->string fake-installer)))
       (lambda ()
-        (expect (display (run-main/stdout '("self-upgrade")))
+        (expect (run-main '("self-upgrade"))
                 (format "Upgrading rackup code in ~a\nrackup code upgrade complete.\n"
                         (path->string (rackup-home))))
         (let ([args-lines
