@@ -273,7 +273,7 @@
                              "if rackup_print_missing_loader_message \"$TARGET\"; then"))
                            (check-true
                             (string-contains? dispatcher-src "qemu-i386 via binfmt_misc"))
-                           (define helper-src (shell-helper-script/private))
+                           (define helper-src (shell-helper-script/private "bash"))
                            (check-true (string-contains? helper-src "_rackup_status"))
                            (check-true (string-contains? helper-src "return \"$_rackup_status\"")))))
 
