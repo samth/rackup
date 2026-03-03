@@ -53,4 +53,19 @@
 
   ;; Zsh has zsh-specific constructs
   (check-true (contains? zsh-output "_describe"))
-  (check-true (contains? zsh-output "_arguments")))
+  (check-true (contains? zsh-output "_arguments"))
+
+  ;; Bash flag-argument completions
+  (check-true (contains? bash-output "\"cs bc\"") "bash completion missing --variant values")
+  (check-true (contains? bash-output "\"full minimal\"") "bash completion missing --distribution values")
+  (check-true (contains? bash-output "\"auto utah northwestern\"") "bash completion missing --snapshot-site values")
+  (check-true (contains? bash-output "\"x86_64 aarch64 i386 arm riscv64 ppc\"") "bash completion missing --arch values")
+  (check-true (contains? bash-output "\"bash zsh\"") "bash completion missing --shell values")
+
+  ;; Zsh structured _arguments for install
+  (check-true (contains? zsh-output "'--variant[VM variant]:variant:(cs bc)'") "zsh completion missing --variant spec")
+  (check-true (contains? zsh-output "'--distribution[Distribution type]:distribution:(full minimal)'") "zsh completion missing --distribution spec")
+  (check-true (contains? zsh-output "'--arch[Target architecture]:arch:(x86_64 aarch64 i386 arm riscv64 ppc)'") "zsh completion missing --arch spec")
+
+  ;; Zsh structured _arguments for init
+  (check-true (contains? zsh-output "'--shell[Shell type]:shell:(bash zsh)'") "zsh completion missing --shell spec for init"))
