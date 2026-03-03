@@ -9,6 +9,7 @@
          net/http-client
          net/url
          "legacy-plt-catalog.rkt"
+         "legacy.rkt"
          "rktd-io.rkt"
          "util.rkt"
          "versioning.rkt")
@@ -33,7 +34,6 @@
 (define release-version-url "https://download.racket-lang.org/version.txt")
 (define all-versions-url "https://download.racket-lang.org/all-versions.html")
 (define pre-release-installers-base "https://pre-release.racket-lang.org/installers/")
-(define plt-scheme-download-base "http://download.plt-scheme.org/")
 (define snapshot-sites
   (hash 'utah "https://users.cs.utah.edu/plt" 'northwestern "https://plt.cs.northwestern.edu"))
 
@@ -176,17 +176,6 @@
 (define (installers-base-url-for-release version)
   (format "https://download.racket-lang.org/installers/~a/" version))
 
-(define (legacy-installers-base-url-for-release version distribution)
-  (define subdir
-    (case distribution
-      [(full) "racket"]
-      [(minimal) "racket-textual"]
-      [else (rackup-error "unsupported legacy distribution: ~a" distribution)]))
-  (format "https://download.racket-lang.org/installers/~a/~a/" version subdir))
-
-(define (plt-version-page-url version)
-  (format "~av~a.html" plt-scheme-download-base version))
-
 (define (fetch-table-rktd installers-base)
   (http-get-rktd (string-append installers-base "table.rktd")))
 
@@ -197,8 +186,6 @@
   (http-get-string (format "~a/snapshots/current/stamp.txt" (hash-ref snapshot-sites site))))
 
 (define installer-rx #px"^(racket(?:-minimal)?)-([^-]+)-(.+?)(?:-(bc|cs))?\\.([A-Za-z0-9]+)$")
-(define legacy-installer-rx
-  #px"^(racket(?:-textual)?)-([0-9]+(?:\\.[0-9]+){0,3})-bin-(.+)\\.([A-Za-z0-9]+)$")
 
 (define (parse-installer-filename s)
   (match (regexp-match installer-rx s)
@@ -249,70 +236,6 @@
            (string-downcase ext))]
     [_ #f]))
 
-(define (parse-legacy-installer-filename s)
-  (match (regexp-match legacy-installer-rx s)
-    [(list _ prefix version-token platform-token ext-s)
-     (define distribution (if (equal? prefix "racket-textual") 'minimal 'full))
-     (define parts (string-split platform-token "-"))
-     (define arch-token
-       (if (pair? parts)
-           (car parts)
-           platform-token))
-     (define platform-parts
-       (if (>= (length parts) 2)
-           (cdr parts)
-           null))
-     (define platform
-       (if (pair? platform-parts)
-           (string-join platform-parts "-")
-           ""))
-     (define platform-family
-       (if (pair? platform-parts)
-           (car platform-parts)
-           platform))
-     (hash 'filename
-           s
-           'distribution
-           distribution
-           'version-token
-           version-token
-           'platform-token
-           platform-token
-           'arch-token
-           arch-token
-           'arch
-           (arch-token->normalized arch-token)
-           'platform
-           platform
-           'platform-family
-           platform-family
-           'platform-parts
-           platform-parts
-           'variant
-           'bc
-           'ext
-           (string-downcase ext-s))]
-    [_ #f]))
-
-(define (parse-legacy-installers-index-html html)
-  (define hrefs
-    (for/list ([m (in-list (regexp-match* #px"href=\"([^\"]+)\"" html #:match-select cdr))])
-      (car m)))
-  (remove-duplicates
-   (filter values
-           (for/list ([h (in-list hrefs)])
-             (and (string? h) (regexp-match? #px"^(?:racket|racket-textual)-.+\\.sh$" h) h)))
-   string=?))
-
-(define (parse-plt-version-page-html html)
-  (remove-duplicates
-   (for/list ([m (in-list (regexp-match*
-                           #px"<option[^>]*value=\"(https?://download[.]plt-scheme[.]org/[^\"]+)\""
-                           html
-                           #:match-select cdr))])
-     (car m))
-   string=?))
-
 (define (table-filenames table)
   (cond
     [(hash? table)
@@ -336,79 +259,6 @@
     [(member "current" tokens) "current"]
     [(pair? tokens) (car (sort tokens string<?))]
     [else default]))
-
-(define (select-legacy-installer-filename filenames
-                                          #:version-token version-token
-                                          #:distribution distribution
-                                          #:arch arch
-                                          #:platform [platform "linux"]
-                                          #:ext [ext "sh"])
-  (define parsed (filter values (map parse-legacy-installer-filename filenames)))
-  (define matches
-    (for/list ([p parsed]
-               #:when (and (equal? (hash-ref p 'version-token) version-token)
-                           (equal? (hash-ref p 'distribution) distribution)
-                           (equal? (hash-ref p 'arch) arch)
-                           (equal? (hash-ref p 'platform-family) platform)
-                           (equal? (hash-ref p 'ext) ext)))
-      (hash-ref p 'filename)))
-  (cond
-    [(pair? matches) (car (sort matches string<?))]
-    [else
-     (rackup-error "no legacy installer found for version=~a distro=~a arch=~a platform=~a ext=~a"
-                   version-token
-                   distribution
-                   arch
-                   platform
-                   ext)]))
-
-(define (plt-version->hyphenated version)
-  (regexp-replace* #px"[.]" version "-"))
-
-(define (select-plt-generated-page-url urls
-                                       #:version version
-                                       #:arch arch
-                                       #:platform [platform "linux"])
-  (define version* (plt-version->hyphenated version))
-  (define (base-name u)
-    (path-basename-string (string->path (path->string* u))))
-  (define (candidate-for-platform? base)
-    (and (string-prefix? base (format "plt-~a-bin-" version*))
-         (string-contains? base (format "-~a-" platform))
-         (string-suffix? base "-sh.html")))
-  (define matches
-    (for/list ([u (in-list urls)]
-               #:when (let ([base (base-name u)])
-                        (and (candidate-for-platform? base)
-                             (string-contains? base (format "-~a-" arch)))))
-      (path->string* u)))
-  (cond
-    [(pair? matches) (car (sort matches string<?))]
-    [else
-     (define platform-urls
-       (for/list ([u (in-list urls)]
-                  #:when (candidate-for-platform? (base-name u)))
-         (path->string* u)))
-     (define hint
-       (cond
-         [(and (equal? platform "linux")
-               (equal? arch "x86_64")
-               (for/or ([u (in-list platform-urls)])
-                 (string-contains? (base-name u) "-i386-")))
-          " (this PLT Scheme version appears to have only i386 Linux installers; try --arch i386)"]
-         [else ""]))
-     (rackup-error "no PLT Scheme installer page found for version=~a arch=~a platform=~a~a"
-                   version
-                   arch
-                   platform
-                   hint)]))
-
-(define (plt-generated-page-url->installer-filename page-url version)
-  (define base (path-basename-string (string->path (path->string* page-url))))
-  (define version* (plt-version->hyphenated version))
-  (match (regexp-match (pregexp (format "^plt-~a-bin-(.+)-sh[.]html$" (regexp-quote version*))) base)
-    [(list _ platform-token) (format "plt-~a-bin-~a.sh" version platform-token)]
-    [_ (rackup-error "unexpected PLT Scheme generated page URL: ~a" page-url)]))
 
 (define (fetch-plt-scheme-installer-filename version
                                              #:distribution distribution
@@ -475,9 +325,6 @@
 
 (define (exn-message-looks-like-404? e)
   (regexp-match? #px"\\b404\\b" (exn-message e)))
-
-(define (version-maybe-plt-scheme? v)
-  (legacy-plt-version? v))
 
 (define (resolve-release-request/fallback requested-spec
                                           resolved-version

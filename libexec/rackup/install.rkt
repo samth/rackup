@@ -8,6 +8,7 @@
          racket/port
          racket/string
          racket/system
+         "legacy.rkt"
          "paths.rkt"
          "remote.rkt"
          "rktd-io.rkt"
@@ -129,42 +130,6 @@
     (verify-installer-sha256! cache-path expected-sha256)
     (file-or-directory-permissions cache-path #o755))
   cache-path)
-
-(define (legacy-interactive-linux-installer? installer-file)
-  (regexp-match? #px"(?:^|/)(?:racket(?:-textual)?|plt)-.+-bin-.+[.]sh$"
-                 (path->string* installer-file)))
-
-(define (read-file-prefix-bytes p [limit 65536])
-  (call-with-input-file* p
-    (lambda (in)
-      (or (read-bytes limit in) #""))))
-
-(define (detect-shell-installer-mode installer-file)
-  ;; Some older Racket shell installers (notably 6.0) have modern-looking
-  ;; filenames but only support interactive prompting. Detect them from the
-  ;; script header instead of guessing from the filename alone.
-  (define prefix
-    (with-handlers ([exn:fail? (lambda (_) #"")])
-      (read-file-prefix-bytes installer-file)))
-  (cond
-    [(and (regexp-match? #rx#"Command-line flags:" prefix)
-          (regexp-match? #rx#"--dest" prefix)
-          (regexp-match? #rx#"--in-place" prefix))
-     'modern]
-    [(regexp-match? #rx#"Do you want a Unix-style distribution\\?" prefix)
-     'shell-unixstyle]
-    [(regexp-match? #rx#"Where do you want to install the \"" prefix)
-     'shell-basic]
-    [else #f]))
-
-(define (legacy-installer-input-script dest legacy-install-kind)
-  ;; Old PLT/Racket installers (e.g. 5.2, 4.x/3xx) do not support --dest/--in-place.
-  ;; Answer prompts for a whole-directory install into the exact requested destination,
-  ;; then skip creating system links.
-  (case legacy-install-kind
-    [(shell-basic) (format "~a\n\n" (path->string* dest))]
-    [(shell-unixstyle) (format "n\n~a\n\n" (path->string* dest))]
-    [else (rackup-error "unknown legacy installer kind: ~a" legacy-install-kind)]))
 
 (define (run-linux-installer! installer-file
                               install-root
@@ -590,19 +555,6 @@
     [(and plthome-normalized (equal? plthome-name "plt"))
      (list (cons "PLTHOME" (path->string* plthome-normalized)))]
     [else null]))
-
-(define (maybe-modernize-legacy-archsys! real-bin-dir)
-  (define plthome (maybe-parent real-bin-dir))
-  (define archsys (and plthome (build-path plthome "bin" "archsys")))
-  (when (and archsys (file-exists? archsys))
-    (define content (file->string archsys))
-    (define updated
-      (regexp-replace* #px"file /bin/ls \\| grep ELF \\| wc -l"
-                       content
-                       "file -L /bin/ls 2>/dev/null | grep ELF | wc -l"))
-    (unless (equal? updated content)
-      (write-string-file archsys updated)
-      (file-or-directory-permissions archsys #o755))))
 
 (define (toolchain-meta request id real-bin-dir executables [env-vars null])
   (hash 'id

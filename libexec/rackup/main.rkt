@@ -5,6 +5,7 @@
          racket/file
          racket/path
          racket/port
+         racket/runtime-path
          racket/string
          racket/system
          "install.rkt"
@@ -18,7 +19,10 @@
          "util.rkt")
 
 (provide main
+         cmd-version
          split-install-command-args)
+
+(define-runtime-path rackup-repo-dir "../..")
 
 (define (usage-line cmd desc)
   (printf "  ~a~a~a\n" cmd (make-string (max 2 (- 22 (string-length cmd))) #\space) desc))
@@ -56,6 +60,7 @@
   (usage-line "runtime status|install|upgrade"
               "Manage rackup's hidden internal runtime used to run rackup itself.")
   (usage-line "doctor" "Print diagnostics for paths, runtime, and installed toolchains.")
+  (usage-line "version" "Print rackup version info (git commit and date).")
   (usage-line "help [command]" "Show global help or help for a specific command.")
   (displayln "")
   (displayln "Use `rackup <command> --help` or `rackup help <command>` for command help."))
@@ -270,6 +275,11 @@
      (help-usage "doctor")
      (displayln "")
      (displayln "Print diagnostics for rackup paths, hidden runtime, and installed toolchains.")
+     #t]
+    [(version)
+     (help-usage "version")
+     (displayln "")
+     (displayln "Print rackup version information (git commit and date).")
      #t]
     [(help)
      (help-usage "help [command]")
@@ -968,6 +978,28 @@
     (rackup-error "self-upgrade failed"))
   (displayln "rackup code upgrade complete."))
 
+(define (cmd-version)
+  (define (git-output . args)
+    (with-handlers ([exn:fail? (lambda (_) #f)])
+      (define out (open-output-string))
+      (define git (find-executable-path "git"))
+      (and git
+           (parameterize ([current-output-port out]
+                          [current-error-port (open-output-string)])
+             (apply system* git args))
+           (let ([s (string-trim (get-output-string out))])
+             (and (not (string-blank? s)) s)))))
+  (define dir (path->string rackup-repo-dir))
+  (define commit (git-output "-C" dir "rev-parse" "--short" "HEAD"))
+  (define date (git-output "-C" dir "log" "-1" "--format=%ci" "HEAD"))
+  (cond
+    [commit
+     (if date
+         (printf "rackup ~a (~a)\n" commit date)
+         (printf "rackup ~a\n" commit))]
+    [else
+     (displayln "rackup (unknown version)")]))
+
 (define (cmd-doctor)
   (doctor-report))
 
@@ -1012,6 +1044,7 @@
          [(list "self-upgrade" rest ...) (cmd-self-upgrade rest)]
          [(list "runtime" rest ...) (cmd-runtime rest)]
          [(list "doctor") (cmd-doctor)]
+         [(list "version") (cmd-version)]
          [_
           (usage)
           (exit 2)])])))

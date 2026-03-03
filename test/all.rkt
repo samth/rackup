@@ -4,6 +4,7 @@
          "copy-filtered-tree.rkt"
          "rktd-io.rkt"
          "util.rkt"
+         "version.rkt"
          "versioning.rkt"
          "remote.rkt"
          "state-shims.rkt"
