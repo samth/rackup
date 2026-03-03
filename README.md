@@ -59,6 +59,44 @@ The repo includes a GitHub Pages workflow that publishes a small install page an
 
 Workflow file: `.github/workflows/pages.yml`
 
+## Migrating from racket-dev-goodies
+
+If you previously used [racket-dev-goodies](https://github.com/takikawa/racket-dev-goodies)
+(the `plt` shell function and `plt-bin` symlinks), rackup replaces it entirely.
+
+**Remove the old setup.** Delete the `plt-alias.bash` source line from your
+`.bashrc`/`.zshrc` and remove any `plt-bin` symlinks from your `PATH`. The `plt`
+function sets `PLTHOME` globally, which conflicts with rackup's per-toolchain
+environment management.
+
+**Install rackup and re-register your Racket builds.** After running
+`rackup init`, use `rackup link` to register existing Racket installations
+that you previously switched between with `plt`:
+
+```bash
+rackup link dev ~/src/racket
+rackup link 8.15 /usr/local/racket-8.15
+rackup default set dev
+```
+
+`rackup link` replaces the role of `plt <dir>` — it registers a local Racket
+build so that rackup's shims and `PLTHOME`/`PLTADDONDIR` management work with it.
+For release versions you can also use `rackup install` instead of linking:
+
+```bash
+rackup install stable
+rackup install 8.15
+```
+
+**Equivalents at a glance:**
+
+| racket-dev-goodies | rackup |
+|---|---|
+| `plt ~/src/racket` | `rackup link dev ~/src/racket && rackup default set dev` |
+| `plt` (show current) | `rackup current` |
+| `plt-make-links.sh` | `rackup reshim` (automatic on install/link) |
+| `plt-fresh-build` | Build manually, then `rackup link` |
+
 ## Docker E2E (Fresh Container)
 
 To test `rackup` installing a Racket toolchain in a fresh Linux container:
