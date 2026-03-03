@@ -1,6 +1,7 @@
-#lang racket/base
+#lang at-exp racket/base
 
 (require rackunit
+         recspecs
          racket/file
          racket/path
          racket/port
@@ -52,7 +53,7 @@
    (lambda ()
      (delete-directory/files tmp-home #:must-exist? #f))))
 
-(define (capture-output thunk)
+(define (capture-output/both thunk)
   (define out (open-output-string))
   (define err (open-output-string))
   (parameterize ([current-output-port out]
@@ -61,23 +62,19 @@
   (values (get-output-string out) (get-output-string err)))
 
 (module+ test
-  (check-exn #px"unsafe rackup home target: /"
-             (lambda ()
-               (validate-uninstall-home-path!/private (string->path "/"))))
-  (check-exn #px"unsafe rackup home target equal to your home directory"
-             (lambda ()
-               (validate-uninstall-home-path!/private (find-system-path 'home-dir))))
+  (expect-exn (validate-uninstall-home-path!/private (string->path "/"))
+              "unsafe rackup home target: /")
+  (expect-exn (validate-uninstall-home-path!/private (find-system-path 'home-dir))
+              "unsafe rackup home target equal to your home directory")
   (let ([env (environment-variables-copy (current-environment-variables))]
         [env-home (build-path repo-root "tmp-uninstall-home-guard")])
     (environment-variables-set! env #"HOME" (string->bytes/utf-8 (path->string env-home)))
     (parameterize ([current-environment-variables env])
-      (check-exn #px"unsafe rackup home target equal to your home directory"
-                 (lambda ()
-                   (validate-uninstall-home-path!/private env-home)))))
+      (expect-exn (validate-uninstall-home-path!/private env-home)
+                  "unsafe rackup home target equal to your home directory")))
   (parameterize ([current-directory repo-root])
-    (check-exn #px"unsafe rackup home target equal to the current directory"
-               (lambda ()
-                 (validate-uninstall-home-path!/private (string->path ".")))))
+    (expect-exn (validate-uninstall-home-path!/private (string->path "."))
+                "unsafe rackup home target equal to the current directory"))
 
   (define delete-home (make-temporary-file "rackup-uninstall-delete-~a" 'directory tmp-root))
   (call-with-output-file* (build-path delete-home "keep.txt")
@@ -89,14 +86,9 @@
 
   (with-temp-rackup-home
    (lambda (_tmp-home)
-     (check-exn
-      #px"refusing to uninstall without interactive confirmation"
-      (lambda ()
-        (let-values ([(out err)
-                      (parameterize ([current-input-port (open-input-string "")])
-                        (capture-output (lambda () (cmd-uninstall/private null))))])
-          (void out)
-          (void err))))))
+     (expect-exn (parameterize ([current-input-port (open-input-string "")])
+                   (cmd-uninstall/private null))
+                 "refusing to uninstall without interactive confirmation")))
 
   (with-temp-rackup-home
    (lambda (tmp-home)
@@ -113,7 +105,7 @@
                                    (lambda args
                                      (set! rm-args args)
                                      #t)])
-                     (capture-output (lambda () (cmd-uninstall/private '("--yes")))))])
+                     (capture-output/both (lambda () (cmd-uninstall/private '("--yes")))))])
        (check-equal? (map (lambda (v) (if (path? v) (path->string v) v)) rm-args)
                      (list (path->string (or (find-executable-path "rm") (string->path "/bin/rm")))
                            "-rf"
@@ -128,15 +120,14 @@
    (lambda (tmp-home)
      (ensure-index!)
      (make-directory* tmp-home)
-     (let-values ([(out _err)
-                   (parameterize ([current-remove-shell-init-blocks-proc/private (lambda () null)]
-                                  [current-uninstall-system*-proc/private (lambda _args #f)])
-                     (capture-output
-                      (lambda ()
-                        (check-exn #px"failed to delete rackup home synchronously"
-                                   (lambda ()
-                                     (cmd-uninstall/private '("--yes")))))))])
-       (check-false (string-contains? out "rackup uninstalled.")))))
+     (define uninstall-out
+       (capture-output
+        (lambda ()
+          (parameterize ([current-remove-shell-init-blocks-proc/private (lambda () null)]
+                         [current-uninstall-system*-proc/private (lambda _args #f)])
+            (expect-exn (cmd-uninstall/private '("--yes"))
+                        "failed to delete rackup home synchronously")))))
+     (check-false (string-contains? uninstall-out "rackup uninstalled."))))
 
   (with-temp-rackup-home
    (lambda (_tmp-home)
@@ -159,7 +150,7 @@
      (let-values ([(out err)
                    (parameterize ([current-remove-shell-init-blocks-proc/private (lambda () null)]
                                   [current-uninstall-system*-proc/private (lambda _args #t)])
-                     (capture-output (lambda () (cmd-uninstall/private '("--yes")))))])
+                     (capture-output/both (lambda () (cmd-uninstall/private '("--yes")))))])
        (check-true (string-contains? err "Linked local source trees will NOT be deleted"))
        (check-true (string-contains? err source-path))
        (check-true (string-contains? out "rackup uninstalled.")))))
