@@ -3,6 +3,7 @@
 (require rackunit/text-ui
          "copy-filtered-tree.rkt"
          "rktd-io.rkt"
+         "shell-completion.rkt"
          "util.rkt"
          "version.rkt"
          "versioning.rkt"
