@@ -54,19 +54,19 @@
 
 
 (module+ test
-  (expect-exn (validate-uninstall-home-path!/private (string->path "/"))
-              "unsafe rackup home target: /")
-  (expect-exn (validate-uninstall-home-path!/private (find-system-path 'home-dir))
-              "unsafe rackup home target equal to your home directory")
+  (check-exn #px"unsafe rackup home target: /"
+             (lambda () (validate-uninstall-home-path!/private (string->path "/"))))
+  (check-exn #px"unsafe rackup home target equal to your home directory"
+             (lambda () (validate-uninstall-home-path!/private (find-system-path 'home-dir))))
   (let ([env (environment-variables-copy (current-environment-variables))]
         [env-home (build-path repo-root "tmp-uninstall-home-guard")])
     (environment-variables-set! env #"HOME" (string->bytes/utf-8 (path->string env-home)))
     (parameterize ([current-environment-variables env])
-      (expect-exn (validate-uninstall-home-path!/private env-home)
-                  "unsafe rackup home target equal to your home directory")))
+      (check-exn #px"unsafe rackup home target equal to your home directory"
+                 (lambda () (validate-uninstall-home-path!/private env-home)))))
   (parameterize ([current-directory repo-root])
-    (expect-exn (validate-uninstall-home-path!/private (string->path "."))
-                "unsafe rackup home target equal to the current directory"))
+    (check-exn #px"unsafe rackup home target equal to the current directory"
+               (lambda () (validate-uninstall-home-path!/private (string->path ".")))))
 
   (define delete-home (make-temporary-file "rackup-uninstall-delete-~a" 'directory tmp-root))
   (call-with-output-file* (build-path delete-home "keep.txt")
@@ -78,9 +78,10 @@
 
   (with-temp-rackup-home
    (lambda (_tmp-home)
-     (expect-exn (parameterize ([current-input-port (open-input-string "")])
-                   (cmd-uninstall/private null))
-                 "refusing to uninstall without interactive confirmation")))
+     (check-exn #px"refusing to uninstall without interactive confirmation"
+                (lambda ()
+                  (parameterize ([current-input-port (open-input-string "")])
+                    (cmd-uninstall/private null))))))
 
   (with-temp-rackup-home
    (lambda (tmp-home)
@@ -117,8 +118,8 @@
         (lambda ()
           (parameterize ([current-remove-shell-init-blocks-proc/private (lambda () null)]
                          [current-uninstall-system*-proc/private (lambda _args #f)])
-            (expect-exn (cmd-uninstall/private '("--yes"))
-                        "failed to delete rackup home synchronously")))))
+            (check-exn #px"failed to delete rackup home synchronously"
+                       (lambda () (cmd-uninstall/private '("--yes"))))))))
      (check-false (string-contains? uninstall-out "rackup uninstalled."))))
 
   (with-temp-rackup-home
