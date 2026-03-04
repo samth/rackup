@@ -6,8 +6,8 @@
          racket/file
          racket/format
          racket/list
-         racket/port
          racket/path
+         racket/port
          racket/runtime-path
          racket/string
          racket/system
@@ -62,14 +62,6 @@
     (eval 'hidden-runtime-invocation-prefix)))
 
 
-(define (run-program/capture program args)
-  (define-values (proc stdout stdin stderr)
-    (apply subprocess #f #f #f program args))
-  (close-output-port stdin)
-  (subprocess-wait proc)
-  (values (subprocess-status proc)
-          (port->string stdout)
-          (port->string stderr)))
 
 (module+ test
   (with-temp-rackup-home
@@ -80,18 +72,21 @@
      (for ([exe '("racket" "raco")])
        (define shim (build-path shims-dir exe))
        (check-true (link-exists? shim))
-       (let-values ([(status out err) (run-program/capture shim '())])
-         (check-equal? status 2)
-         (check-equal? out "")
-         (check-true
-          (string-contains?
-           err
-           (format "rackup: '~a' is managed by rackup, but no active toolchain is configured."
-                   exe)))
-         (check-true (string-contains? err "Install one with: rackup install stable"))
-         (check-true (string-contains? err "Or select one with: rackup default <toolchain>"))
-         (check-true
-          (string-contains? err "Inspect choices with: rackup list | rackup available --limit 20"))))))
+       (define-values (proc stdout stdin stderr)
+         (subprocess #f #f #f shim))
+       (close-output-port stdin)
+       (subprocess-wait proc)
+       (check-equal? (subprocess-status proc) 2)
+       (check-equal? (port->string stdout) "")
+       (define err-str (port->string stderr))
+       (expect (display err-str)
+               (format "rackup: '~a' is managed by rackup, but no active toolchain is configured." exe)
+               #:match 'contains)
+       (expect (display err-str) "Install one with: rackup install stable" #:match 'contains)
+       (expect (display err-str) "Or select one with: rackup default <toolchain>" #:match 'contains)
+       (expect (display err-str)
+               "Inspect choices with: rackup list | rackup available --limit 20"
+               #:match 'contains)))))
 
   (with-temp-rackup-home
    (lambda (_tmp)
@@ -118,11 +113,8 @@
             'installed-at "2026-02-28T00:00:00Z"))
      (set-default-toolchain! id)
      (reshim!)
-     (let-values ([(status out err) (run-program/capture (build-path (rackup-shims-dir) "racket")
-                                                         '("--version"))])
-       (check-equal? status 23)
-       (check-equal? out "")
-       (check-equal? err ""))))
+     (expect/shell (list (path->string (build-path (rackup-shims-dir) "racket")) "--version")
+                   #:status 23 "")))
 
   (with-temp-rackup-home (lambda (tmp)
                            (ensure-index!)
@@ -246,7 +238,7 @@
                             (string-contains? dispatcher-src "qemu-i386 via binfmt_misc"))
                            (define helper-src (shell-helper-script/private "bash"))
                            (check-true (string-contains? helper-src "_rackup_status"))
-                           (check-true (string-contains? helper-src "return \"$_rackup_status\"")))))
+                           (check-true (string-contains? helper-src "return \"$_rackup_status\""))))
 
   (with-temp-rackup-home
    (lambda (tmp)
@@ -374,22 +366,16 @@
         (putenv "RACKUP_TEST_HOST_MACHINE" "x86_64")
         (putenv "RACKUP_TEST_ASSUME_I386_LOADER" "1"))
       (lambda ()
-        (let-values ([(status out err) (run-program/capture (build-path (rackup-shims-dir) "racket")
-                                                            '("--version"))])
-          (check-equal? status 139)
-          (check-equal? out "")
-          (check-true
-           (string-contains?
-            err
-            "appears to be running through qemu-i386 via binfmt_misc on this host."))
-          (check-true
-           (string-contains?
-            err
-            "setarch i386 -R' only helps when the binary is running natively, not through qemu-user."))
-          (check-true
-           (string-contains?
-            err
-            "disable qemu-i386 binfmt_misc and retry, or use a true native i386 environment/VM."))))
+        (define shim-cmd (list (path->string (build-path (rackup-shims-dir) "racket")) "--version"))
+        (expect/shell shim-cmd #:status 139
+                      #:port 'stderr #:match 'contains
+                      "appears to be running through qemu-i386 via binfmt_misc on this host.")
+        (expect/shell shim-cmd #:status 139
+                      #:port 'stderr #:match 'contains
+                      "setarch i386 -R' only helps when the binary is running natively, not through qemu-user.")
+        (expect/shell shim-cmd #:status 139
+                      #:port 'stderr #:match 'contains
+                      "disable qemu-i386 binfmt_misc and retry, or use a true native i386 environment/VM."))
       (lambda ()
         (if old-assume-loader
             (putenv "RACKUP_TEST_ASSUME_I386_LOADER" old-assume-loader)
@@ -1313,25 +1299,22 @@ Examples:
      (dynamic-wind
       (lambda () (putenv "RACKUP_TOOLCHAIN" "release-103-bc-i386-linux-full"))
       (lambda ()
-        (define shim (build-path (rackup-shims-dir) "racket"))
-        (let-values ([(status out err) (run-program/capture shim '("--version"))])
-          (check-equal? status 127)
-          (check-equal? out "")
-          (check-true
-           (string-contains?
-            err
-            "rackup: executable 'racket' not found in toolchain 'release-103-bc-i386-linux-full'"))
-          (check-true
-           (string-contains?
-            err
-            "rackup: active toolchain came from RACKUP_TOOLCHAIN and overrides default toolchain 'release-8.18-cs-x86_64-linux-full'."))
-          (check-true (string-contains? err "Clear it with: rackup switch --unset"))
-          (check-true
-           (string-contains? err "Or unset it manually with: unset RACKUP_TOOLCHAIN"))
-          (check-true
-           (string-contains?
-            err
-            "Try: rackup which racket --toolchain release-103-bc-i386-linux-full"))))
+        (define shim-cmd (list (path->string (build-path (rackup-shims-dir) "racket")) "--version"))
+        (expect/shell shim-cmd #:status 127
+                      #:port 'stderr #:match 'contains
+                      "rackup: executable 'racket' not found in toolchain 'release-103-bc-i386-linux-full'")
+        (expect/shell shim-cmd #:status 127
+                      #:port 'stderr #:match 'contains
+                      "rackup: active toolchain came from RACKUP_TOOLCHAIN and overrides default toolchain 'release-8.18-cs-x86_64-linux-full'.")
+        (expect/shell shim-cmd #:status 127
+                      #:port 'stderr #:match 'contains
+                      "Clear it with: rackup switch --unset")
+        (expect/shell shim-cmd #:status 127
+                      #:port 'stderr #:match 'contains
+                      "Or unset it manually with: unset RACKUP_TOOLCHAIN")
+        (expect/shell shim-cmd #:status 127
+                      #:port 'stderr #:match 'contains
+                      "Try: rackup which racket --toolchain release-103-bc-i386-linux-full"))
       (lambda ()
         (if old-env-id
             (putenv "RACKUP_TOOLCHAIN" old-env-id)
@@ -1500,10 +1483,8 @@ Examples:
           (putenv var "/nonexistent/poisoned")))
       (lambda ()
         ;; rackup list should still work
-        (let-values ([(ok? out err) (run-bin-rackup/capture '("list"))])
-          (check-true ok? "rackup list should work with all PLT vars poisoned")
-          (check-true (string-contains? out "release-9.0")
-                      "rackup list output should contain the toolchain")))
+        (expect (begin (system* rackup-bin "list") (void))
+                "release-9.0" #:match 'contains))
       (lambda ()
         (for ([kv saved-vars])
           (if (cdr kv)
@@ -1539,12 +1520,8 @@ Examples:
       (lambda ()
         (putenv "PLTCOMPILEDROOTS" "test-compiled-roots-passthrough"))
       (lambda ()
-        (let-values ([(ok? out err)
-                      (run-bin-rackup/capture
-                       (list "run" id "--" "print-compiled-roots"))])
-          (check-true ok? "rackup run should succeed")
-          (check-true (string-contains? out "PLTCOMPILEDROOTS=test-compiled-roots-passthrough")
-                      "PLTCOMPILEDROOTS should pass through to rackup run subprocess")))
+        (expect (begin (apply system* rackup-bin (list "run" id "--" "print-compiled-roots")) (void))
+                "PLTCOMPILEDROOTS=test-compiled-roots-passthrough" #:match 'contains))
       (lambda ()
         (if old-cr
             (putenv "PLTCOMPILEDROOTS" old-cr)

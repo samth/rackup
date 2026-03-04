@@ -4,7 +4,6 @@
          recspecs
          racket/file
          racket/path
-         racket/port
          racket/runtime-path
          racket/string
          "../libexec/rackup/main.rkt"
@@ -53,13 +52,6 @@
    (lambda ()
      (delete-directory/files tmp-home #:must-exist? #f))))
 
-(define (capture-output/both thunk)
-  (define out (open-output-string))
-  (define err (open-output-string))
-  (parameterize ([current-output-port out]
-                 [current-error-port err])
-    (thunk))
-  (values (get-output-string out) (get-output-string err)))
 
 (module+ test
   (expect-exn (validate-uninstall-home-path!/private (string->path "/"))
@@ -105,7 +97,7 @@
                                    (lambda args
                                      (set! rm-args args)
                                      #t)])
-                     (capture-output/both (lambda () (cmd-uninstall/private '("--yes")))))])
+                     (capture-output/split (lambda () (cmd-uninstall/private '("--yes")))))])
        (check-equal? (map (lambda (v) (if (path? v) (path->string v) v)) rm-args)
                      (list (path->string (or (find-executable-path "rm") (string->path "/bin/rm")))
                            "-rf"
@@ -150,7 +142,7 @@
      (let-values ([(out err)
                    (parameterize ([current-remove-shell-init-blocks-proc/private (lambda () null)]
                                   [current-uninstall-system*-proc/private (lambda _args #t)])
-                     (capture-output/both (lambda () (cmd-uninstall/private '("--yes")))))])
+                     (capture-output/split (lambda () (cmd-uninstall/private '("--yes")))))])
        (check-true (string-contains? err "Linked local source trees will NOT be deleted"))
        (check-true (string-contains? err source-path))
        (check-true (string-contains? out "rackup uninstalled.")))))
