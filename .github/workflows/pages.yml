@@ -9,6 +9,7 @@ on:
       - docker/**
       - libexec/**
       - pages/**
+      - scripts/build-pages-site.rkt
       - scripts/build-pages-site.sh
       - scripts/copy-filtered-tree.sh
       - scripts/docker-test-fresh-install.sh
@@ -42,7 +43,7 @@ jobs:
           raco pkg install --auto plt-web
       - name: Build static Pages site
         run: |
-          sh scripts/build-pages-site.sh _site
+          racket -y scripts/build-pages-site.rkt _site
       - name: Archive built site bundle
         run: |
           tar \
