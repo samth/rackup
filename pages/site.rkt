@@ -1,9 +1,26 @@
 #lang plt-web
 
-(require plt-web/style)
+(require plt-web/style
+         openssl/sha256)
+
+;; Extract --install-sh <path> from command-line args before plt-web sees them.
+(define install-sh-path
+  (let loop ([args (vector->list (current-command-line-arguments))]
+             [result #f]
+             [rest '()])
+    (cond
+      [(null? args)
+       (current-command-line-arguments (list->vector (reverse rest)))
+       result]
+      [(and (string=? (car args) "--install-sh") (pair? (cdr args)))
+       (loop (cddr args) (cadr args) rest)]
+      [else
+       (loop (cdr args) result (cons (car args) rest))])))
 
 (define install-sh-sha256
-  (or (getenv "RACKUP_INSTALL_SH_SHA256") "UNKNOWN"))
+  (if install-sh-path
+      (call-with-input-file install-sh-path sha256)
+      "UNKNOWN"))
 
 (define rackup-site
   (site "www"

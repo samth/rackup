@@ -35,11 +35,9 @@ sed "s/@@RACKUP_SRC_SHA256@@/$SRC_SHA256/g" "$ROOT_DIR/scripts/install.sh" > "$O
 cp "$OUT_DIR/install.sh" "$OUT_DIR/install"
 chmod 0755 "$OUT_DIR/install.sh" "$OUT_DIR/install"
 
-INSTALL_SHA256="$($sha256_cmd "$OUT_DIR/install.sh" | cut -d ' ' -f 1)"
-
-# Generate HTML with the install.sh hash available to the Racket code.
+# Generate HTML; Racket computes the install.sh checksum itself.
 mkdir -p "$PLT_WEB_STAGE"
-RACKUP_INSTALL_SH_SHA256="$INSTALL_SHA256" racket "$ROOT_DIR/pages/site.rkt" -r -o "$PLT_WEB_STAGE" -f
+racket "$ROOT_DIR/pages/site.rkt" --install-sh "$OUT_DIR/install.sh" -r -o "$PLT_WEB_STAGE" -f
 cp -R "$PLT_WEB_STAGE/www/." "$OUT_DIR/"
 
 : > "$OUT_DIR/.nojekyll"
