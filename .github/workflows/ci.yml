@@ -30,6 +30,17 @@ jobs:
           test -f /tmp/rackup-pages-site/rackup-src.tar.gz
           grep -Fq 'btn.innerHTML' /tmp/rackup-pages-site/index.html
           grep -Fq 'sha256sum -c' /tmp/rackup-pages-site/index.html
+          # Every user-facing command from `rackup help` must appear on the webpage.
+          # Internal commands (help, shell, runtime) are excluded.
+          missing=0
+          for cmd in $(racket libexec/rackup-core.rkt help 2>&1 | grep -oP '^\s+\S+' | awk '{print $1}'); do
+            case "$cmd" in help|shell|runtime) continue ;; esac
+            grep -Fq "rackup $cmd" /tmp/rackup-pages-site/index.html || {
+              echo "ERROR: command 'rackup $cmd' missing from webpage" >&2
+              missing=1
+            }
+          done
+          if [ "$missing" -eq 1 ]; then exit 1; fi
           if tar -tzf /tmp/rackup-pages-site/rackup-src.tar.gz | grep -En '(^|/)compiled(/|$)|\.(zo|dep)$'; then
             echo "rackup-src.tar.gz unexpectedly contains compiled artifacts" >&2
             exit 1

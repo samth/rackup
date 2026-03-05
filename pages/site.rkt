@@ -362,16 +362,22 @@ sh install.sh && rm install.sh})
         @h2{Commands}
         @table[class: "rackup-cmd-table"]{
           @tr{@td{@code{rackup install @i{name}}} @td{Install a toolchain}}
-          @tr{@td{@code{rackup default @i{name}}} @td{Set the active toolchain}}
           @tr{@td{@code{rackup list}} @td{List installed toolchains}}
           @tr{@td{@code{rackup available}} @td{List installable toolchains}}
-          @tr{@td{@code{rackup current}} @td{Show the active toolchain}}
+          @tr{@td{@code{rackup default @i{name}}} @td{Set the global default toolchain}}
+          @tr{@td{@code{rackup current}} @td{Show the active toolchain and its source}}
+          @tr{@td{@code{rackup switch @i{name}}} @td{Switch the active toolchain in this shell}}
+          @tr{@td{@code{rackup run @i{name} -- @i{cmd}}} @td{Run a command using a specific toolchain}}
           @tr{@td{@code{rackup which @i{cmd}}} @td{Show path for a shimmed command}}
           @tr{@td{@code{rackup link @i{name} @i{path}}} @td{Link a local source tree}}
           @tr{@td{@code{rackup remove @i{name}}} @td{Remove an installed toolchain}}
-          @tr{@td{@code{rackup self-upgrade}} @td{Upgrade rackup itself}}
+          @tr{@td{@code{rackup prompt}} @td{Print toolchain info for shell prompt}}
+          @tr{@td{@code{rackup reshim}} @td{Rebuild shims from installed toolchains}}
+          @tr{@td{@code{rackup doctor}} @td{Print diagnostics}}
           @tr{@td{@code{rackup init --shell @i{sh}}} @td{Set up shell integration}}
+          @tr{@td{@code{rackup self-upgrade}} @td{Upgrade rackup itself}}
           @tr{@td{@code{rackup uninstall}} @td{Remove rackup and all managed state}}
+          @tr{@td{@code{rackup version}} @td{Print version info}}
         }}
 
       }
