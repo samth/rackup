@@ -273,6 +273,16 @@
           Pass @code{-y} for non-interactive mode:
         }
         @(shell-block "noninteractive-cmd" "curl -fsSL https://samth.github.io/rackup/install.sh | sh -s -- -y")
+        @p[class: "rackup-note"]{
+          Or, to verify the install script's checksum before running it:
+        }
+        @div[class: "rackup-install-row"]{
+          @(shell-block "paranoid-cmd" @string-append{curl -fsSL -o install.sh https://samth.github.io/rackup/install.sh
+sha256sum install.sh  @"#" compare with the published hash
+sh install.sh && rm install.sh})
+          @a[class: "rackup-copy-btn" href: "#" id: "copy-paranoid-cmd"]{
+            @literal{<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>}}
+        }
       }
 
       @div[class: "rackup-section"]{
@@ -347,19 +357,23 @@
 
     @script/inline{
       (function () {
-        var installCmd = "curl -fsSL https://samth.github.io/rackup/install.sh | sh";
-        var copyBtn = document.getElementById("copy-install-cmd");
-        if (copyBtn && navigator.clipboard) {
-          copyBtn.addEventListener("click", function (event) {
-            event.preventDefault();
-            navigator.clipboard.writeText(installCmd).then(function () {
-              var old = copyBtn.innerHTML;
-              copyBtn.innerHTML = "Copied";
-              setTimeout(function () {
-                copyBtn.innerHTML = old;
-              }, 1200);
+        function setupCopy(btnId, sourceId) {
+          var btn = document.getElementById(btnId);
+          var source = document.getElementById(sourceId);
+          if (btn && source && navigator.clipboard) {
+            btn.addEventListener("click", function (event) {
+              event.preventDefault();
+              navigator.clipboard.writeText(source.textContent).then(function () {
+                var old = btn.innerHTML;
+                btn.innerHTML = "Copied";
+                setTimeout(function () {
+                  btn.innerHTML = old;
+                }, 1200);
+              });
             });
-          });
+          }
         }
+        setupCopy("copy-install-cmd", "install-cmd");
+        setupCopy("copy-paranoid-cmd", "paranoid-cmd");
       }());
     }}))

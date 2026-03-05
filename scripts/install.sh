@@ -11,6 +11,7 @@ FROM_LOCAL=""
 NO_INIT=0
 do_init=0
 BOOTSTRAP_MODE="${RACKUP_BOOTSTRAP_MODE:-install}"
+EXPECTED_SRC_SHA256="@@RACKUP_SRC_SHA256@@"
 
 is_tty_stdout() {
   [ -t 1 ]
@@ -148,6 +149,24 @@ else
   else
     warn "Error: need curl or wget to download rackup sources."
     exit 1
+  fi
+  if [ "$EXPECTED_SRC_SHA256" != "@@RACKUP_SRC_SHA256@@" ]; then
+    info "Verifying download (SHA-256)..."
+    if command -v sha256sum >/dev/null 2>&1; then
+      actual_sha256="$(sha256sum "$TMPDIR_INSTALL/rackup.tar.gz" | cut -d ' ' -f 1)"
+    elif command -v shasum >/dev/null 2>&1; then
+      actual_sha256="$(shasum -a 256 "$TMPDIR_INSTALL/rackup.tar.gz" | cut -d ' ' -f 1)"
+    else
+      warn "Warning: neither sha256sum nor shasum found; skipping checksum verification."
+      actual_sha256="$EXPECTED_SRC_SHA256"
+    fi
+    if [ "$actual_sha256" != "$EXPECTED_SRC_SHA256" ]; then
+      warn "Error: SHA-256 checksum mismatch for rackup-src.tar.gz"
+      warn "  expected: $EXPECTED_SRC_SHA256"
+      warn "  actual:   $actual_sha256"
+      exit 1
+    fi
+    ok "Checksum OK."
   fi
   mkdir -p "$TMPDIR_INSTALL/src"
   # Use -m so future mtimes in the archive do not produce noisy warnings on skewed clocks.
