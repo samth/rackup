@@ -28,7 +28,8 @@ jobs:
           test -f /tmp/rackup-pages-site/index.html
           test -f /tmp/rackup-pages-site/install.sh
           test -f /tmp/rackup-pages-site/rackup-src.tar.gz
-          grep -Fq 'copyBtn.innerHTML' /tmp/rackup-pages-site/index.html
+          grep -Fq 'btn.innerHTML' /tmp/rackup-pages-site/index.html
+          grep -Fq 'sha256sum -c' /tmp/rackup-pages-site/index.html
           if tar -tzf /tmp/rackup-pages-site/rackup-src.tar.gz | grep -En '(^|/)compiled(/|$)|\.(zo|dep)$'; then
             echo "rackup-src.tar.gz unexpectedly contains compiled artifacts" >&2
             exit 1
