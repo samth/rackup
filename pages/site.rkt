@@ -2,6 +2,9 @@
 
 (require plt-web/style)
 
+(define install-sh-sha256
+  (or (getenv "RACKUP_INSTALL_SH_SHA256") "UNKNOWN"))
+
 (define rackup-site
   (site "www"
         #:navigation
@@ -278,7 +281,7 @@
         }
         @div[class: "rackup-install-row"]{
           @(shell-block "paranoid-cmd" @string-append{curl -fsSL -o install.sh https://samth.github.io/rackup/install.sh
-echo "@@INSTALL_SH_SHA256@@  install.sh" | sha256sum -c -
+echo "@|install-sh-sha256|  install.sh" | sha256sum -c -
 sh install.sh && rm install.sh})
           @a[class: "rackup-copy-btn" href: "#" id: "copy-paranoid-cmd"]{
             @literal{<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>}}
