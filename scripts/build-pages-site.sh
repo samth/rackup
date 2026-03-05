@@ -24,17 +24,23 @@ mkdir -p "$TMP_STAGE/rackup-src"
 tar -C "$TMP_STAGE" -czf "$OUT_DIR/rackup-src.tar.gz" rackup-src
 
 if command -v sha256sum >/dev/null 2>&1; then
-  SRC_SHA256="$(sha256sum "$OUT_DIR/rackup-src.tar.gz" | cut -d ' ' -f 1)"
+  sha256_cmd="sha256sum"
 elif command -v shasum >/dev/null 2>&1; then
-  SRC_SHA256="$(shasum -a 256 "$OUT_DIR/rackup-src.tar.gz" | cut -d ' ' -f 1)"
+  sha256_cmd="shasum -a 256"
 else
-  echo "Warning: no sha256sum or shasum found; install.sh will skip checksum verification" >&2
-  SRC_SHA256="@@RACKUP_SRC_SHA256@@"
+  echo "Error: no sha256sum or shasum found; cannot build site without a hash tool" >&2
+  exit 1
 fi
 
+SRC_SHA256="$($sha256_cmd "$OUT_DIR/rackup-src.tar.gz" | cut -d ' ' -f 1)"
 sed "s/@@RACKUP_SRC_SHA256@@/$SRC_SHA256/g" "$ROOT_DIR/scripts/install.sh" > "$OUT_DIR/install.sh"
 cp "$OUT_DIR/install.sh" "$OUT_DIR/install"
 chmod 0755 "$OUT_DIR/install.sh" "$OUT_DIR/install"
+
+INSTALL_SHA256="$($sha256_cmd "$OUT_DIR/install.sh" | cut -d ' ' -f 1)"
+
+# Inject the install.sh checksum into the built HTML page
+sed -i "s/@@INSTALL_SH_SHA256@@/$INSTALL_SHA256/g" "$OUT_DIR/index.html"
 
 : > "$OUT_DIR/.nojekyll"
 

@@ -157,7 +157,20 @@ else
     elif command -v shasum >/dev/null 2>&1; then
       actual_sha256="$(shasum -a 256 "$TMPDIR_INSTALL/rackup.tar.gz" | cut -d ' ' -f 1)"
     else
-      warn "Warning: neither sha256sum nor shasum found; skipping checksum verification."
+      warn "Warning: neither sha256sum nor shasum found; cannot verify download."
+      if [ -r /dev/tty ] && [ -w /dev/tty ]; then
+        printf "Continue without checksum verification? [y/N] " > /dev/tty
+        answer=""
+        read -r answer < /dev/tty || true
+        case "$answer" in
+          y|Y|yes|YES) ;;
+          *) exit 1 ;;
+        esac
+      else
+        warn "Error: no hash tool available and no TTY to prompt; aborting."
+        warn "Install sha256sum or shasum and try again."
+        exit 1
+      fi
       actual_sha256="$EXPECTED_SRC_SHA256"
     fi
     if [ "$actual_sha256" != "$EXPECTED_SRC_SHA256" ]; then
