@@ -22,14 +22,15 @@
 (printf "trace=~a\n" trace)
 (printf "transcript=~a\n" transcript-path)
 
-(unless (system* (path->string (build-path root-dir "scripts" "docker-run-transcript-matrix.sh"))
+(unless (system* (find-executable-path "racket") "-y"
+                 (path->string (build-path root-dir "scripts" "docker-run-transcript-matrix.rkt"))
                  "--host-racket"
                  host-racket
                  "--trace"
                  trace
                  "--transcript"
                  transcript-path)
-  (error 'test-transcript-matrix "docker-run-transcript-matrix.sh failed"))
+  (error 'test-transcript-matrix "docker-run-transcript-matrix failed"))
 
 (printf "Asserting transcript content...\n")
 
