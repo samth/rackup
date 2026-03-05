@@ -1,7 +1,7 @@
 #lang plt-web
 
 (require plt-web/style
-         openssl/sha256)
+         file/sha1)
 
 ;; Extract --install-sh <path> from command-line args before plt-web sees them.
 (define install-sh-path
@@ -19,7 +19,8 @@
 
 (define install-sh-sha256
   (if install-sh-path
-      (call-with-input-file install-sh-path sha256)
+      (bytes->hex-string
+       (call-with-input-file install-sh-path sha256-bytes))
       "UNKNOWN"))
 
 (define rackup-site
