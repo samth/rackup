@@ -21,6 +21,7 @@ rackup_runtime_addon_dir() {
 }
 
 rackup_system_runtime_addon_dir() {
+  # shellcheck disable=SC3028  # fallback to id -u below handles POSIX sh
   uid_part="${UID:-}"
   if [ -z "$uid_part" ] && command -v id >/dev/null 2>&1; then
     uid_part="$(id -u 2>/dev/null || true)"
@@ -277,15 +278,15 @@ rackup_select_hidden_runtime_filename() {
         [ "$arch_token" = "$arch" ] || continue
         platform_and_variant=${rest2#"$arch_token"-}
 
-        variant=bc
+        variant='bc'
         platform_token=$platform_and_variant
         case "$platform_and_variant" in
           *-cs)
-            variant=cs
+            variant='cs'
             platform_token=${platform_and_variant%-cs}
             ;;
           *-bc)
-            variant=bc
+            variant='bc'
             platform_token=${platform_and_variant%-bc}
             ;;
         esac
@@ -366,7 +367,6 @@ rackup_hidden_runtime_install_if_missing() {
   fi
 
   home="$(rackup_home)"
-  runtime_dir="$(rackup_runtime_dir)"
   versions_dir="$(rackup_runtime_versions_dir)"
   current_link="$(rackup_runtime_current_link)"
   cache_dir="$(rackup_runtime_cache_dir)"

@@ -2,6 +2,7 @@
 set -eu
 
 OUT_DIR="${1:-_site}"
+# shellcheck disable=SC1007
 ROOT_DIR=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 TMP_STAGE="$(mktemp -d "${TMPDIR:-/tmp}/rackup-pages.XXXXXX")"
 PLT_WEB_STAGE="$TMP_STAGE/plt-web-out"
