@@ -387,4 +387,33 @@
   (check-true (distribution-fallback? 'minimal 'full))
   (check-false (distribution-fallback? 'full 'full))
   (check-false (distribution-fallback? 'minimal 'minimal))
-  (check-false (distribution-fallback? 'full 'minimal)))
+  (check-false (distribution-fallback? 'full 'minimal))
+
+  ;; End-to-end: riscv64 is minimal-only -- requesting full falls back to minimal.
+  (define riscv-req
+    (resolve-install-request/runtime "9.1" #:distribution 'full #:arch "riscv64"))
+  (check-equal? (hash-ref riscv-req 'distribution) 'minimal)
+  (check-equal? (hash-ref riscv-req 'arch) "riscv64")
+  (check-true (regexp-match? #rx"minimal" (hash-ref riscv-req 'installer-filename)))
+
+  ;; Architectures that have full Linux installers in 9.1 should NOT fall back.
+  (for ([arch (in-list '("x86_64" "aarch64" "i386" "arm"))])
+    (define req
+      (resolve-install-request/runtime "9.1" #:distribution 'full #:arch arch))
+    (check-equal? (hash-ref req 'distribution) 'full
+                  (format "~a: full installer should be found" arch))
+    (check-equal? (hash-ref req 'arch) arch)
+    (check-false (regexp-match? #rx"minimal" (hash-ref req 'installer-filename))
+                 (format "~a: should not fall back to minimal" arch)))
+
+  ;; Explicitly requesting minimal on riscv64 works directly (no fallback needed).
+  (define riscv-minimal-req
+    (resolve-install-request/runtime "9.1" #:distribution 'minimal #:arch "riscv64"))
+  (check-equal? (hash-ref riscv-minimal-req 'distribution) 'minimal)
+  (check-true (regexp-match? #rx"minimal" (hash-ref riscv-minimal-req 'installer-filename)))
+
+  ;; Stable resolves for riscv64 with full -> minimal fallback.
+  (define riscv-stable-req
+    (resolve-install-request/runtime "stable" #:distribution 'full #:arch "riscv64"))
+  (check-equal? (hash-ref riscv-stable-req 'distribution) 'minimal)
+  (check-equal? (hash-ref riscv-stable-req 'arch) "riscv64"))
