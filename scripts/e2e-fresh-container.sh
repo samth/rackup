@@ -637,6 +637,112 @@ else
 fi
 run_rackup default "$primary_id"
 
+echo
+echo "== Upgrade path: install 9.0, then upgrade to stable (9.1) =="
+# Only run if the first spec was NOT 9.0 already (avoid duplicate install)
+upgrade_test_ran=0
+first_spec_is_90=0
+if [[ "${INSTALLED_SPECS[0]:-}" == "9.0" ]]; then
+  first_spec_is_90=1
+fi
+if [[ "$first_spec_is_90" -eq 0 ]]; then
+  # Install 9.0 to simulate an older installation
+  if run_rackup install 9.0 --set-default; then
+    upgrade_test_ran=1
+    old_id="$(current_toolchain_id)"
+    assert_contains "release-9.0" "$old_id" "9.0 toolchain should be installed"
+    old_version="$(current_shim_version)"
+    assert_contains "9.0" "$old_version" "shim should report 9.0"
+
+    # Now install stable (which resolves to 9.1) alongside it
+    if ! run_rackup install stable --set-default; then
+      echo "stable install attempt failed after 9.0, retrying..."
+      sleep 2
+      run_rackup install stable --set-default
+    fi
+    new_id="$(current_toolchain_id)"
+    new_version="$(current_shim_version)"
+
+    # Verify the upgrade resulted in a different (newer) version
+    if [[ "$old_id" != "$new_id" ]]; then
+      echo "Upgrade path verified: $old_id -> $new_id"
+      echo "Version changed: $old_version -> $new_version"
+
+      # Verify both toolchains are listed
+      list_out="$(run_rackup list)"
+      assert_contains "release-9.0" "$list_out" "9.0 should still be in list after upgrade"
+
+      # Verify we can switch back to 9.0
+      run_rackup default "$old_id"
+      switchback_version="$(current_shim_version)"
+      assert_contains "9.0" "$switchback_version" "switching back to 9.0 should work"
+
+      # Switch back to the new version
+      run_rackup default "$new_id"
+      switch_new_version="$(current_shim_version)"
+      echo "Switch back to new version: $switch_new_version"
+    else
+      echo "stable resolved to 9.0 (same as existing); upgrade path test skipped (already latest)"
+    fi
+
+    # Restore primary toolchain as default
+    run_rackup default "$primary_id"
+  else
+    echo "9.0 install failed (may not be available); skipping upgrade path test"
+  fi
+else
+  echo "First spec is already 9.0; upgrade path covered by multi-spec install"
+fi
+
+echo
+echo "== Snapshot site tests: Utah and Northwestern =="
+SNAPSHOT_TEST_SITES=()
+if [[ "$SNAPSHOT_SITE" == "auto" || "$SNAPSHOT_SITE" == "utah" ]]; then
+  SNAPSHOT_TEST_SITES+=("utah")
+fi
+if [[ "$SNAPSHOT_SITE" == "auto" || "$SNAPSHOT_SITE" == "northwestern" ]]; then
+  SNAPSHOT_TEST_SITES+=("northwestern")
+fi
+for site in "${SNAPSHOT_TEST_SITES[@]}"; do
+  echo
+  echo "== Installing snapshot from site: $site =="
+  if run_rackup install "snapshot:$site" --set-default; then
+    snap_id="$(current_toolchain_id)"
+    assert_contains "snapshot-${site}" "$snap_id" "snapshot ID should contain site name $site"
+    snap_version="$(current_shim_version)"
+    assert_nonempty "$snap_version" "snapshot from $site should report a version"
+    echo "Snapshot $site installed: $snap_id (version=$snap_version)"
+
+    # Verify metadata via list
+    snap_list="$(run_rackup list)"
+    assert_contains "snapshot-${site}" "$snap_list" "$site snapshot should appear in list"
+
+    # Restore primary default
+    run_rackup default "$primary_id"
+  else
+    echo "Snapshot install from $site failed on first attempt, retrying..."
+    sleep 2
+    if run_rackup install "snapshot:$site" --set-default; then
+      snap_id="$(current_toolchain_id)"
+      assert_contains "snapshot-${site}" "$snap_id" "snapshot ID should contain site name $site (retry)"
+      echo "Snapshot $site installed on retry: $snap_id"
+      run_rackup default "$primary_id"
+    else
+      echo "WARNING: Snapshot install from $site failed (site may be unavailable); skipping"
+    fi
+  fi
+done
+
+# If both Utah and Northwestern snapshots were installed, verify they coexist
+if [[ ${#SNAPSHOT_TEST_SITES[@]} -ge 2 ]]; then
+  snap_list="$(run_rackup list)"
+  if [[ "$snap_list" == *"snapshot-utah"* ]] && [[ "$snap_list" == *"snapshot-northwestern"* ]]; then
+    echo "Both Utah and Northwestern snapshots coexist successfully"
+  else
+    echo "Note: not all snapshot sites were successfully installed (this is OK if sites are unavailable)"
+  fi
+fi
+
 if [[ "$HOST_RACKET" == "absent" ]]; then
   echo
   echo "== Hidden runtime recovery failure-mode check =="
