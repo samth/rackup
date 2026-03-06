@@ -101,12 +101,12 @@ note "Package isolation"
 pkg_dir=/tmp/rackup-extra-pkg
 rm -rf "$pkg_dir"
 mkdir -p "$pkg_dir"
-cat > "$pkg_dir/info.rkt" <<'EOF'
+cat >"$pkg_dir/info.rkt" <<'EOF'
 #lang info
 (define collection "rackup-extra-pkg")
 (define deps '("base"))
 EOF
-cat > "$pkg_dir/main.rkt" <<'EOF'
+cat >"$pkg_dir/main.rkt" <<'EOF'
 #lang racket/base
 (provide marker)
 (define marker "rackup-extra-ok")
@@ -135,7 +135,7 @@ mkdir -p "$local_src/racket/bin" \
   "$local_src/racket/collects" \
   "$local_src/pkgs" \
   "$local_src/racket/src/build/cs/c/ChezScheme/pb/bin/pb"
-cat > "$local_src/racket/bin/racket" <<'EOF'
+cat >"$local_src/racket/bin/racket" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 if [[ "$#" -ge 2 && "$1" == "-e" ]]; then
@@ -146,17 +146,17 @@ if [[ "$#" -ge 2 && "$1" == "-e" ]]; then
 fi
 printf "LOCAL-RACKET %s\n" "$*"
 EOF
-cat > "$local_src/racket/bin/raco" <<'EOF'
+cat >"$local_src/racket/bin/raco" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 printf "LOCAL-RACO %s\n" "$*"
 EOF
-cat > "$local_src/racket/src/build/cs/c/ChezScheme/pb/bin/pb/scheme" <<'EOF'
+cat >"$local_src/racket/src/build/cs/c/ChezScheme/pb/bin/pb/scheme" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 printf "LOCAL-SCHEME %s\n" "$*"
 EOF
-cat > "$local_src/racket/src/build/cs/c/ChezScheme/pb/bin/pb/petite" <<'EOF'
+cat >"$local_src/racket/src/build/cs/c/ChezScheme/pb/bin/pb/petite" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 printf "LOCAL-PETITE %s\n" "$*"

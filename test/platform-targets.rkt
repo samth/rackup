@@ -69,4 +69,43 @@
                                            #:arch "x86_64"
                                            #:platform "linux"
                                            #:ext "sh")
-                "racket-minimal-9.1-x86_64-linux-cs.sh"))
+                "racket-minimal-9.1-x86_64-linux-cs.sh")
+
+  ;; Architectures with only minimal installers (riscv64, arm, ppc) must fail
+  ;; when requesting full distribution, since no full installer exists.
+  (check-exn exn:fail?
+             (lambda ()
+               (select-installer-filename table
+                                          #:version-token "9.1"
+                                          #:variant 'cs
+                                          #:distribution 'full
+                                          #:arch "riscv64"
+                                          #:platform "linux"
+                                          #:ext "sh")))
+  (check-exn exn:fail?
+             (lambda ()
+               (select-installer-filename table
+                                          #:version-token "9.1"
+                                          #:variant 'cs
+                                          #:distribution 'full
+                                          #:arch "arm"
+                                          #:platform "linux"
+                                          #:ext "sh")))
+
+  ;; Minimal installers are found for these architectures.
+  (check-equal? (select-installer-filename table
+                                           #:version-token "9.1"
+                                           #:variant 'cs
+                                           #:distribution 'minimal
+                                           #:arch "riscv64"
+                                           #:platform "linux"
+                                           #:ext "sh")
+                "racket-minimal-9.1-riscv64-linux-cs.sh")
+  (check-equal? (select-installer-filename table
+                                           #:version-token "9.1"
+                                           #:variant 'cs
+                                           #:distribution 'minimal
+                                           #:arch "arm"
+                                           #:platform "linux"
+                                           #:ext "sh")
+                "racket-minimal-9.1-arm-linux-cs.sh"))

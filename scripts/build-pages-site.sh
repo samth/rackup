@@ -2,6 +2,7 @@
 set -eu
 
 OUT_DIR="${1:-_site}"
+# shellcheck disable=SC1007
 ROOT_DIR=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 TMP_STAGE="$(mktemp -d "${TMPDIR:-/tmp}/rackup-pages.XXXXXX")"
 PLT_WEB_STAGE="$TMP_STAGE/plt-web-out"
@@ -31,7 +32,7 @@ mkdir -p "$TMP_STAGE/rackup-src"
 tar -C "$TMP_STAGE" -czf "$OUT_DIR/rackup-src.tar.gz" rackup-src
 
 SRC_SHA256="$($sha256_cmd "$OUT_DIR/rackup-src.tar.gz" | cut -d ' ' -f 1)"
-sed "s/@@RACKUP_SRC_SHA256@@/$SRC_SHA256/g" "$ROOT_DIR/scripts/install.sh" > "$OUT_DIR/install.sh"
+sed "s/@@RACKUP_SRC_SHA256@@/$SRC_SHA256/g" "$ROOT_DIR/scripts/install.sh" >"$OUT_DIR/install.sh"
 cp "$OUT_DIR/install.sh" "$OUT_DIR/install"
 chmod 0755 "$OUT_DIR/install.sh" "$OUT_DIR/install"
 
@@ -40,6 +41,6 @@ mkdir -p "$PLT_WEB_STAGE"
 racket "$ROOT_DIR/pages/site.rkt" --install-sh "$OUT_DIR/install.sh" -r -o "$PLT_WEB_STAGE" -f
 cp -R "$PLT_WEB_STAGE/www/." "$OUT_DIR/"
 
-: > "$OUT_DIR/.nojekyll"
+: >"$OUT_DIR/.nojekyll"
 
 echo "Built GitHub Pages site in $OUT_DIR"

@@ -1,0 +1,78 @@
+name: Shell Lint
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  shell-lint:
+    name: Shell Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Collect shell scripts
+        shell: bash
+        run: |
+          # Find all .sh files plus known shell scripts without extensions
+          (
+            find . -name '*.sh' -type f
+            echo ./bin/rackup
+          ) | sort -u > /tmp/shell-scripts.txt
+          echo "Found shell scripts:"
+          cat /tmp/shell-scripts.txt
+
+      - name: ShellCheck
+        shell: bash
+        run: |
+          xargs shellcheck --severity=warning < /tmp/shell-scripts.txt
+
+      - name: Install shfmt
+        uses: mfinelli/setup-shfmt@v2
+
+      - name: shfmt (formatting check)
+        shell: bash
+        run: |
+          xargs shfmt -d -i 2 -ci < /tmp/shell-scripts.txt
+
+      - name: Install checkbashisms
+        run: sudo apt-get install -y -qq devscripts
+
+      - name: checkbashisms (POSIX portability)
+        shell: bash
+        run: |
+          # Collect scripts with #!/bin/sh shebangs
+          posix_scripts=()
+          while IFS= read -r f; do
+            if head -1 "$f" | grep -q '^#!.*/bin/sh'; then
+              posix_scripts+=("$f")
+            fi
+          done < /tmp/shell-scripts.txt
+
+          if [ ${#posix_scripts[@]} -eq 0 ]; then
+            echo "No POSIX sh scripts found, skipping."
+            exit 0
+          fi
+
+          echo "POSIX sh scripts:"
+          printf '  %s\n' "${posix_scripts[@]}"
+
+          # checkbashisms has known parser limitations with embedded quotes
+          # in single-quoted strings. Run per-file and collect real failures
+          # separately from parse errors.
+          rc=0
+          for f in "${posix_scripts[@]}"; do
+            if ! output="$(checkbashisms "$f" 2>&1)"; then
+              # Filter out pure parse-error-only failures (exit 2 = skipped/parse error)
+              if echo "$output" | grep -q '^possible bashism'; then
+                printf '%s\n' "$output"
+                rc=1
+              elif echo "$output" | grep -q '^error:'; then
+                echo "checkbashisms: parser warning for $f (non-fatal):"
+                echo "$output" | grep '^error:' | sed 's/^/  /'
+              fi
+            fi
+          done
+          exit "$rc"

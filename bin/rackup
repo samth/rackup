@@ -1,6 +1,7 @@
 #!/bin/sh
 set -eu
 
+# shellcheck disable=SC1007
 SELF_DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
 LIBEXEC_DIR="$SELF_DIR/../libexec"
 CORE="$LIBEXEC_DIR/rackup-core.rkt"
@@ -11,6 +12,7 @@ if [ ! -r "$BOOTSTRAP_SH" ]; then
   exit 1
 fi
 
+# shellcheck disable=SC1090
 . "$BOOTSTRAP_SH"
 
 if [ "${1:-}" = "prompt" ]; then
@@ -21,11 +23,11 @@ if [ "${1:-}" = "prompt" ]; then
       ;;
     2)
       case "${2:-}" in
-        -h|--help)
+        -h | --help)
           rackup_prompt_help_shell
           exit 0
           ;;
-        --raw|--source|--short|--long)
+        --raw | --source | --short | --long)
           rackup_prompt_shell "$2"
           exit 0
           ;;
@@ -70,6 +72,7 @@ rackup_run_core() {
 if [ "${1:-}" = "uninstall" ]; then
   REQUEST_DIR="$(mktemp -d "${TMPDIR:-/tmp}/rackup-uninstall.XXXXXX")"
   REQUEST_FILE="$REQUEST_DIR/request.txt"
+  # shellcheck disable=SC2317  # invoked via trap
   cleanup_uninstall_request() {
     rm -rf "$REQUEST_DIR"
   }
@@ -94,7 +97,7 @@ if [ "${1:-}" = "uninstall" ]; then
     rm -rf -- "$TARGET_HOME"
   fi
   echo "rackup uninstalled."
-  if [ "$(wc -l < "$REQUEST_FILE")" -gt 1 ]; then
+  if [ "$(wc -l <"$REQUEST_FILE")" -gt 1 ]; then
     echo "Removed rackup shell init blocks from:"
     sed -n '2,$p' "$REQUEST_FILE" | while IFS= read -r rc_path; do
       [ -n "$rc_path" ] || continue

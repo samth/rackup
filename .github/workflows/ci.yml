@@ -298,6 +298,45 @@ jobs:
             --host-racket absent \
             --spec stable
 
+  docker-e2e-upgrade-path:
+    name: Docker E2E (upgrade 9.0 -> stable + snapshot sites)
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Docker upgrade path and snapshot site smoke
+        run: |
+          scripts/docker-test-fresh-install.sh \
+            --spec stable \
+            --snapshot-site auto
+
+  docker-e2e-snapshot-utah:
+    name: Docker E2E (snapshot:utah explicit)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Docker snapshot install from Utah
+        run: |
+          scripts/docker-test-fresh-install.sh \
+            --spec stable \
+            --snapshot-site utah
+
+  docker-e2e-snapshot-northwestern:
+    name: Docker E2E (snapshot:northwestern explicit)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Docker snapshot install from Northwestern
+        run: |
+          scripts/docker-test-fresh-install.sh \
+            --spec stable \
+            --snapshot-site northwestern
+
   docker-e2e-source-build-link:
     name: Docker E2E (real source build local link)
     runs-on: ubuntu-latest

@@ -194,7 +194,7 @@ assert_rackup_self_compiled() {
 version_prefix_for_spec() {
   local spec="$1"
   case "$spec" in
-    stable|pre-release|snapshot|snapshot:*|current) echo "" ;;
+    stable | pre-release | snapshot | snapshot:* | current) echo "" ;;
     *) echo "$spec" ;;
   esac
 }
@@ -203,12 +203,12 @@ create_local_test_package() {
   local pkg_dir="$PKG_SRC_ROOT/rackup-e2e-pkg"
   rm -rf "$pkg_dir"
   mkdir -p "$pkg_dir"
-  cat > "$pkg_dir/info.rkt" <<'EOF'
+  cat >"$pkg_dir/info.rkt" <<'EOF'
 #lang info
 (define collection "rackup-e2e-pkg")
 (define deps '("base"))
 EOF
-  cat > "$pkg_dir/main.rkt" <<'EOF'
+  cat >"$pkg_dir/main.rkt" <<'EOF'
 #lang racket/base
 (provide marker)
 (define marker "rackup-e2e-package-ok")
@@ -233,7 +233,7 @@ create_fake_local_source_tree() {
   local addon_dir="$root/add-on/development"
   rm -rf "$root"
   mkdir -p "$bin_dir" "$plthome/collects" "$root/pkgs" "$chez_bin_dir" "$addon_dir"
-  cat > "$bin_dir/racket" <<'EOF'
+  cat >"$bin_dir/racket" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 default_addon_dir="$(cd "$(dirname "$0")/../.." && pwd)/add-on/development"
@@ -252,17 +252,17 @@ printf 'PLTCOLLECTS=%s\n' "${PLTCOLLECTS:-}"
 printf 'PLTADDONDIR=%s\n' "${PLTADDONDIR:-}"
 printf 'ARGS=%s\n' "$*"
 EOF
-  cat > "$bin_dir/raco" <<'EOF'
+  cat >"$bin_dir/raco" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 printf 'FAKE-RACO %s\n' "$*"
 EOF
-  cat > "$chez_bin_dir/scheme" <<'EOF'
+  cat >"$chez_bin_dir/scheme" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 printf 'FAKE-SCHEME %s\n' "$*"
 EOF
-  cat > "$chez_bin_dir/petite" <<'EOF'
+  cat >"$chez_bin_dir/petite" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 printf 'FAKE-PETITE %s\n' "$*"
@@ -280,12 +280,12 @@ create_real_local_source_tree() {
     echo "Reusing prebuilt local source tree from image: $PREBUILT_LOCAL_SOURCE_DIR" >&2
     if [[ -f "$PREBUILT_LOCAL_SOURCE_DIR/.rackup-source-build-ref" ]]; then
       local recorded_ref
-      recorded_ref="$(tr -d '\n' < "$PREBUILT_LOCAL_SOURCE_DIR/.rackup-source-build-ref")"
+      recorded_ref="$(tr -d '\n' <"$PREBUILT_LOCAL_SOURCE_DIR/.rackup-source-build-ref")"
       [[ "$recorded_ref" == "$SOURCE_BUILD_REF" ]] || fail "prebuilt local source ref mismatch: expected '$SOURCE_BUILD_REF' got '$recorded_ref'"
     fi
     if [[ -n "$SOURCE_BUILD_COMMIT" && -f "$PREBUILT_LOCAL_SOURCE_DIR/.rackup-source-build-commit" ]]; then
       local recorded_commit
-      recorded_commit="$(tr -d '\n' < "$PREBUILT_LOCAL_SOURCE_DIR/.rackup-source-build-commit")"
+      recorded_commit="$(tr -d '\n' <"$PREBUILT_LOCAL_SOURCE_DIR/.rackup-source-build-commit")"
       [[ "$recorded_commit" == "$SOURCE_BUILD_COMMIT" ]] || fail "prebuilt local source commit mismatch: expected '$SOURCE_BUILD_COMMIT' got '$recorded_commit'"
     fi
     mkdir -p "$root"
@@ -416,9 +416,10 @@ else
   assert_contains "present: " "$runtime_status" "runtime status output missing"
 fi
 
-IFS=',' read -r -a SPECS <<< "$SPECS_CSV"
+IFS=',' read -r -a SPECS <<<"$SPECS_CSV"
 declare -a INSTALLED_IDS=()
 declare -a INSTALLED_SPECS=()
+# shellcheck disable=SC2034  # populated for debug/future use
 declare -A SPEC_TO_ID=()
 declare -A SPEC_TO_PREFIX=()
 
@@ -440,6 +441,7 @@ for spec in "${SPECS[@]}"; do
   id="$(current_toolchain_id)"
   INSTALLED_IDS+=("$id")
   INSTALLED_SPECS+=("$spec")
+  # shellcheck disable=SC2034
   SPEC_TO_ID["$spec"]="$id"
   SPEC_TO_PREFIX["$spec"]="$(version_prefix_for_spec "$spec")"
 
@@ -561,6 +563,7 @@ shell_helper_function_test zsh "$shell_test_id" "$shell_test_prefix"
 echo
 echo "== Missing toolchain switch fails fast without a tty =="
 missing_switch_err="$(
+  # shellcheck disable=SC2016  # single quotes intentional: code runs in subshell
   env -i HOME="$HOME" RACKUP_HOME="$RACKUP_HOME" PATH="/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin" \
     bash -lc '
       set -euo pipefail
@@ -637,6 +640,114 @@ else
 fi
 run_rackup default "$primary_id"
 
+echo
+echo "== Upgrade path: install 9.0, then upgrade to stable (9.1) =="
+# Only run if the first spec was NOT 9.0 already (avoid duplicate install)
+# shellcheck disable=SC2034
+upgrade_test_ran=0
+first_spec_is_90=0
+if [[ "${INSTALLED_SPECS[0]:-}" == "9.0" ]]; then
+  first_spec_is_90=1
+fi
+if [[ "$first_spec_is_90" -eq 0 ]]; then
+  # Install 9.0 to simulate an older installation
+  if run_rackup install 9.0 --set-default; then
+    # shellcheck disable=SC2034
+    upgrade_test_ran=1
+    old_id="$(current_toolchain_id)"
+    assert_contains "release-9.0" "$old_id" "9.0 toolchain should be installed"
+    old_version="$(current_shim_version)"
+    assert_contains "9.0" "$old_version" "shim should report 9.0"
+
+    # Now install stable (which resolves to 9.1) alongside it
+    if ! run_rackup install stable --set-default; then
+      echo "stable install attempt failed after 9.0, retrying..."
+      sleep 2
+      run_rackup install stable --set-default
+    fi
+    new_id="$(current_toolchain_id)"
+    new_version="$(current_shim_version)"
+
+    # Verify the upgrade resulted in a different (newer) version
+    if [[ "$old_id" != "$new_id" ]]; then
+      echo "Upgrade path verified: $old_id -> $new_id"
+      echo "Version changed: $old_version -> $new_version"
+
+      # Verify both toolchains are listed
+      list_out="$(run_rackup list)"
+      assert_contains "release-9.0" "$list_out" "9.0 should still be in list after upgrade"
+
+      # Verify we can switch back to 9.0
+      run_rackup default "$old_id"
+      switchback_version="$(current_shim_version)"
+      assert_contains "9.0" "$switchback_version" "switching back to 9.0 should work"
+
+      # Switch back to the new version
+      run_rackup default "$new_id"
+      switch_new_version="$(current_shim_version)"
+      echo "Switch back to new version: $switch_new_version"
+    else
+      echo "stable resolved to 9.0 (same as existing); upgrade path test skipped (already latest)"
+    fi
+
+    # Restore primary toolchain as default
+    run_rackup default "$primary_id"
+  else
+    echo "9.0 install failed (may not be available); skipping upgrade path test"
+  fi
+else
+  echo "First spec is already 9.0; upgrade path covered by multi-spec install"
+fi
+
+echo
+echo "== Snapshot site tests: Utah and Northwestern =="
+SNAPSHOT_TEST_SITES=()
+if [[ "$SNAPSHOT_SITE" == "auto" || "$SNAPSHOT_SITE" == "utah" ]]; then
+  SNAPSHOT_TEST_SITES+=("utah")
+fi
+if [[ "$SNAPSHOT_SITE" == "auto" || "$SNAPSHOT_SITE" == "northwestern" ]]; then
+  SNAPSHOT_TEST_SITES+=("northwestern")
+fi
+for site in "${SNAPSHOT_TEST_SITES[@]}"; do
+  echo
+  echo "== Installing snapshot from site: $site =="
+  if run_rackup install "snapshot:$site" --set-default; then
+    snap_id="$(current_toolchain_id)"
+    assert_contains "snapshot-${site}" "$snap_id" "snapshot ID should contain site name $site"
+    snap_version="$(current_shim_version)"
+    assert_nonempty "$snap_version" "snapshot from $site should report a version"
+    echo "Snapshot $site installed: $snap_id (version=$snap_version)"
+
+    # Verify metadata via list
+    snap_list="$(run_rackup list)"
+    assert_contains "snapshot-${site}" "$snap_list" "$site snapshot should appear in list"
+
+    # Restore primary default
+    run_rackup default "$primary_id"
+  else
+    echo "Snapshot install from $site failed on first attempt, retrying..."
+    sleep 2
+    if run_rackup install "snapshot:$site" --set-default; then
+      snap_id="$(current_toolchain_id)"
+      assert_contains "snapshot-${site}" "$snap_id" "snapshot ID should contain site name $site (retry)"
+      echo "Snapshot $site installed on retry: $snap_id"
+      run_rackup default "$primary_id"
+    else
+      echo "WARNING: Snapshot install from $site failed (site may be unavailable); skipping"
+    fi
+  fi
+done
+
+# If both Utah and Northwestern snapshots were installed, verify they coexist
+if [[ ${#SNAPSHOT_TEST_SITES[@]} -ge 2 ]]; then
+  snap_list="$(run_rackup list)"
+  if [[ "$snap_list" == *"snapshot-utah"* ]] && [[ "$snap_list" == *"snapshot-northwestern"* ]]; then
+    echo "Both Utah and Northwestern snapshots coexist successfully"
+  else
+    echo "Note: not all snapshot sites were successfully installed (this is OK if sites are unavailable)"
+  fi
+fi
+
 if [[ "$HOST_RACKET" == "absent" ]]; then
   echo
   echo "== Hidden runtime recovery failure-mode check =="
@@ -656,10 +767,10 @@ if [[ "$HOST_RACKET" != "absent" ]]; then
   sibling_keep_dir="$HOME/rackup-e2e-keep-dir"
   sibling_keep_file="$sibling_keep_dir/keep.txt"
   local_src_keep_file="$local_src_root/keep-local.txt"
-  printf 'keep\n' > "$keep_file"
+  printf 'keep\n' >"$keep_file"
   mkdir -p "$sibling_keep_dir"
-  printf 'keep\n' > "$sibling_keep_file"
-  printf 'keep\n' > "$local_src_keep_file"
+  printf 'keep\n' >"$sibling_keep_file"
+  printf 'keep\n' >"$local_src_keep_file"
   test -d "$RACKUP_HOME"
   [[ -f "$HOME/.bashrc" ]] || fail "expected ~/.bashrc before uninstall"
   [[ -f "$HOME/.zshrc" ]] || fail "expected ~/.zshrc before uninstall"

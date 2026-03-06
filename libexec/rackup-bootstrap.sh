@@ -21,8 +21,8 @@ rackup_runtime_addon_dir() {
 }
 
 rackup_system_runtime_addon_dir() {
-  uid_part="${UID:-}"
-  if [ -z "$uid_part" ] && command -v id >/dev/null 2>&1; then
+  uid_part=""
+  if command -v id >/dev/null 2>&1; then
     uid_part="$(id -u 2>/dev/null || true)"
   fi
   if [ -n "$uid_part" ]; then
@@ -59,7 +59,7 @@ rackup_default_toolchain_file() {
 rackup_read_default_toolchain_shell() {
   f="$(rackup_default_toolchain_file)"
   if [ -f "$f" ]; then
-    tr -d '\r\n' < "$f"
+    tr -d '\r\n' <"$f"
   fi
 }
 
@@ -72,18 +72,18 @@ rackup_rktd_string_field_shell() {
   key="$1"
   file="$2"
   [ -f "$file" ] || return 0
-  grep -Eo "\\($key \\. \"[^\"]*\"\\)" "$file" 2>/dev/null \
-    | sed -n 's/.*"\([^"]*\)".*/\1/p' \
-    | head -n 1
+  grep -Eo "\\($key \\. \"[^\"]*\"\\)" "$file" 2>/dev/null |
+    sed -n 's/.*"\([^"]*\)".*/\1/p' |
+    head -n 1
 }
 
 rackup_rktd_symbol_field_shell() {
   key="$1"
   file="$2"
   [ -f "$file" ] || return 0
-  grep -Eo "\\($key \\. [^ )]+\\)" "$file" 2>/dev/null \
-    | sed -n 's/.*\. \([^ )]*\)).*/\1/p' \
-    | head -n 1
+  grep -Eo "\\($key \\. [^ )]+\\)" "$file" 2>/dev/null |
+    sed -n 's/.*\. \([^ )]*\)).*/\1/p' |
+    head -n 1
 }
 
 rackup_prompt_short_shell() {
@@ -92,7 +92,7 @@ rackup_prompt_short_shell() {
   kind="$(rackup_rktd_symbol_field_shell kind "$meta_file")"
   version="$(rackup_rktd_string_field_shell resolved-version "$meta_file")"
   case "$kind" in
-    release|stable)
+    release | stable)
       suffix="${version:-$active}"
       ;;
     pre-release)
@@ -240,12 +240,12 @@ rackup_host_platform() {
 rackup_normalized_arch() {
   m="$(uname -m 2>/dev/null || echo unknown)"
   case "$m" in
-    x86_64|amd64) echo "x86_64" ;;
-    aarch64|arm64) echo "aarch64" ;;
-    i386|i686|x86) echo "i386" ;;
-    armv7*|armv6*|arm) echo "arm" ;;
+    x86_64 | amd64) echo "x86_64" ;;
+    aarch64 | arm64) echo "aarch64" ;;
+    i386 | i686 | x86) echo "i386" ;;
+    armv7* | armv6* | arm) echo "arm" ;;
     riscv64) echo "riscv64" ;;
-    ppc|powerpc|ppc64|ppc64le|powerpc64|powerpc64le) echo "ppc" ;;
+    ppc | powerpc | ppc64 | ppc64le | powerpc64 | powerpc64le) echo "ppc" ;;
     *) echo "$m" ;;
   esac
 }
@@ -296,7 +296,7 @@ rackup_select_hidden_runtime_filename() {
         rest=${base#racket-minimal-}
         version_token=${rest%%-*}
         case "$version_token" in
-          "$version"|"$version".*) : ;;
+          "$version" | "$version".*) : ;;
           *) continue ;;
         esac
 
@@ -305,15 +305,15 @@ rackup_select_hidden_runtime_filename() {
         [ "$arch_token" = "$arch" ] || continue
         platform_and_variant=${rest2#"$arch_token"-}
 
-        variant=bc
+        variant='bc'
         platform_token=$platform_and_variant
         case "$platform_and_variant" in
           *-cs)
-            variant=cs
+            variant='cs'
             platform_token=${platform_and_variant%-cs}
             ;;
           *-bc)
-            variant=bc
+            variant='bc'
             platform_token=${platform_and_variant%-bc}
             ;;
         esac
@@ -322,9 +322,9 @@ rackup_select_hidden_runtime_filename() {
         case "$host_platform" in
           linux)
             case "$platform_token" in
-              linux|linux-*)
+              linux | linux-*)
                 case "$platform_token" in
-                  *natipkg*|*pkg-build*) continue ;;
+                  *natipkg* | *pkg-build*) continue ;;
                 esac
                 ;;
               *)
@@ -334,7 +334,7 @@ rackup_select_hidden_runtime_filename() {
             ;;
           macosx)
             case "$platform_token" in
-              macosx|macosx-*) ;;
+              macosx | macosx-*) ;;
               *) continue ;;
             esac
             ;;
@@ -407,7 +407,6 @@ rackup_hidden_runtime_install_if_missing() {
   fi
 
   home="$(rackup_home)"
-  runtime_dir="$(rackup_runtime_dir)"
   versions_dir="$(rackup_runtime_versions_dir)"
   current_link="$(rackup_runtime_current_link)"
   cache_dir="$(rackup_runtime_cache_dir)"

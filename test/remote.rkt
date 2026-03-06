@@ -433,4 +433,72 @@
   (check-equal? (hash-ref p-macos-dmg 'platform-family) "macosx")
   (check-equal? (hash-ref p-macos-dmg 'variant) 'cs)
   (check-equal? (hash-ref p-macos-dmg 'ext) "dmg")
-  (check-equal? (hash-ref p-macos-dmg 'distribution) 'full))
+  (check-equal? (hash-ref p-macos-dmg 'distribution) 'full)
+
+  ;; Distribution fallback: when only minimal installers exist for an arch,
+  ;; requesting full should fall back to minimal.
+  (define minimal-only-table
+    (hash 'a "racket-minimal-9.1-riscv64-linux-cs.sh"
+          'b "racket-minimal-9.1-riscv64-linux-cs.tgz"
+          'c "racket-9.1-x86_64-linux-cs.sh"
+          'd "racket-minimal-9.1-x86_64-linux-cs.sh"))
+
+  ;; riscv64 has no full installer -- select-installer-filename should fail
+  (check-exn exn:fail?
+             (lambda ()
+               (select-installer-filename minimal-only-table
+                                          #:version-token "9.1"
+                                          #:variant 'cs
+                                          #:distribution 'full
+                                          #:arch "riscv64")))
+
+  ;; But minimal works fine for riscv64
+  (check-equal? (select-installer-filename minimal-only-table
+                                           #:version-token "9.1"
+                                           #:variant 'cs
+                                           #:distribution 'minimal
+                                           #:arch "riscv64")
+                "racket-minimal-9.1-riscv64-linux-cs.sh")
+
+  ;; x86_64 has full installer -- should still work
+  (check-equal? (select-installer-filename minimal-only-table
+                                           #:version-token "9.1"
+                                           #:variant 'cs
+                                           #:distribution 'full
+                                           #:arch "x86_64")
+                "racket-9.1-x86_64-linux-cs.sh")
+
+  ;; distribution-fallback? predicate
+  (check-true (distribution-fallback? 'minimal 'full))
+  (check-false (distribution-fallback? 'full 'full))
+  (check-false (distribution-fallback? 'minimal 'minimal))
+  (check-false (distribution-fallback? 'full 'minimal))
+
+  ;; End-to-end: riscv64 is minimal-only -- requesting full falls back to minimal.
+  (define riscv-req
+    (resolve-install-request/runtime "9.1" #:distribution 'full #:arch "riscv64" #:platform "linux"))
+  (check-equal? (hash-ref riscv-req 'distribution) 'minimal)
+  (check-equal? (hash-ref riscv-req 'arch) "riscv64")
+  (check-true (regexp-match? #rx"minimal" (hash-ref riscv-req 'installer-filename)))
+
+  ;; Architectures that have full Linux installers in 9.1 should NOT fall back.
+  (for ([arch (in-list '("x86_64" "aarch64" "i386" "arm"))])
+    (define req
+      (resolve-install-request/runtime "9.1" #:distribution 'full #:arch arch #:platform "linux"))
+    (check-equal? (hash-ref req 'distribution) 'full
+                  (format "~a: full installer should be found" arch))
+    (check-equal? (hash-ref req 'arch) arch)
+    (check-false (regexp-match? #rx"minimal" (hash-ref req 'installer-filename))
+                 (format "~a: should not fall back to minimal" arch)))
+
+  ;; Explicitly requesting minimal on riscv64 works directly (no fallback needed).
+  (define riscv-minimal-req
+    (resolve-install-request/runtime "9.1" #:distribution 'minimal #:arch "riscv64" #:platform "linux"))
+  (check-equal? (hash-ref riscv-minimal-req 'distribution) 'minimal)
+  (check-true (regexp-match? #rx"minimal" (hash-ref riscv-minimal-req 'installer-filename)))
+
+  ;; Stable resolves for riscv64 with full -> minimal fallback.
+  (define riscv-stable-req
+    (resolve-install-request/runtime "stable" #:distribution 'full #:arch "riscv64" #:platform "linux"))
+  (check-equal? (hash-ref riscv-stable-req 'distribution) 'minimal)
+  (check-equal? (hash-ref riscv-stable-req 'arch) "riscv64"))

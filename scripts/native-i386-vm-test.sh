@@ -147,7 +147,7 @@ while [[ $# -gt 0 ]]; do
       DOWNLOAD_ONLY=1
       shift
       ;;
-    -h|--help)
+    -h | --help)
       usage
       exit 0
       ;;
@@ -160,7 +160,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 case "$MODE" in
-  debug|smoke) ;;
+  debug | smoke) ;;
   *)
     printf 'Unknown mode: %s\n' "$MODE" >&2
     exit 2
@@ -268,9 +268,9 @@ cp "$ROOT_DIR/vm/native-i386-firstboot.sh" "$INITRD_EXTRA_TREE/rackup-native-i38
 cp "$ROOT_DIR/vm/native-i386-firstboot.service" "$INITRD_EXTRA_TREE/rackup-native-i386-firstboot.service"
 (
   cd "$INITRD_EXTRA_TREE"
-  find . -print0 | cpio --null -o -H newc --quiet | gzip -9 > "$INITRD_EXTRA"
+  find . -print0 | cpio --null -o -H newc --quiet | gzip -9 >"$INITRD_EXTRA"
 )
-cat "$INITRD_ORIG" "$INITRD_EXTRA" > "$INITRD_CUSTOM"
+cat "$INITRD_ORIG" "$INITRD_EXTRA" >"$INITRD_CUSTOM"
 
 if [[ "$DOWNLOAD_ONLY" -eq 1 ]]; then
   printf 'Prepared native i386 VM assets in %s\n' "$WORKDIR"
