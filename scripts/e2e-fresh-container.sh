@@ -643,6 +643,7 @@ run_rackup default "$primary_id"
 echo
 echo "== Upgrade path: install 9.0, then upgrade to stable (9.1) =="
 # Only run if the first spec was NOT 9.0 already (avoid duplicate install)
+# shellcheck disable=SC2034
 upgrade_test_ran=0
 first_spec_is_90=0
 if [[ "${INSTALLED_SPECS[0]:-}" == "9.0" ]]; then
@@ -651,6 +652,7 @@ fi
 if [[ "$first_spec_is_90" -eq 0 ]]; then
   # Install 9.0 to simulate an older installation
   if run_rackup install 9.0 --set-default; then
+    # shellcheck disable=SC2034
     upgrade_test_ran=1
     old_id="$(current_toolchain_id)"
     assert_contains "release-9.0" "$old_id" "9.0 toolchain should be installed"
