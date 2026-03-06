@@ -108,7 +108,6 @@
                     "-mountpoint" (path->string* mount-point)
                     (path->string* dmg)))
    (lambda ()
-     (make-directory* dest)
      ;; Racket .dmg files contain a top-level directory like "Racket v9.1/"
      ;; with the standard bin/, lib/, share/ layout inside.
      (define top-dirs

@@ -227,7 +227,7 @@ rackup_fetch_text() {
 rackup_host_platform() {
   case "$(uname -s 2>/dev/null)" in
     Darwin) echo "macosx" ;;
-    Linux)  echo "linux" ;;
+    Linux) echo "linux" ;;
     # TODO: BSD (FreeBSD, OpenBSD, NetBSD) also uses sh/tgz installers like Linux.
     # When BSD support is added, decide whether to return "linux" (shared installer
     # mechanics) or a distinct token like "freebsd" (matching Racket download filenames).
@@ -278,8 +278,8 @@ rackup_select_hidden_runtime_filename() {
 
   # Set extension preference order based on platform
   case "$host_platform" in
-    macosx)  want_exts="tgz dmg" ;;
-    *)       want_exts="sh tgz" ;;
+    macosx) want_exts="tgz dmg" ;;
+    *) want_exts="sh tgz" ;;
   esac
 
   found=""

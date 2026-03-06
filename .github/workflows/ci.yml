@@ -361,23 +361,28 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # tgz installer path (preferred) — all macOS versions/archs
+          # tgz installer path — Intel has full tgz, ARM only has minimal tgz
           - runner: macos-13       # Intel x86_64
             installer_format: tgz
             setup_racket_arch: x64
+            extra_install_flags: ""
           - runner: macos-14       # Apple Silicon arm64
             installer_format: tgz
             setup_racket_arch: arm64
+            extra_install_flags: "--distribution minimal"
           - runner: macos-15       # Apple Silicon arm64
             installer_format: tgz
             setup_racket_arch: arm64
-          # dmg installer path (fallback) — test on one Intel + one ARM
+            extra_install_flags: "--distribution minimal"
+          # dmg installer path — test on one Intel + one ARM
           - runner: macos-13       # Intel x86_64
             installer_format: dmg
             setup_racket_arch: x64
+            extra_install_flags: ""
           - runner: macos-14       # Apple Silicon arm64
             installer_format: dmg
             setup_racket_arch: arm64
+            extra_install_flags: ""
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
@@ -395,7 +400,7 @@ jobs:
         shell: bash
         run: |
           export RACKUP_HOME="$(mktemp -d)/rackup-e2e"
-          bin/rackup install stable --set-default --installer-ext "${{ matrix.installer_format }}"
+          bin/rackup install stable --set-default --installer-ext "${{ matrix.installer_format }}" ${{ matrix.extra_install_flags }}
           bin/rackup list
           bin/rackup doctor
           "$RACKUP_HOME/shims/racket" -e '(displayln "hello from rackup")'
