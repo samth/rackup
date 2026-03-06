@@ -289,27 +289,56 @@
       (apply system* exe args)))
   (values ok? (string-trim (get-output-string err))))
 
+(define (demod-merged-zo-path)
+  (build-path (rackup-libexec-dir) "compiled" "rackup-core_rkt_merged.zo"))
+
 (define (precompile-rackup-sources!)
   (define racket-exe (hidden-runtime-racket-path))
-  (define sources (rackup-source-paths))
-  (when (and racket-exe (pair? sources))
-    (define compile-expression
-      (string-join
-       '("(begin"
-         "  (require compiler/cm racket/path)"
-         "  (for ([arg (in-vector (current-command-line-arguments))])"
-         "    (managed-compile-zo (path->complete-path (string->path arg)))))")
-       " "))
-    (let-values ([(ok? details)
-                  (apply run-hidden-runtime/quiet
-                         racket-exe
-                         "-e"
-                         compile-expression
-                         (map path->string* sources))])
-      (unless ok?
-        (eprintf "rackup: warning: failed to precompile rackup sources via compiler/cm\n")
-        (unless (string-blank? details)
-          (eprintf "~a\n" details))))))
+  (when racket-exe
+    (define merged-zo (demod-merged-zo-path))
+    (if (file-exists? merged-zo)
+        ;; Recompile demodularized machine-independent .zo to machine-dependent
+        (let-values ([(ok? details)
+                      (run-hidden-runtime/quiet
+                       racket-exe
+                       "-l" "raco" "demod" "-r"
+                       (path->string* merged-zo))])
+          (cond
+            [ok?
+             ;; Verify the recompiled .zo loads correctly
+             (let-values ([(ok2? details2)
+                           (run-hidden-runtime/quiet
+                            racket-exe
+                            (path->string* merged-zo)
+                            "-e" "(void)")])
+               (unless ok2?
+                 (eprintf "rackup: warning: recompiled demod .zo failed smoke test\n")
+                 (unless (string-blank? details2)
+                   (eprintf "~a\n" details2))))]
+            [else
+             (eprintf "rackup: warning: failed to recompile demodularized .zo\n")
+             (unless (string-blank? details)
+               (eprintf "~a\n" details))]))
+        ;; Fallback: compile from source
+        (let ([sources (rackup-source-paths)])
+          (when (pair? sources)
+            (define compile-expression
+              (string-join
+               '("(begin"
+                 "  (require compiler/cm racket/path)"
+                 "  (for ([arg (in-vector (current-command-line-arguments))])"
+                 "    (managed-compile-zo (path->complete-path (string->path arg)))))")
+               " "))
+            (let-values ([(ok? details)
+                          (apply run-hidden-runtime/quiet
+                                 racket-exe
+                                 "-e"
+                                 compile-expression
+                                 (map path->string* sources))])
+              (unless ok?
+                (eprintf "rackup: warning: failed to precompile rackup sources via compiler/cm\n")
+                (unless (string-blank? details)
+                  (eprintf "~a\n" details)))))))))
 
 (define (with-runtime-lock thunk)
   (ensure-rackup-layout!)

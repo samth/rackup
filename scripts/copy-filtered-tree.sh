@@ -6,9 +6,9 @@ usage() {
 Usage: copy-filtered-tree.sh SRC_DIR DEST_DIR [PATH ...]
 
 Copies files from SRC_DIR into DEST_DIR while excluding:
-  - any directory named compiled
-  - any .zo or .dep file
   - .git directories
+  - .dep files
+  - .zo files (except rackup-core_rkt_merged.zo)
 
 If PATH arguments are provided, they are interpreted relative to SRC_DIR.
 EOF
@@ -37,7 +37,7 @@ mkdir -p "$DEST_DIR"
 (
   cd "$SRC_DIR"
   find "$@" \
-    \( -type d \( -name .git -o -name compiled \) -prune \) -o \
-    \( -type f \( -name '*.zo' -o -name '*.dep' \) -prune \) -o \
+    \( -type d -name .git -prune \) -o \
+    \( -type f \( -name '*.zo' -o -name '*.dep' \) ! -name 'rackup-core_rkt_merged.zo' -prune \) -o \
     \( -type f -o -type l \) -print0
 ) | tar -C "$SRC_DIR" --null -T - -cf - | tar -C "$DEST_DIR" -xf -

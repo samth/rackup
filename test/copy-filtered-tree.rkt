@@ -78,4 +78,21 @@
      (check-true (file-exists? (build-path dst "bin" "rackup")))
      (check-true (file-exists? (build-path dst "libexec" "rackup-core.rkt")))
      (check-false (file-exists? (build-path dst "pages" "site.rkt")))
-     (check-false (directory-exists? (build-path dst "libexec" "compiled"))))))
+     (check-false (directory-exists? (build-path dst "libexec" "compiled")))))
+
+  ;; The demodularized merged .zo passes through while other .zo files are filtered
+  (with-temp-dirs
+   (lambda (src dst)
+     (write-executable (build-path src "bin" "rackup") "#!/bin/sh\nexit 0\n")
+     (write-executable (build-path src "libexec" "rackup-core.rkt") "#lang racket/base\n")
+     (make-directory* (build-path src "libexec" "compiled"))
+     (call-with-output-file (build-path src "libexec" "compiled" "rackup-core_rkt.zo") void)
+     (call-with-output-file (build-path src "libexec" "compiled" "rackup-core_rkt_merged.zo")
+       (lambda (out) (display "merged" out)))
+
+     (run-copy src dst (string->path "bin") (string->path "libexec"))
+
+     (check-true (file-exists? (build-path dst "bin" "rackup")))
+     (check-true (file-exists? (build-path dst "libexec" "rackup-core.rkt")))
+     (check-true (file-exists? (build-path dst "libexec" "compiled" "rackup-core_rkt_merged.zo")))
+     (check-false (file-exists? (build-path dst "libexec" "compiled" "rackup-core_rkt.zo"))))))
