@@ -47,7 +47,7 @@ while [[ $# -gt 0 ]]; do
       MODE="$2"
       shift 2
       ;;
-    -h|--help)
+    -h | --help)
       usage
       exit 0
       ;;
@@ -65,7 +65,7 @@ if [[ -z "$PLATFORM" || -z "$EXPECTED_ARCH" ]]; then
 fi
 
 case "$MODE" in
-  detect|download|runtime-install) ;;
+  detect | download | runtime-install) ;;
   *)
     echo "Invalid --mode: $MODE (expected detect|download|runtime-install)" >&2
     exit 2

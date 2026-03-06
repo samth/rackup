@@ -23,11 +23,11 @@ if [ "${1:-}" = "prompt" ]; then
       ;;
     2)
       case "${2:-}" in
-        -h|--help)
+        -h | --help)
           rackup_prompt_help_shell
           exit 0
           ;;
-        --raw|--source|--short|--long)
+        --raw | --source | --short | --long)
           rackup_prompt_shell "$2"
           exit 0
           ;;
@@ -97,7 +97,7 @@ if [ "${1:-}" = "uninstall" ]; then
     rm -rf -- "$TARGET_HOME"
   fi
   echo "rackup uninstalled."
-  if [ "$(wc -l < "$REQUEST_FILE")" -gt 1 ]; then
+  if [ "$(wc -l <"$REQUEST_FILE")" -gt 1 ]; then
     echo "Removed rackup shell init blocks from:"
     sed -n '2,$p' "$REQUEST_FILE" | while IFS= read -r rc_path; do
       [ -n "$rc_path" ] || continue

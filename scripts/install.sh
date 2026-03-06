@@ -71,7 +71,7 @@ USAGE
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    -y|--yes)
+    -y | --yes)
       YES=1
       shift
       ;;
@@ -103,7 +103,7 @@ while [ "$#" -gt 0 ]; do
       FROM_LOCAL="$2"
       shift 2
       ;;
-    -h|--help)
+    -h | --help)
       usage
       exit 0
       ;;
@@ -116,7 +116,7 @@ while [ "$#" -gt 0 ]; do
 done
 
 case "$BOOTSTRAP_MODE" in
-  install|self-upgrade) ;;
+  install | self-upgrade) ;;
   *)
     warn "Invalid RACKUP_BOOTSTRAP_MODE: $BOOTSTRAP_MODE (expected install or self-upgrade)"
     exit 2
@@ -159,11 +159,11 @@ else
     else
       warn "Warning: neither sha256sum nor shasum found; cannot verify download."
       if [ -r /dev/tty ] && [ -w /dev/tty ]; then
-        printf "Continue without checksum verification? [y/N] " > /dev/tty
+        printf "Continue without checksum verification? [y/N] " >/dev/tty
         answer=""
-        read -r answer < /dev/tty || true
+        read -r answer </dev/tty || true
         case "$answer" in
-          y|Y|yes|YES) ;;
+          y | Y | yes | YES) ;;
           *) exit 1 ;;
         esac
       else
@@ -247,11 +247,11 @@ elif [ "$YES" -eq 1 ]; then
   do_init=1
 else
   if [ -r /dev/tty ] && [ -w /dev/tty ]; then
-    printf "Initialize %s shell config now? [Y/n] " "$shell_to_init" > /dev/tty
+    printf "Initialize %s shell config now? [Y/n] " "$shell_to_init" >/dev/tty
     answer=""
-    read -r answer < /dev/tty || true
+    read -r answer </dev/tty || true
     case "${answer:-Y}" in
-      y|Y|yes|YES|"")
+      y | Y | yes | YES | "")
         do_init=1
         ;;
       *)
