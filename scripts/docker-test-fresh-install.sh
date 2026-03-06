@@ -141,7 +141,7 @@ while [[ $# -gt 0 ]]; do
       SKIP_PACKAGE_TESTS=1
       shift
       ;;
-    -h|--help)
+    -h | --help)
       usage
       exit 0
       ;;
@@ -154,7 +154,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 case "$MODE" in
-  direct|bootstrap|bootstrap-curl) ;;
+  direct | bootstrap | bootstrap-curl) ;;
   *)
     echo "Invalid mode: $MODE (expected direct|bootstrap|bootstrap-curl)" >&2
     exit 2
@@ -162,7 +162,7 @@ case "$MODE" in
 esac
 
 case "$SNAPSHOT_SITE" in
-  auto|utah|northwestern) ;;
+  auto | utah | northwestern) ;;
   *)
     echo "Invalid snapshot site: $SNAPSHOT_SITE" >&2
     exit 2
@@ -170,7 +170,7 @@ case "$SNAPSHOT_SITE" in
 esac
 
 case "$LOCAL_LINK_MODE" in
-  fake|build) ;;
+  fake | build) ;;
   *)
     echo "Invalid local-link mode: $LOCAL_LINK_MODE (expected fake|build)" >&2
     exit 2
@@ -178,7 +178,7 @@ case "$LOCAL_LINK_MODE" in
 esac
 
 case "$HOST_RACKET" in
-  present|absent) ;;
+  present | absent) ;;
   *)
     echo "Invalid host-racket mode: $HOST_RACKET (expected present|absent)" >&2
     exit 2
@@ -237,19 +237,19 @@ if [[ "$BUILD" -eq 1 ]]; then
       cache_scope="${cache_scope}-${source_cache_tag}"
     fi
     build_cmd+=(--cache-from "type=gha,scope=${cache_scope}"
-                --cache-to "type=gha,scope=${cache_scope},mode=max")
+      --cache-to "type=gha,scope=${cache_scope},mode=max")
   else
     build_cmd=(docker build)
   fi
   build_args=(--build-arg BASE_IMAGE="$BASE_IMAGE"
-              --build-arg INCLUDE_SYSTEM_RACKET="$include_system_racket")
+    --build-arg INCLUDE_SYSTEM_RACKET="$include_system_racket")
   if [[ "$LOCAL_LINK_MODE" == "build" && -n "$SOURCE_BUILD_COMMIT" ]]; then
     build_args+=(--build-arg PREBUILD_LOCAL_SOURCE=1
-                 --build-arg PREBUILD_SOURCE_REPO="$SOURCE_BUILD_REPO"
-                 --build-arg PREBUILD_SOURCE_REF="$SOURCE_BUILD_REF"
-                 --build-arg PREBUILD_SOURCE_COMMIT="$SOURCE_BUILD_COMMIT"
-                 --build-arg PREBUILD_SOURCE_TARGET="$SOURCE_BUILD_TARGET"
-                 --build-arg PREBUILD_SOURCE_JOBS="$SOURCE_BUILD_JOBS")
+      --build-arg PREBUILD_SOURCE_REPO="$SOURCE_BUILD_REPO"
+      --build-arg PREBUILD_SOURCE_REF="$SOURCE_BUILD_REF"
+      --build-arg PREBUILD_SOURCE_COMMIT="$SOURCE_BUILD_COMMIT"
+      --build-arg PREBUILD_SOURCE_TARGET="$SOURCE_BUILD_TARGET"
+      --build-arg PREBUILD_SOURCE_JOBS="$SOURCE_BUILD_JOBS")
   fi
   if [[ -n "$DOCKER_PLATFORM" ]]; then
     build_cmd+=(--platform "$DOCKER_PLATFORM")
