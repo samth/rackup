@@ -45,4 +45,25 @@
                                         #:distribution 'full
                                         #:snapshot-site 'utah
                                         #:snapshot-stamp "20260225-abcd")
-                "snapshot-utah-20260225-abcd-8.19.0.1-cs-x86_64-linux-full"))
+                "snapshot-utah-20260225-abcd-8.19.0.1-cs-x86_64-linux-full")
+
+  ;; host-platform-token returns a recognized platform string
+  (check-true (member (host-platform-token) '("linux" "macosx"))
+              "host-platform-token must return a recognized platform")
+
+  ;; macOS canonical IDs use "macosx" platform token
+  (check-equal? (canonical-toolchain-id 'release
+                                        #:resolved-version "9.1"
+                                        #:variant 'cs
+                                        #:arch "aarch64"
+                                        #:platform "macosx"
+                                        #:distribution 'full)
+                "release-9.1-cs-aarch64-macosx-full")
+
+  (check-equal? (canonical-toolchain-id 'release
+                                        #:resolved-version "8.18"
+                                        #:variant 'cs
+                                        #:arch "x86_64"
+                                        #:platform "macosx"
+                                        #:distribution 'minimal)
+                "release-8.18-cs-x86_64-macosx-minimal"))

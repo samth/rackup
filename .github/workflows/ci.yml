@@ -67,6 +67,15 @@ jobs:
           - runs_on: ubuntu-24.04-arm
             arch_name: arm64
             setup_racket_arch: arm64
+          - runs_on: macos-13
+            arch_name: x64-macos
+            setup_racket_arch: x64
+          - runs_on: macos-14
+            arch_name: arm64-macos-14
+            setup_racket_arch: arm64
+          - runs_on: macos-15
+            arch_name: arm64-macos-15
+            setup_racket_arch: arm64
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
@@ -305,3 +314,70 @@ jobs:
             --source-build-commit 657a006747c199241b2569b56e07f26585eb0437 \
             --source-build-target base \
             --source-build-jobs "$(nproc)"
+
+  macos-e2e:
+    name: "macOS E2E (${{ matrix.runner }} / ${{ matrix.installer_format }})"
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # tgz installer path (preferred) — all macOS versions/archs
+          - runner: macos-13       # Intel x86_64
+            installer_format: tgz
+            setup_racket_arch: x64
+          - runner: macos-14       # Apple Silicon arm64
+            installer_format: tgz
+            setup_racket_arch: arm64
+          - runner: macos-15       # Apple Silicon arm64
+            installer_format: tgz
+            setup_racket_arch: arm64
+          # dmg installer path (fallback) — test on one Intel + one ARM
+          - runner: macos-13       # Intel x86_64
+            installer_format: dmg
+            setup_racket_arch: x64
+          - runner: macos-14       # Apple Silicon arm64
+            installer_format: dmg
+            setup_racket_arch: arm64
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Racket
+        uses: Bogdanp/setup-racket@v1.14
+        with:
+          architecture: ${{ matrix.setup_racket_arch }}
+          distribution: full
+          variant: CS
+          version: stable
+      - name: Build
+        shell: bash
+        run: raco make libexec/rackup-core.rkt libexec/rackup/*.rkt
+      - name: "E2E install stable (${{ matrix.installer_format }})"
+        shell: bash
+        run: |
+          export RACKUP_HOME="$(mktemp -d)/rackup-e2e"
+          bin/rackup install stable --set-default --installer-ext "${{ matrix.installer_format }}"
+          bin/rackup list
+          bin/rackup doctor
+          "$RACKUP_HOME/shims/racket" -e '(displayln "hello from rackup")'
+          bin/rackup remove "$(bin/rackup list --ids | head -1)"
+
+  macos-e2e-bootstrap:
+    name: "macOS E2E Bootstrap (${{ matrix.runner }})"
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-13       # Intel x86_64
+          - runner: macos-14       # Apple Silicon arm64
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bootstrap install (no system racket)
+        shell: bash
+        run: |
+          export RACKUP_HOME="$(mktemp -d)/rackup-bootstrap"
+          sh scripts/install.sh -y --from-local . --prefix "$RACKUP_HOME"
+          "$RACKUP_HOME/bin/rackup" install stable --set-default
+          "$RACKUP_HOME/shims/racket" -e '(displayln "bootstrap ok")'

@@ -25,6 +25,7 @@
          parse-legacy-installers-index-html
          parse-plt-version-page-html
          select-installer-filename
+         select-installer-filename/by-ext
          select-legacy-installer-filename
          select-plt-generated-page-url
          plt-generated-page-url->installer-filename
@@ -372,7 +373,7 @@
                                          #:distribution distribution*
                                          #:arch arch
                                          #:platform platform
-                                         #:exts '("sh" "tgz")
+                                         #:exts preferred-exts
                                          #:allow-version-prefix? #t))
      (release-request-hash requested-spec
                            resolved-version
@@ -576,7 +577,8 @@
                                  #:variant [variant-override #f]
                                  #:distribution [distribution 'full]
                                  #:arch [arch (normalized-host-arch)]
-                                 #:snapshot-site [snapshot-site-opt 'auto])
+                                 #:snapshot-site [snapshot-site-opt 'auto]
+                                 #:installer-ext [installer-ext-override #f])
   (define spec*
     (if (string? spec)
         (parse-install-spec spec)
@@ -584,7 +586,14 @@
   (define kind (hash-ref spec* 'kind))
   (define distribution* (parse-distribution distribution))
   (define requested-spec (hash-ref spec* 'input ""))
-  (define platform "linux")
+  (define platform (host-platform-token))
+  (define preferred-exts
+    (if installer-ext-override
+        (list installer-ext-override)
+        (match platform
+          ["macosx"  '("tgz" "dmg")]
+          ["linux"   '("sh" "tgz")]
+          [_ (rackup-error "no installer extension preferences for platform: ~a" platform)])))
   (define (variant-for version)
     (define legacy-plt? (version-maybe-plt-scheme? version))
     (define v
@@ -638,7 +647,7 @@
                                          #:distribution distribution*
                                          #:arch arch
                                          #:platform platform
-                                         #:exts '("sh" "tgz")
+                                         #:exts preferred-exts
                                          #:allow-version-prefix? allow-prefix?))
      (define filename
        (with-handlers ([exn:fail? (lambda (e)
@@ -704,7 +713,7 @@
                                            #:distribution distribution*
                                            #:arch arch
                                            #:platform platform
-                                           #:exts '("sh" "tgz")))
+                                           #:exts preferred-exts))
      (hash 'kind
            'snapshot
            'requested-spec

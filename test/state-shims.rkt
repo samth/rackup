@@ -1023,7 +1023,7 @@
                         "#!/usr/bin/env bash\necho tgz-runtime\n")
      (file-or-directory-permissions (build-path archive-root "racket" "bin" "racket") #o755)
      (check-true (system* tar-exe "-czf" archive "-C" archive-root "."))
-     (run-linux-tgz-installer! archive dest)
+     (run-tgz-installer! archive dest)
      (check-true (directory-exists? (build-path dest "racket" "bin")))
      (check-true (file-exists? (build-path dest "racket" "bin" "racket")))))
 

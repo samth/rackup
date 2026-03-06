@@ -88,18 +88,54 @@
 (define (tar-exe)
   (or (find-executable-path "tar") (string->path "/bin/tar")))
 
-(define (run-linux-tgz-installer! installer-file install-root)
+(define (run-tgz-installer! installer-file install-root)
   (define archive (path->complete-path installer-file))
   (define dest (path->complete-path install-root))
   (displayln (format "Extracting hidden runtime archive into ~a" (path->string dest)))
   (make-directory* dest)
   (system*/check 'hidden-runtime-tgz-installer (tar-exe) "-xzf" archive "-C" dest))
 
+(define (run-macos-dmg-installer! installer-file install-root)
+  (define dmg (path->complete-path installer-file))
+  (define dest (path->complete-path install-root))
+  (define mount-point (make-temporary-file "rackup-dmg-~a" 'directory))
+  (displayln (format "Mounting DMG and extracting hidden runtime into ~a" (path->string dest)))
+  (dynamic-wind
+   (lambda ()
+     (system*/check 'hdiutil-attach
+                    "hdiutil" "attach"
+                    "-nobrowse" "-noverify" "-noautoopen"
+                    "-mountpoint" (path->string* mount-point)
+                    (path->string* dmg)))
+   (lambda ()
+     (make-directory* dest)
+     ;; Racket .dmg files contain a top-level directory like "Racket v9.1/"
+     ;; with the standard bin/, lib/, share/ layout inside.
+     (define top-dirs
+       (for/list ([p (directory-list mount-point #:build? #t)]
+                  #:when (directory-exists? p))
+         p))
+     (define src-dir
+       (cond
+         [(and (= (length top-dirs) 1)
+               (directory-exists? (build-path (car top-dirs) "bin")))
+          (car top-dirs)]
+         [(directory-exists? (build-path mount-point "bin"))
+          mount-point]
+         [(pair? top-dirs) (car top-dirs)]
+         [else mount-point]))
+     (copy-directory/files src-dir dest #:keep-modify-seconds? #t))
+   (lambda ()
+     (system* "hdiutil" "detach" (path->string* mount-point) "-quiet")
+     (when (directory-exists? mount-point)
+       (delete-directory mount-point)))))
+
 (define (installer-extension p)
   (define low (string-downcase (path->string* p)))
   (cond
     [(regexp-match? #px"[.]sh$" low) "sh"]
     [(regexp-match? #px"[.]tgz$" low) "tgz"]
+    [(regexp-match? #px"[.]dmg$" low) "dmg"]
     [else #f]))
 
 (define (detect-bin-dir install-root)
@@ -205,7 +241,7 @@
                 'arch
                 (normalized-host-arch)
                 'platform
-                "linux"))
+                (host-platform-token)))
         (define real-bin
           (with-handlers ([exn:fail? (lambda (_) (build-path (rackup-runtime-current-link) "bin"))])
             (resolve-path (build-path (rackup-runtime-current-link) "bin"))))
@@ -320,7 +356,9 @@
                       [(equal? installer-ext "sh")
                        (run-linux-installer! installer-file install-root)]
                       [(equal? installer-ext "tgz")
-                       (run-linux-tgz-installer! installer-file install-root)]
+                       (run-tgz-installer! installer-file install-root)]
+                      [(equal? installer-ext "dmg")
+                       (run-macos-dmg-installer! installer-file install-root)]
                       [else
                        (rackup-error "unsupported hidden runtime installer format: ~a"
                                      (or installer-ext "unknown"))])

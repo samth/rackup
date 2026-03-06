@@ -224,6 +224,19 @@ rackup_fetch_text() {
   rm -f "$tmp"
 }
 
+rackup_host_platform() {
+  case "$(uname -s 2>/dev/null)" in
+    Darwin) echo "macosx" ;;
+    Linux)  echo "linux" ;;
+    # TODO: BSD (FreeBSD, OpenBSD, NetBSD) also uses sh/tgz installers like Linux.
+    # When BSD support is added, decide whether to return "linux" (shared installer
+    # mechanics) or a distinct token like "freebsd" (matching Racket download filenames).
+    *)
+      rackup_fail "unsupported platform: $(uname -s)"
+      ;;
+  esac
+}
+
 rackup_normalized_arch() {
   m="$(uname -m 2>/dev/null || echo unknown)"
   case "$m" in
@@ -247,16 +260,31 @@ rackup_lookup_stable_version_shell() {
 rackup_select_hidden_runtime_filename() {
   version="$1"
   arch="$2"
+  host_platform="$(rackup_host_platform)"
   table_url="https://download.racket-lang.org/installers/$version/table.rktd"
   table="$(rackup_fetch_text "$table_url")" || rackup_fail "failed to fetch $table_url"
 
   # Extract candidate installers from table.rktd conservatively.
-  candidates="$(printf '%s\n' "$table" | grep -Eo 'racket(-minimal)?-[^"[:space:]]+\.(sh|tgz)' | sort -u || true)"
+  # On Linux: look for .sh and .tgz; on macOS: look for .tgz and .dmg
+  case "$host_platform" in
+    macosx)
+      candidates="$(printf '%s\n' "$table" | grep -Eo 'racket(-minimal)?-[^"[:space:]]+\.(tgz|dmg)' | sort -u || true)"
+      ;;
+    *)
+      candidates="$(printf '%s\n' "$table" | grep -Eo 'racket(-minimal)?-[^"[:space:]]+\.(sh|tgz)' | sort -u || true)"
+      ;;
+  esac
   [ -n "$candidates" ] || rackup_fail "failed to parse installer candidates from $table_url"
+
+  # Set extension preference order based on platform
+  case "$host_platform" in
+    macosx)  want_exts="tgz dmg" ;;
+    *)       want_exts="sh tgz" ;;
+  esac
 
   found=""
   for want_variant in cs bc; do
-    for want_ext in sh tgz; do
+    for want_ext in $want_exts; do
       for f in $candidates; do
         case "$f" in
           racket-minimal-*."$want_ext") ;;
@@ -291,10 +319,23 @@ rackup_select_hidden_runtime_filename() {
         esac
         [ "$variant" = "$want_variant" ] || continue
 
-        case "$platform_token" in
-          linux|linux-*)
+        case "$host_platform" in
+          linux)
             case "$platform_token" in
-              *natipkg*|*pkg-build*) continue ;;
+              linux|linux-*)
+                case "$platform_token" in
+                  *natipkg*|*pkg-build*) continue ;;
+                esac
+                ;;
+              *)
+                continue
+                ;;
+            esac
+            ;;
+          macosx)
+            case "$platform_token" in
+              macosx|macosx-*) ;;
+              *) continue ;;
             esac
             ;;
           *)
@@ -308,7 +349,7 @@ rackup_select_hidden_runtime_filename() {
     done
   done
 
-  [ -n "$found" ] || rackup_fail "no matching hidden runtime installer found for stable=$version arch=$arch"
+  [ -n "$found" ] || rackup_fail "no matching hidden runtime installer found for stable=$version arch=$arch platform=$host_platform"
   printf '%s\n' "$found"
 }
 
@@ -381,7 +422,7 @@ rackup_hidden_runtime_install_if_missing() {
   runtime_variant="$(rackup_runtime_variant_from_filename "$filename")"
   runtime_ext="${filename##*.}"
   installer_url="https://download.racket-lang.org/installers/$stable_ver/$filename"
-  runtime_id="runtime-$stable_ver-$runtime_variant-$arch-linux-minimal"
+  runtime_id="runtime-$stable_ver-$runtime_variant-$arch-$(rackup_host_platform)-minimal"
   version_dir="$versions_dir/$runtime_id"
   tmp_version_dir="$versions_dir/.${runtime_id}.tmp.$$"
   install_root="$tmp_version_dir/install"
@@ -424,6 +465,42 @@ rackup_hidden_runtime_install_if_missing() {
         rm -rf "$tmp_version_dir"
         rackup_fail "hidden runtime archive extraction failed"
       fi
+      ;;
+    dmg)
+      dmg_mount="$(mktemp -d "${TMPDIR:-/tmp}/rackup-dmg.XXXXXX")"
+      if ! hdiutil attach -nobrowse -noverify -noautoopen -mountpoint "$dmg_mount" "$installer_cache" >/dev/null 2>&1; then
+        rm -rf "$dmg_mount" "$tmp_version_dir"
+        rackup_fail "failed to mount DMG installer"
+      fi
+      mkdir -p "$install_root"
+      # Racket .dmg files contain a top-level directory (e.g. "Racket v9.1/")
+      # with the standard bin/, lib/, share/ layout inside.
+      src_dir=""
+      for d in "$dmg_mount"/*/; do
+        if [ -d "${d}bin" ]; then
+          src_dir="$d"
+          break
+        fi
+      done
+      if [ -z "$src_dir" ]; then
+        if [ -d "$dmg_mount/bin" ]; then
+          src_dir="$dmg_mount/"
+        else
+          # Fall back to first directory
+          for d in "$dmg_mount"/*/; do
+            src_dir="$d"
+            break
+          done
+        fi
+      fi
+      if [ -z "$src_dir" ]; then
+        hdiutil detach "$dmg_mount" -quiet 2>/dev/null || true
+        rm -rf "$dmg_mount" "$tmp_version_dir"
+        rackup_fail "could not find Racket installation inside DMG"
+      fi
+      cp -R "$src_dir"/* "$install_root/" 2>/dev/null || cp -R "$src_dir". "$install_root/" 2>/dev/null || true
+      hdiutil detach "$dmg_mount" -quiet 2>/dev/null || true
+      rm -rf "$dmg_mount"
       ;;
     *)
       rm -rf "$tmp_version_dir"

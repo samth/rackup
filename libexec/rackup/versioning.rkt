@@ -15,7 +15,7 @@
          canonical-toolchain-id
          sanitize-id-part
          normalized-host-arch
-         linux-platform-token
+         host-platform-token
          arch-token->normalized
          variant->string
          distribution->string)
@@ -143,8 +143,14 @@
     [(regexp-match? #px"ppc|powerpc" m) "ppc"]
     [else m*]))
 
-(define (linux-platform-token)
-  "linux")
+;; Returns the platform token for the current host OS.
+;; TODO: BSD also reports 'unix via (system-type 'os) — if BSD support is added,
+;; use (system-type) or uname to distinguish Linux from FreeBSD/OpenBSD/etc.
+(define (host-platform-token)
+  (case (system-type 'os)
+    [(macosx) "macosx"]
+    [(unix)   "linux"]
+    [else (rackup-error "unsupported platform: ~a" (system-type 'os))]))
 
 (define (arch-token->normalized token)
   (cond

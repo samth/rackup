@@ -22,7 +22,8 @@
          link-toolchain!
          remove-toolchain!
          run-linux-installer!
-         run-linux-tgz-installer!
+         run-tgz-installer!
+         run-macos-dmg-installer!
          enumerate-toolchain-executables
          doctor-report)
 
@@ -173,7 +174,7 @@
     (unless (string-blank? details)
       (eprintf "~a\n" (truncate-lines details)))
     (delete-log!)
-    (rackup-error "linux-installer failed: ~a (~a)"
+    (rackup-error "installer failed: ~a (~a)"
                   (path->string* installer)
                   (if legacy-kind
                       "legacy interactive mode"
@@ -183,18 +184,54 @@
 (define (tar-exe)
   (or (find-executable-path "tar") (string->path "/bin/tar")))
 
-(define (run-linux-tgz-installer! installer-file install-root)
+(define (run-tgz-installer! installer-file install-root)
   (define archive (path->complete-path installer-file))
   (define dest (path->complete-path install-root))
   (install-verbose "Extracting archive into ~a" (path->string dest))
   (make-directory* dest)
   (system*/check 'linux-tgz-installer (tar-exe) "-xzf" archive "-C" dest))
 
+(define (run-macos-dmg-installer! installer-file install-root)
+  (define dmg (path->complete-path installer-file))
+  (define dest (path->complete-path install-root))
+  (define mount-point (make-temporary-file "rackup-dmg-~a" 'directory))
+  (install-verbose "Mounting DMG and extracting into ~a" (path->string dest))
+  (dynamic-wind
+   (lambda ()
+     (system*/check 'hdiutil-attach
+                    "hdiutil" "attach"
+                    "-nobrowse" "-noverify" "-noautoopen"
+                    "-mountpoint" (path->string* mount-point)
+                    (path->string* dmg)))
+   (lambda ()
+     (make-directory* dest)
+     ;; Racket .dmg files contain a top-level directory like "Racket v9.1/"
+     ;; with the standard bin/, lib/, share/ layout inside.
+     (define top-dirs
+       (for/list ([p (directory-list mount-point #:build? #t)]
+                  #:when (directory-exists? p))
+         p))
+     (define src-dir
+       (cond
+         [(and (= (length top-dirs) 1)
+               (directory-exists? (build-path (car top-dirs) "bin")))
+          (car top-dirs)]
+         [(directory-exists? (build-path mount-point "bin"))
+          mount-point]
+         [(pair? top-dirs) (car top-dirs)]
+         [else mount-point]))
+     (copy-directory/files src-dir dest #:keep-modify-seconds? #t))
+   (lambda ()
+     (system* "hdiutil" "detach" (path->string* mount-point) "-quiet")
+     (when (directory-exists? mount-point)
+       (delete-directory mount-point)))))
+
 (define (installer-filename-extension s)
   (define low (string-downcase s))
   (cond
     [(regexp-match? #px"[.]sh$" low) "sh"]
     [(regexp-match? #px"[.]tgz$" low) "tgz"]
+    [(regexp-match? #px"[.]dmg$" low) "dmg"]
     [else #f]))
 
 (define (detect-bin-dir install-root)
@@ -611,6 +648,7 @@
   (define force? #f)
   (define no-cache? #f)
   (define verbosity 'normal)
+  (define installer-ext #f)
   (command-line #:program "rackup install"
                 #:argv opts
                 #:once-each [("--variant") v "VM variant" (set! variant v)]
@@ -620,6 +658,7 @@
                 [("--set-default") "Set installed toolchain as default" (set! set-default? #t)]
                 [("--force") "Reinstall existing canonical toolchain" (set! force? #t)]
                 [("--no-cache") "Redownload installer instead of using cache" (set! no-cache? #t)]
+                [("--installer-ext") e "Force installer extension (sh, tgz, dmg)" (set! installer-ext e)]
                 #:once-any
                 [("--quiet") "Show minimal install output" (set! verbosity 'quiet)]
                 [("--verbose") "Show detailed installer URL/path output" (set! verbosity 'verbose)]
@@ -640,7 +679,9 @@
         'no-cache?
         no-cache?
         'verbosity
-        verbosity))
+        verbosity
+        'installer-ext
+        installer-ext))
 
 (define (parse-link-options opts)
   (define set-default? #f)
@@ -660,11 +701,7 @@
   (string-append "local-" (sanitize-id-part name)))
 
 (define (local-toolchain-meta id name layout real-bin-dir executables env-vars version* variant*)
-  (define platform-raw (system-type 'os))
-  (define platform
-    (if (symbol? platform-raw)
-        (symbol->string platform-raw)
-        (format "~a" platform-raw)))
+  (define platform (host-platform-token))
   (hash 'id
         id
         'kind
@@ -789,7 +826,8 @@
                              #:variant (hash-ref parsed-opts 'variant)
                              #:distribution (hash-ref parsed-opts 'distribution)
                              #:arch (hash-ref parsed-opts 'arch)
-                             #:snapshot-site (hash-ref parsed-opts 'snapshot-site)))
+                             #:snapshot-site (hash-ref parsed-opts 'snapshot-site)
+                             #:installer-ext (hash-ref parsed-opts 'installer-ext #f)))
   (define id (canonical-id-for-request request))
   (define tc-dir (rackup-toolchain-dir id))
   (define install-root (rackup-toolchain-install-dir id))
@@ -830,9 +868,11 @@
             (run-linux-installer! installer-path
                                   install-root
                                   #:legacy-install-kind (hash-ref request 'legacy-install-kind #f))]
-           [(equal? installer-ext "tgz") (run-linux-tgz-installer! installer-path install-root)]
+           [(equal? installer-ext "tgz") (run-tgz-installer! installer-path install-root)]
+           [(equal? installer-ext "dmg") (run-macos-dmg-installer! installer-path install-root)]
            [else
-            (rackup-error "unsupported installer format for Linux: ~a"
+            (rackup-error "unsupported installer format for ~a: ~a"
+                          (host-platform-token)
                           (or installer-ext "unknown"))])
          (define real-bin-dir (detect-bin-dir install-root))
          (maybe-modernize-legacy-archsys! real-bin-dir)

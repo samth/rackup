@@ -348,4 +348,89 @@
    #px"PLT Scheme v102|historical release range"
    (lambda () (resolve-install-request/runtime "102" #:arch "i386")))
   (check-exn exn:fail?
-             (lambda () (resolve-install-request/runtime "203" #:arch "i386"))))
+             (lambda () (resolve-install-request/runtime "203" #:arch "i386")))
+
+  ;; Extension preference: select-installer-filename/by-ext with macOS extensions
+  (define fake-table-macos
+    (hash 'a "racket-9.1-aarch64-macosx-cs.tgz"
+          'b "racket-9.1-aarch64-macosx-cs.dmg"
+          'c "racket-minimal-9.1-aarch64-macosx-cs.tgz"
+          'd "racket-minimal-9.1-aarch64-macosx-cs.dmg"
+          'e "racket-9.1-x86_64-macosx-cs.tgz"
+          'f "racket-9.1-x86_64-macosx-cs.dmg"))
+
+  ;; On macOS, tgz is preferred over dmg
+  (check-equal? (select-installer-filename fake-table-macos
+                                           #:version-token "9.1"
+                                           #:variant 'cs
+                                           #:distribution 'full
+                                           #:arch "aarch64"
+                                           #:platform "macosx"
+                                           #:ext "tgz")
+                "racket-9.1-aarch64-macosx-cs.tgz")
+
+  ;; dmg fallback works
+  (check-equal? (select-installer-filename fake-table-macos
+                                           #:version-token "9.1"
+                                           #:variant 'cs
+                                           #:distribution 'full
+                                           #:arch "aarch64"
+                                           #:platform "macosx"
+                                           #:ext "dmg")
+                "racket-9.1-aarch64-macosx-cs.dmg")
+
+  ;; select-installer-filename/by-ext prefers tgz over dmg for macOS
+  (check-equal? (select-installer-filename/by-ext fake-table-macos
+                                                   #:version-token "9.1"
+                                                   #:variant 'cs
+                                                   #:distribution 'full
+                                                   #:arch "aarch64"
+                                                   #:platform "macosx"
+                                                   #:exts '("tgz" "dmg"))
+                "racket-9.1-aarch64-macosx-cs.tgz")
+
+  ;; dmg-only table falls back correctly
+  (define fake-table-macos-dmg-only
+    (hash 'a "racket-9.1-aarch64-macosx-cs.dmg"))
+  (check-equal? (select-installer-filename/by-ext fake-table-macos-dmg-only
+                                                   #:version-token "9.1"
+                                                   #:variant 'cs
+                                                   #:distribution 'full
+                                                   #:arch "aarch64"
+                                                   #:platform "macosx"
+                                                   #:exts '("tgz" "dmg"))
+                "racket-9.1-aarch64-macosx-cs.dmg")
+
+  ;; macOS platform should not select Linux sh installers
+  (define fake-table-cross-platform
+    (hash 'a "racket-9.1-x86_64-linux-cs.sh"
+          'b "racket-9.1-x86_64-macosx-cs.tgz"))
+  (check-exn exn:fail?
+             (lambda ()
+               (select-installer-filename fake-table-cross-platform
+                                          #:version-token "9.1"
+                                          #:variant 'cs
+                                          #:distribution 'full
+                                          #:arch "x86_64"
+                                          #:platform "macosx"
+                                          #:ext "sh")))
+
+  ;; Linux platform should not select macOS dmg installers
+  (check-exn exn:fail?
+             (lambda ()
+               (select-installer-filename fake-table-cross-platform
+                                          #:version-token "9.1"
+                                          #:variant 'cs
+                                          #:distribution 'full
+                                          #:arch "x86_64"
+                                          #:platform "linux"
+                                          #:ext "dmg")))
+
+  ;; Parsing macOS dmg filenames
+  (define p-macos-dmg (parse-installer-filename "racket-9.1-aarch64-macosx-cs.dmg"))
+  (check-equal? (hash-ref p-macos-dmg 'arch) "aarch64")
+  (check-equal? (hash-ref p-macos-dmg 'platform) "macosx")
+  (check-equal? (hash-ref p-macos-dmg 'platform-family) "macosx")
+  (check-equal? (hash-ref p-macos-dmg 'variant) 'cs)
+  (check-equal? (hash-ref p-macos-dmg 'ext) "dmg")
+  (check-equal? (hash-ref p-macos-dmg 'distribution) 'full)))
