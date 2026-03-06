@@ -784,12 +784,21 @@
   (ensure-rackup-layout!)
   (ensure-index!)
   (define parsed-opts (parse-install-options opts))
+  (define requested-distribution (hash-ref parsed-opts 'distribution))
   (define request
     (resolve-install-request spec
                              #:variant (hash-ref parsed-opts 'variant)
-                             #:distribution (hash-ref parsed-opts 'distribution)
+                             #:distribution requested-distribution
                              #:arch (hash-ref parsed-opts 'arch)
                              #:snapshot-site (hash-ref parsed-opts 'snapshot-site)))
+  (when (distribution-fallback? (hash-ref request 'distribution)
+                               (if (symbol? requested-distribution)
+                                   requested-distribution
+                                   (string->symbol requested-distribution)))
+    (install-warn "No ~a installer available for ~a on ~a; using minimal instead."
+                  requested-distribution
+                  (hash-ref request 'arch)
+                  (hash-ref request 'platform)))
   (define id (canonical-id-for-request request))
   (define tc-dir (rackup-toolchain-dir id))
   (define install-root (rackup-toolchain-install-dir id))
