@@ -29,6 +29,9 @@ jobs:
         run: |
           xargs shellcheck --severity=warning < /tmp/shell-scripts.txt
 
+      - name: Install shfmt
+        uses: mfinelli/setup-shfmt@v2
+
       - name: shfmt (formatting check)
         shell: bash
         run: |
