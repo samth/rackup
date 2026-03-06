@@ -35,7 +35,7 @@
   (usage-line "install <spec> [flags]" "Install a Racket toolchain (release, pre-release, snapshot).")
   (usage-line "link <name> <path> [flags]"
               "Link an in-place/local Racket build as a managed toolchain.")
-  (usage-line "list" "List installed toolchains (shows default/active tags).")
+  (usage-line "list [--ids]" "List installed toolchains (shows default/active tags).")
   (usage-line "default [id|status|set <toolchain>|clear|<toolchain>|--unset]"
               "Show, set, or clear the global default toolchain.")
   (usage-line "current [id|source|line]"
@@ -141,9 +141,11 @@
      (displayln "  rackup link dev ~/src/racket")
      #t]
     [(list)
-     (help-usage "list")
+     (help-usage "list [--ids]")
      (displayln "")
      (displayln "List installed toolchains and show default/active tags.")
+     (displayln "")
+     (help-option-line "--ids" "Print only toolchain IDs, one per line (for scripting).")
      #t]
     [(default)
      (help-usage "default [id|status|set <toolchain>|clear|<toolchain>|--unset]")
@@ -446,10 +448,19 @@
        (rackup-error "toolchain not installed: ~a" spec))
      (install-toolchain! spec '())]))
 
-(define (cmd-list)
+(define (cmd-list rest)
+  (define ids-only? #f)
+  (let loop ([args rest])
+    (match args
+      ['() (void)]
+      [(list "--ids" more ...) (set! ids-only? #t) (loop more)]
+      [(list flag _ ...) (rackup-error "unknown list flag: ~a" flag)]))
   (ensure-index!)
   (define idx (load-index))
   (define ids (installed-toolchain-ids idx))
+  (when ids-only?
+    (for ([id ids]) (displayln id))
+    (exit 0))
   (define default-id (get-default-toolchain idx))
   (define active-id (resolve-active-toolchain-id))
   (define env-id (getenv "RACKUP_TOOLCHAIN"))
@@ -1041,7 +1052,7 @@
          [(list "available" rest ...) (cmd-available rest)]
          [(list "install" rest ...) (cmd-install rest)]
          [(list "link" rest ...) (cmd-link rest)]
-         [(list "list") (cmd-list)]
+         [(list "list" rest ...) (cmd-list rest)]
          [(list "default" rest ...) (cmd-default rest)]
          [(list "current" rest ...) (cmd-current rest)]
          [(list "prompt" rest ...) (cmd-prompt rest)]
@@ -1050,13 +1061,13 @@
          [(list "shell" rest ...) (cmd-shell rest)]
          [(list "run" rest ...) (cmd-run rest)]
          [(list "remove" rest ...) (cmd-remove rest)]
-         [(list "reshim") (cmd-reshim)]
+         [(list "reshim" _ ...) (cmd-reshim)]
          [(list "init" rest ...) (cmd-init rest)]
          [(list "uninstall" rest ...) (cmd-uninstall rest)]
          [(list "self-upgrade" rest ...) (cmd-self-upgrade rest)]
          [(list "runtime" rest ...) (cmd-runtime rest)]
-         [(list "doctor") (cmd-doctor)]
-         [(list "version") (cmd-version)]
+         [(list "doctor" _ ...) (cmd-doctor)]
+         [(list "version" _ ...) (cmd-version)]
          [_
           (usage)
           (exit 2)])])))
