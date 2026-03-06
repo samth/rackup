@@ -43,6 +43,10 @@
         "bin"
         "libexec"
         "scripts/copy-filtered-tree.sh")
+   ;; Build demodularized machine-independent .zo before creating tarball
+   (run (build-path root-dir "scripts" "build-demod.sh")
+        (build-path src-stage "libexec"))
+
    (run (find-executable-path "tar")
         "-C"
         tmp-stage

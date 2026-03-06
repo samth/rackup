@@ -5,6 +5,10 @@ set -eu
 SELF_DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
 LIBEXEC_DIR="$SELF_DIR/../libexec"
 CORE="$LIBEXEC_DIR/rackup-core.rkt"
+DEMOD_ZO="$LIBEXEC_DIR/compiled/rackup-core_rkt_merged.zo"
+if [ -f "$DEMOD_ZO" ]; then
+  CORE="$DEMOD_ZO"
+fi
 BOOTSTRAP_SH="$LIBEXEC_DIR/rackup-bootstrap.sh"
 
 if [ ! -r "$BOOTSTRAP_SH" ]; then
@@ -62,7 +66,9 @@ done
 unset PLTHOME PLTCOLLECTS PLTADDONDIR PLTCOMPILEDROOTS PLTUSERHOME RACKET_XPATCH PLT_COMPILED_FILE_CHECK
 
 rackup_run_core() {
-  if [ "$USE_Y" -eq 1 ]; then
+  if [ "$CORE" = "$DEMOD_ZO" ]; then
+    "$RACKET_EXE" -U -A "$RUNTIME_ADDON_DIR" "$CORE" "$@"
+  elif [ "$USE_Y" -eq 1 ]; then
     "$RACKET_EXE" -y -U -A "$RUNTIME_ADDON_DIR" "$CORE" "$@"
   else
     "$RACKET_EXE" -U -A "$RUNTIME_ADDON_DIR" "$CORE" "$@"
@@ -78,7 +84,7 @@ if [ "${1:-}" = "uninstall" ]; then
   }
   trap cleanup_uninstall_request EXIT INT TERM HUP
   export RACKUP_UNINSTALL_REQUEST_FILE="$REQUEST_FILE"
-  "$RACKET_EXE" -y -U -A "$RUNTIME_ADDON_DIR" "$CORE" "$@"
+  rackup_run_core "$@"
   status=$?
   if [ "$status" -ne 0 ]; then
     exit "$status"
@@ -109,7 +115,9 @@ if [ "${1:-}" = "uninstall" ]; then
   exit 0
 fi
 
-if [ "$USE_Y" -eq 1 ]; then
+if [ "$CORE" = "$DEMOD_ZO" ]; then
+  exec "$RACKET_EXE" -U -A "$RUNTIME_ADDON_DIR" "$CORE" "$@"
+elif [ "$USE_Y" -eq 1 ]; then
   exec "$RACKET_EXE" -y -U -A "$RUNTIME_ADDON_DIR" "$CORE" "$@"
 else
   exec "$RACKET_EXE" -U -A "$RUNTIME_ADDON_DIR" "$CORE" "$@"

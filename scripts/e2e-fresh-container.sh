@@ -185,9 +185,13 @@ current_shim_version() {
 }
 
 assert_rackup_self_compiled() {
+  local merged_zo="$RACKUP_HOME/libexec/compiled/rackup-core_rkt_merged.zo"
   local core_zo="$RACKUP_HOME/libexec/compiled/rackup-core_rkt.zo"
   local main_zo="$RACKUP_HOME/libexec/rackup/compiled/main_rkt.zo"
-  [[ -f "$core_zo" ]] || fail "expected rackup core bytecode at $core_zo"
+  if [[ -f "$merged_zo" ]]; then
+    return 0
+  fi
+  [[ -f "$core_zo" ]] || fail "expected rackup bytecode at $core_zo or $merged_zo"
   [[ -f "$main_zo" ]] || fail "expected rackup main bytecode at $main_zo"
 }
 

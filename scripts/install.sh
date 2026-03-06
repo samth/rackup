@@ -204,8 +204,8 @@ copy_filtered_tree() {
   (
     cd "$src_dir"
     find "$@" \
-      \( -type d \( -name .git -o -name compiled \) -prune \) -o \
-      \( -type f \( -name '*.zo' -o -name '*.dep' \) -prune \) -o \
+      \( -type d -name .git -prune \) -o \
+      \( -type f \( -name '*.zo' -o -name '*.dep' \) ! -name 'rackup-core_rkt_merged.zo' -prune \) -o \
       \( -type f -o -type l \) -print0
   ) | tar -C "$src_dir" --null -T - -cf - | tar -C "$dest_dir" -xf -
 }
