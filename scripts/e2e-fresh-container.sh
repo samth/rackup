@@ -419,6 +419,7 @@ fi
 IFS=',' read -r -a SPECS <<< "$SPECS_CSV"
 declare -a INSTALLED_IDS=()
 declare -a INSTALLED_SPECS=()
+# shellcheck disable=SC2034  # populated for debug/future use
 declare -A SPEC_TO_ID=()
 declare -A SPEC_TO_PREFIX=()
 
@@ -440,6 +441,7 @@ for spec in "${SPECS[@]}"; do
   id="$(current_toolchain_id)"
   INSTALLED_IDS+=("$id")
   INSTALLED_SPECS+=("$spec")
+  # shellcheck disable=SC2034
   SPEC_TO_ID["$spec"]="$id"
   SPEC_TO_PREFIX["$spec"]="$(version_prefix_for_spec "$spec")"
 
@@ -561,6 +563,7 @@ shell_helper_function_test zsh "$shell_test_id" "$shell_test_prefix"
 echo
 echo "== Missing toolchain switch fails fast without a tty =="
 missing_switch_err="$(
+  # shellcheck disable=SC2016  # single quotes intentional: code runs in subshell
   env -i HOME="$HOME" RACKUP_HOME="$RACKUP_HOME" PATH="/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin" \
     bash -lc '
       set -euo pipefail

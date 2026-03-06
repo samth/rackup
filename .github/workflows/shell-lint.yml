@@ -1,0 +1,31 @@
+name: Shell Lint
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  shellcheck:
+    name: ShellCheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Collect shell scripts
+        id: collect
+        shell: bash
+        run: |
+          # Find all .sh files plus known shell scripts without extensions
+          (
+            find . -name '*.sh' -type f
+            echo ./bin/rackup
+          ) | sort -u > /tmp/shell-scripts.txt
+          echo "Found shell scripts:"
+          cat /tmp/shell-scripts.txt
+
+      - name: Run ShellCheck
+        shell: bash
+        run: |
+          xargs shellcheck --severity=warning < /tmp/shell-scripts.txt

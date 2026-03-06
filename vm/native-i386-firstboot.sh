@@ -164,14 +164,19 @@ fi
 
 run_case shim mzscheme
 shim_status=$LAST_STATUS
+# shellcheck disable=SC2016
 run_case_sh shim-no-aslr 'exec setarch i386 -R "$@"' mzscheme
 shim_no_aslr_status=$LAST_STATUS
 
 if [ "$MODE" = debug ]; then
   run_case direct "$REAL_BIN"
+  # shellcheck disable=SC2016  # single quotes intentional: shell code passed to run_case_sh
   run_case_sh direct-ulimit-unlimited 'ulimit -s unlimited; exec "$1"' "$REAL_BIN"
+  # shellcheck disable=SC2016
   run_case_sh direct-no-aslr 'exec setarch i386 -R "$1"' "$REAL_BIN"
+  # shellcheck disable=SC2016
   run_case_sh direct-min-env 'exec env -i HOME=/root PATH=/usr/bin:/bin PLTHOME="$2" PLTADDONDIR="$3" "$1"' "$REAL_BIN" "$PLTHOME" "$PLTADDONDIR"
+  # shellcheck disable=SC2016
   run_case_sh direct-no-aslr-min-env 'exec env -i HOME=/root PATH=/usr/bin:/bin PLTHOME="$2" PLTADDONDIR="$3" setarch i386 -R "$1"' "$REAL_BIN" "$PLTHOME" "$PLTADDONDIR"
 
   set +e
