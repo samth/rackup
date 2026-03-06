@@ -401,6 +401,34 @@ jobs:
           "$RACKUP_HOME/shims/racket" -e '(displayln "hello from rackup")'
           bin/rackup remove "$(bin/rackup list --ids | head -1)"
 
+  macos-e2e-legacy-plt-dmg:
+    name: macOS E2E (legacy PLT Scheme DMG)
+    runs-on: macos-13
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Racket
+        uses: Bogdanp/setup-racket@v1.14
+        with:
+          architecture: x64
+          distribution: full
+          variant: CS
+          version: stable
+      - name: Build
+        shell: bash
+        run: raco make libexec/rackup-core.rkt libexec/rackup/*.rkt
+      - name: Legacy PLT Scheme DMG install (4.2.5, 4.0, 350)
+        shell: bash
+        run: |
+          export RACKUP_HOME="$(mktemp -d)/rackup-legacy"
+          for ver in 4.2.5 4.0 350; do
+            echo "=== Installing PLT Scheme $ver (macOS DMG) ==="
+            bin/rackup install "$ver" --arch i386 --verbose
+            bin/rackup list
+            echo "--- Installed $ver successfully ---"
+            bin/rackup remove "$(bin/rackup list --ids | tail -1)"
+          done
+
   macos-e2e-bootstrap:
     name: "macOS E2E Bootstrap (${{ matrix.runner }})"
     runs-on: ${{ matrix.runner }}

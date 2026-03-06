@@ -288,6 +288,29 @@
                 "http://download.plt-scheme.org/bundles/4.2.5/plt/plt-4.2.5-bin-x86_64-linux-f7.sh")
   (check-equal? (hash-ref legacy-req-4.2.5 'legacy-install-kind) 'shell-unixstyle)
 
+  ;; macOS DMG installers for legacy PLT Scheme versions
+  (define legacy-req-4.2.5-mac (resolve-install-request/runtime "4.2.5" #:arch "i386" #:platform "macosx"))
+  (check-equal? (hash-ref legacy-req-4.2.5-mac 'installer-url)
+                "http://download.plt-scheme.org/bundles/4.2.5/plt/plt-4.2.5-bin-i386-osx-mac.dmg")
+  (check-equal? (hash-ref legacy-req-4.2.5-mac 'installer-filename)
+                "plt-4.2.5-bin-i386-osx-mac.dmg")
+  (check-equal? (hash-ref legacy-req-4.2.5-mac 'legacy-install-kind) 'dmg)
+  (check-equal? (hash-ref legacy-req-4.2.5-mac 'platform) "macosx")
+
+  ;; macOS DMGs available for 350+, not for older versions
+  (define legacy-req-350-mac (resolve-install-request/runtime "350" #:arch "i386" #:platform "macosx"))
+  (check-equal? (hash-ref legacy-req-350-mac 'legacy-install-kind) 'dmg)
+  (check-exn #px"does not have macOS installers"
+             (lambda () (resolve-install-request/runtime "209" #:arch "i386" #:platform "macosx")))
+
+  ;; Spot-check a few more macOS entries resolve correctly
+  (for ([ver (in-list '("4.0" "4.1" "4.2" "370" "372"))])
+    (define req (resolve-install-request/runtime ver #:arch "i386" #:platform "macosx"))
+    (check-equal? (hash-ref req 'legacy-install-kind) 'dmg
+                  (format "~a macOS should use dmg install kind" ver))
+    (check-true (regexp-match? #rx"osx-mac\\.dmg$" (hash-ref req 'installer-filename))
+                (format "~a macOS filename should end with osx-mac.dmg" ver)))
+
   (for* ([release-info (in-hash-values legacy-plt-release-info)]
          [artifact (in-list (hash-ref release-info 'artifacts null))]
          #:when (regexp-match? #px"^http://" (hash-ref artifact 'url "")))
