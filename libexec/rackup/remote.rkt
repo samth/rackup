@@ -29,7 +29,8 @@
          select-plt-generated-page-url
          plt-generated-page-url->installer-filename
          resolve-install-request
-         download-url->file)
+         download-url->file
+         distribution-fallback?)
 
 (define release-version-url "https://download.racket-lang.org/version.txt")
 (define all-versions-url "https://download.racket-lang.org/all-versions.html")
@@ -365,42 +366,68 @@
          (fetch-table-rktd base)))
      (cond
        [table
-     (define filename
-       (select-installer-filename/by-ext table
+     (define-values (filename actual-distribution)
+       (with-handlers ([exn:fail?
+                        (lambda (e)
+                          (if (eq? distribution* 'full)
+                              (values (select-installer-filename/by-ext table
+                                        #:version-token resolved-version
+                                        #:variant variant
+                                        #:distribution 'minimal
+                                        #:arch arch
+                                        #:platform platform
+                                        #:exts '("sh" "tgz")
+                                        #:allow-version-prefix? #t)
+                                      'minimal)
+                              (raise e)))])
+         (values (select-installer-filename/by-ext table
                                          #:version-token resolved-version
                                          #:variant variant
                                          #:distribution distribution*
                                          #:arch arch
                                          #:platform platform
                                          #:exts '("sh" "tgz")
-                                         #:allow-version-prefix? #t))
+                                         #:allow-version-prefix? #t)
+                 distribution*)))
      (release-request-hash requested-spec
                            resolved-version
                            variant
-                           distribution*
+                           actual-distribution
                            arch
                            platform
                            base
                            filename)]
        [else
         ;; Older Racket releases may use Apache index listings (e.g. 5.2).
-        (define legacy-result
-          (call-with-values (lambda ()
-                              (fetch-legacy-installer-filename resolved-version
-                                                               #:distribution distribution*
-                                                               #:arch arch
-                                                               #:platform platform))
-                            list))
-        (define base* (first legacy-result))
-        (define filename* (second legacy-result))
+        (define-values (base* filename* actual-distribution)
+          (with-handlers ([exn:fail?
+                           (lambda (e)
+                             (if (eq? distribution* 'full)
+                                 (let-values ([(b f)
+                                               (fetch-legacy-installer-filename resolved-version
+                                                                                #:distribution 'minimal
+                                                                                #:arch arch
+                                                                                #:platform platform)])
+                                   (values b f 'minimal))
+                                 (raise e)))])
+            (let-values ([(b f)
+                          (fetch-legacy-installer-filename resolved-version
+                                                           #:distribution distribution*
+                                                           #:arch arch
+                                                           #:platform platform)])
+              (values b f distribution*))))
         (release-request-hash requested-spec
                               resolved-version
                               variant
-                              distribution*
+                              actual-distribution
                               arch
                               platform
                               base*
                               filename*)])]))
+
+(define (distribution-fallback? actual-distribution requested-distribution)
+  (and (eq? actual-distribution 'minimal)
+       (eq? requested-distribution 'full)))
 
 (define (select-installer-filename table
                                    #:version-token version-token
@@ -631,21 +658,38 @@
            [(and (string? from-rktd) (not (equal? from-rktd "current"))) from-rktd]
            [else (best-version-token-from-table table "current")])))
      (define variant (variant-for resolved-version))
-     (define (select-pre-release token #:allow-prefix? [allow-prefix? #f])
+     (define (select-pre-release token #:distribution [dist distribution*] #:allow-prefix? [allow-prefix? #f])
        (select-installer-filename/by-ext table
                                          #:version-token token
                                          #:variant variant
-                                         #:distribution distribution*
+                                         #:distribution dist
                                          #:arch arch
                                          #:platform platform
                                          #:exts '("sh" "tgz")
                                          #:allow-version-prefix? allow-prefix?))
-     (define filename
+     (define-values (filename actual-distribution)
        (with-handlers ([exn:fail? (lambda (e)
-                                    (if (numeric-version? resolved-version)
-                                        (select-pre-release resolved-version #:allow-prefix? #t)
-                                        (raise e)))])
-         (select-pre-release "current")))
+                                    (define (try-minimal tok #:allow-prefix? [pfx? #f])
+                                      (values (select-pre-release tok #:distribution 'minimal #:allow-prefix? pfx?)
+                                              'minimal))
+                                    (cond
+                                      [(and (eq? distribution* 'full)
+                                            (numeric-version? resolved-version))
+                                       (with-handlers ([exn:fail?
+                                                        (lambda (_)
+                                                          (with-handlers ([exn:fail?
+                                                                          (lambda (_)
+                                                                            (try-minimal resolved-version #:allow-prefix? #t))])
+                                                            (try-minimal "current")))])
+                                         (values (select-pre-release resolved-version #:allow-prefix? #t)
+                                                 distribution*))]
+                                      [(eq? distribution* 'full)
+                                       (try-minimal "current")]
+                                      [(numeric-version? resolved-version)
+                                       (values (select-pre-release resolved-version #:allow-prefix? #t)
+                                               distribution*)]
+                                      [else (raise e)]))])
+         (values (select-pre-release "current") distribution*)))
      (hash 'kind
            'pre-release
            'requested-spec
@@ -657,7 +701,7 @@
            'variant
            variant
            'distribution
-           distribution*
+           actual-distribution
            'arch
            arch
            'platform
@@ -684,11 +728,21 @@
        (if variant-override
            (parse-variant variant-override)
            'cs))
-     (define picked
-       (try-resolve-snapshot-site sites-to-try
-                                  #:distribution distribution*
-                                  #:arch arch
-                                  #:variant variant))
+     (define-values (picked actual-distribution)
+       (with-handlers ([exn:fail?
+                        (lambda (e)
+                          (if (eq? distribution* 'full)
+                              (values (try-resolve-snapshot-site sites-to-try
+                                                                 #:distribution 'minimal
+                                                                 #:arch arch
+                                                                 #:variant variant)
+                                      'minimal)
+                              (raise e)))])
+         (values (try-resolve-snapshot-site sites-to-try
+                                            #:distribution distribution*
+                                            #:arch arch
+                                            #:variant variant)
+                 distribution*)))
      (define site (hash-ref picked 'site))
      (define base (snapshot-installers-base site))
      (define table (hash-ref picked 'table))
@@ -701,7 +755,7 @@
        (select-snapshot-installer-filename table
                                            version-rktd
                                            #:variant variant
-                                           #:distribution distribution*
+                                           #:distribution actual-distribution
                                            #:arch arch
                                            #:platform platform
                                            #:exts '("sh" "tgz")))
@@ -716,7 +770,7 @@
            'variant
            variant
            'distribution
-           distribution*
+           actual-distribution
            'arch
            arch
            'platform
