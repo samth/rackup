@@ -1491,6 +1491,343 @@ Examples:
               (putenv (car kv) (cdr kv))
               (putenv (car kv) "")))))))
 
+  ;; ---- Upgrade path tests ----
+  ;; Simulate a 9.0 installation, then "upgrade" by adding 9.1 alongside it.
+  ;; Verify both toolchains coexist and the default can be changed.
+  (with-temp-rackup-home
+   (lambda (tmp)
+     (ensure-index!)
+     ;; Helper to register a fake toolchain with a working shim
+     (define (register-fake-versioned-toolchain! id version spec)
+       (define install-root (rackup-toolchain-install-dir id))
+       (define real-bin (build-path install-root "bin"))
+       (make-directory* real-bin)
+       (define racket-exe (build-path real-bin "racket"))
+       (write-string-file racket-exe
+                          (format "#!/usr/bin/env bash\nprintf '~a'\n" version))
+       (file-or-directory-permissions racket-exe #o755)
+       (make-file-or-directory-link real-bin (rackup-toolchain-bin-link id))
+       (register-toolchain! id
+                            (hash 'id id
+                                  'kind 'release
+                                  'requested-spec spec
+                                  'resolved-version version
+                                  'variant 'cs
+                                  'distribution 'full
+                                  'arch "x86_64"
+                                  'platform "linux"
+                                  'snapshot-site #f
+                                  'snapshot-stamp #f
+                                  'installer-url (format "https://example.invalid/racket-~a.sh" version)
+                                  'installer-filename (format "racket-~a-x86_64-linux-cs.sh" version)
+                                  'install-root (path->string install-root)
+                                  'bin-link (path->string (rackup-toolchain-bin-link id))
+                                  'real-bin-dir (path->string real-bin)
+                                  'executables '("racket")
+                                  'installed-at "2026-01-15T00:00:00Z")))
+
+     ;; Step 1: Install 9.0 as the initial toolchain (simulating prior state)
+     (define id-90 "release-9.0-cs-x86_64-linux-full")
+     (register-fake-versioned-toolchain! id-90 "9.0" "stable")
+     (check-equal? (get-default-toolchain) id-90)
+     (check-equal? (installed-toolchain-ids) (list id-90))
+
+     ;; Verify 9.0 state is consistent
+     (define meta-90 (read-toolchain-meta id-90))
+     (check-equal? (hash-ref meta-90 'resolved-version) "9.0")
+     (check-equal? (hash-ref meta-90 'kind) 'release)
+
+     ;; Step 2: "Upgrade" by installing 9.1 alongside 9.0
+     (define id-91 "release-9.1-cs-x86_64-linux-full")
+     (register-fake-versioned-toolchain! id-91 "9.1" "stable")
+
+     ;; Both should be present
+     (check-equal? (installed-toolchain-ids)
+                   (sort (list id-90 id-91) string<?))
+
+     ;; Default should still be 9.0 (first installed)
+     (check-equal? (get-default-toolchain) id-90)
+
+     ;; Switch default to 9.1
+     (set-default-toolchain! id-91)
+     (check-equal? (get-default-toolchain) id-91)
+
+     ;; Verify both toolchains have valid metadata
+     (define meta-91 (read-toolchain-meta id-91))
+     (check-equal? (hash-ref meta-91 'resolved-version) "9.1")
+
+     ;; list command should show both
+     (define list-out (capture-output (lambda () (run-main '("list")))))
+     (check-true (string-contains? list-out "release-9.0-cs-x86_64-linux-full"))
+     (check-true (string-contains? list-out "release-9.1-cs-x86_64-linux-full"))
+     (check-true (string-contains? list-out "[default,active]"))
+
+     ;; Reshim and verify shim dispatches to 9.1 (the new default)
+     (reshim!)
+     (define shim-out
+       (capture-output
+        (lambda () (system* (build-path (rackup-shims-dir) "racket")))))
+     (check-true (string-contains? shim-out "9.1"))
+
+     ;; Remove 9.0 and verify 9.1 remains as default
+     (remove-toolchain! id-90)
+     (check-equal? (installed-toolchain-ids) (list id-91))
+     (check-equal? (get-default-toolchain) id-91)
+
+     ;; Prompt should reflect 9.1
+     @expect[(run-main '("prompt"))]{racket-9.1
+}))
+
+  ;; Upgrade path: verify old-format index (missing keys) is handled gracefully
+  (with-temp-rackup-home
+   (lambda (tmp)
+     (ensure-rackup-layout!)
+     ;; Write a minimal old-format index that lacks the 'aliases key
+     (write-rktd-file (rackup-index-file)
+                      (hash 'installed-toolchains (hash) 'default-toolchain #f))
+     ;; load-index should normalize it without error
+     (define idx (load-index))
+     (check-true (hash? idx))
+     (check-equal? (hash-ref idx 'aliases) (hash))
+     (check-equal? (installed-toolchain-ids idx) null)
+
+     ;; Write an even more minimal index (just a hash with installed-toolchains)
+     (write-rktd-file (rackup-index-file)
+                      (hash 'installed-toolchains (hash)))
+     (define idx2 (load-index))
+     (check-true (hash? idx2))
+     (check-equal? (hash-ref idx2 'aliases) (hash))
+     (check-equal? (hash-ref idx2 'default-toolchain) #f)
+
+     ;; ensure-index! on top of existing state should preserve it
+     (define id "release-9.0-cs-x86_64-linux-full")
+     (define install-root (rackup-toolchain-install-dir id))
+     (define real-bin (build-path install-root "bin"))
+     (make-directory* real-bin)
+     (write-string-file (build-path real-bin "racket") "#!/usr/bin/env bash\nexit 0\n")
+     (file-or-directory-permissions (build-path real-bin "racket") #o755)
+     (make-file-or-directory-link real-bin (rackup-toolchain-bin-link id))
+     (register-toolchain! id
+                          (hash 'id id 'kind 'release 'requested-spec "9.0"
+                                'resolved-version "9.0" 'variant 'cs 'distribution 'full
+                                'arch "x86_64" 'platform "linux"
+                                'executables '("racket") 'installed-at "2026-01-15T00:00:00Z"))
+     ;; Re-run ensure-index! (simulating what happens after self-upgrade)
+     (define idx3 (ensure-index!))
+     (check-true (toolchain-exists? id idx3))
+     (check-equal? (get-default-toolchain idx3) id)))
+
+  ;; Upgrade path: self-upgrade preserves state when install.sh reruns
+  (with-temp-rackup-home
+   (lambda (tmp)
+     (ensure-index!)
+     ;; Set up a pre-existing 9.0 installation
+     (define id-90 "release-9.0-cs-x86_64-linux-full")
+     (define install-root (rackup-toolchain-install-dir id-90))
+     (define real-bin (build-path install-root "bin"))
+     (make-directory* real-bin)
+     (write-string-file (build-path real-bin "racket") "#!/usr/bin/env bash\necho 9.0\n")
+     (file-or-directory-permissions (build-path real-bin "racket") #o755)
+     (make-file-or-directory-link real-bin (rackup-toolchain-bin-link id-90))
+     (register-toolchain! id-90
+                          (hash 'id id-90 'kind 'release 'requested-spec "stable"
+                                'resolved-version "9.0" 'variant 'cs 'distribution 'full
+                                'arch "x86_64" 'platform "linux"
+                                'snapshot-site #f 'snapshot-stamp #f
+                                'installer-url "https://example.invalid/racket-9.0.sh"
+                                'installer-filename "racket-9.0-x86_64-linux-cs.sh"
+                                'install-root (path->string install-root)
+                                'bin-link (path->string (rackup-toolchain-bin-link id-90))
+                                'real-bin-dir (path->string real-bin)
+                                'executables '("racket")
+                                'installed-at "2026-01-15T00:00:00Z"))
+
+     ;; Fake the self-upgrade: a script that just touches a marker file
+     ;; but doesn't modify state (simulating install.sh --prefix preserving state)
+     (define fake-installer (build-path tmp "fake-upgrade-install.sh"))
+     (define marker-file (build-path tmp "upgrade-ran.marker"))
+     (write-string-file
+      fake-installer
+      (format "#!/bin/sh\nset -eu\ntouch ~s\n" (path->string marker-file)))
+     (file-or-directory-permissions fake-installer #o755)
+
+     (define old-override (getenv "RACKUP_SELF_UPGRADE_INSTALL_SH"))
+     (dynamic-wind
+      (lambda () (putenv "RACKUP_SELF_UPGRADE_INSTALL_SH" (path->string fake-installer)))
+      (lambda ()
+        (run-main '("self-upgrade"))
+        ;; Verify the upgrade script ran
+        (check-true (file-exists? marker-file))
+        ;; Verify state is preserved after upgrade
+        (check-equal? (get-default-toolchain) id-90)
+        (check-true (toolchain-exists? id-90))
+        (define meta (read-toolchain-meta id-90))
+        (check-equal? (hash-ref meta 'resolved-version) "9.0"))
+      (lambda ()
+        (if old-override
+            (putenv "RACKUP_SELF_UPGRADE_INSTALL_SH" old-override)
+            (putenv "RACKUP_SELF_UPGRADE_INSTALL_SH" ""))))))
+
+  ;; ---- Snapshot site tests: Utah and Northwestern ----
+  ;; Test that both Utah and Northwestern snapshot toolchains can be registered
+  ;; and coexist with correct metadata
+  (with-temp-rackup-home
+   (lambda (tmp)
+     (ensure-index!)
+
+     (define (register-fake-snapshot! site stamp version)
+       (define id (canonical-toolchain-id 'snapshot
+                                          #:resolved-version version
+                                          #:variant 'cs
+                                          #:arch "x86_64"
+                                          #:distribution 'full
+                                          #:snapshot-site site
+                                          #:snapshot-stamp stamp))
+       (define install-root (rackup-toolchain-install-dir id))
+       (define real-bin (build-path install-root "bin"))
+       (make-directory* real-bin)
+       (define racket-exe (build-path real-bin "racket"))
+       (write-string-file racket-exe
+                          (format "#!/usr/bin/env bash\nprintf '~a (~a)'\n" version site))
+       (file-or-directory-permissions racket-exe #o755)
+       (make-file-or-directory-link real-bin (rackup-toolchain-bin-link id))
+       (register-toolchain! id
+                            (hash 'id id
+                                  'kind 'snapshot
+                                  'requested-spec (format "snapshot:~a" site)
+                                  'resolved-version version
+                                  'variant 'cs
+                                  'distribution 'full
+                                  'arch "x86_64"
+                                  'platform "linux"
+                                  'snapshot-site site
+                                  'snapshot-stamp stamp
+                                  'installer-url (format "https://~a.example/snapshots/~a/racket.sh" site stamp)
+                                  'installer-filename (format "racket-~a-x86_64-linux-cs.sh" version)
+                                  'install-root (path->string install-root)
+                                  'bin-link (path->string (rackup-toolchain-bin-link id))
+                                  'real-bin-dir (path->string real-bin)
+                                  'executables '("racket")
+                                  'installed-at "2026-03-01T00:00:00Z"))
+       id)
+
+     ;; Register a Utah snapshot
+     (define utah-id
+       (register-fake-snapshot! 'utah "2026-02-26-26be534ac9" "9.1.0.7"))
+
+     ;; Register a Northwestern snapshot
+     (define nw-id
+       (register-fake-snapshot! 'northwestern "2026-02-25-abcdef1234" "9.1.0.6"))
+
+     ;; Both should be registered with distinct IDs
+     (check-not-equal? utah-id nw-id)
+     (check-true (string-contains? utah-id "utah"))
+     (check-true (string-contains? nw-id "northwestern"))
+
+     ;; Both should be in the installed list
+     (check-true (toolchain-exists? utah-id))
+     (check-true (toolchain-exists? nw-id))
+     (check-equal? (length (installed-toolchain-ids)) 2)
+
+     ;; Verify metadata distinguishes them
+     (define utah-meta (read-toolchain-meta utah-id))
+     (define nw-meta (read-toolchain-meta nw-id))
+     (check-equal? (hash-ref utah-meta 'snapshot-site) 'utah)
+     (check-equal? (hash-ref utah-meta 'snapshot-stamp) "2026-02-26-26be534ac9")
+     (check-equal? (hash-ref utah-meta 'resolved-version) "9.1.0.7")
+     (check-equal? (hash-ref nw-meta 'snapshot-site) 'northwestern)
+     (check-equal? (hash-ref nw-meta 'snapshot-stamp) "2026-02-25-abcdef1234")
+     (check-equal? (hash-ref nw-meta 'resolved-version) "9.1.0.6")
+
+     ;; Set Utah as default, verify shim resolves to it
+     (set-default-toolchain! utah-id)
+     (reshim!)
+     (define shim-out
+       (capture-output
+        (lambda () (system* (build-path (rackup-shims-dir) "racket")))))
+     (check-true (string-contains? shim-out "9.1.0.7 (utah)"))
+
+     ;; Switch to Northwestern, verify
+     (set-default-toolchain! nw-id)
+     (reshim!)
+     (define shim-out2
+       (capture-output
+        (lambda () (system* (build-path (rackup-shims-dir) "racket")))))
+     (check-true (string-contains? shim-out2 "9.1.0.6 (northwestern)"))
+
+     ;; list output should show both snapshots
+     (define list-out (capture-output (lambda () (run-main '("list")))))
+     (check-true (string-contains? list-out "snapshot-utah"))
+     (check-true (string-contains? list-out "snapshot-northwestern"))
+
+     ;; prompt should reflect snapshot
+     @expect[(run-main '("prompt" "--short"))]{racket-snapshot-9.1.0.6
+}))
+
+  ;; Test upgrade path with snapshots: old Utah snapshot -> new Utah snapshot
+  (with-temp-rackup-home
+   (lambda (tmp)
+     (ensure-index!)
+
+     (define (make-snapshot-toolchain! stamp version)
+       (define id (canonical-toolchain-id 'snapshot
+                                          #:resolved-version version
+                                          #:variant 'cs
+                                          #:arch "x86_64"
+                                          #:distribution 'full
+                                          #:snapshot-site 'utah
+                                          #:snapshot-stamp stamp))
+       (define install-root (rackup-toolchain-install-dir id))
+       (define real-bin (build-path install-root "bin"))
+       (make-directory* real-bin)
+       (write-string-file (build-path real-bin "racket")
+                          (format "#!/usr/bin/env bash\nprintf '~a'\n" version))
+       (file-or-directory-permissions (build-path real-bin "racket") #o755)
+       (make-file-or-directory-link real-bin (rackup-toolchain-bin-link id))
+       (register-toolchain! id
+                            (hash 'id id
+                                  'kind 'snapshot
+                                  'requested-spec "snapshot:utah"
+                                  'resolved-version version
+                                  'variant 'cs
+                                  'distribution 'full
+                                  'arch "x86_64"
+                                  'platform "linux"
+                                  'snapshot-site 'utah
+                                  'snapshot-stamp stamp
+                                  'installer-url (format "https://utah.example/snapshots/~a/racket.sh" stamp)
+                                  'installer-filename (format "racket-~a-x86_64-linux-cs.sh" version)
+                                  'install-root (path->string install-root)
+                                  'bin-link (path->string (rackup-toolchain-bin-link id))
+                                  'real-bin-dir (path->string real-bin)
+                                  'executables '("racket")
+                                  'installed-at "2026-03-01T00:00:00Z"))
+       id)
+
+     ;; Install old snapshot
+     (define old-id (make-snapshot-toolchain! "2026-02-20-old1234" "9.1.0.3"))
+     (check-equal? (get-default-toolchain) old-id)
+
+     ;; "Upgrade" by installing newer snapshot
+     (define new-id (make-snapshot-toolchain! "2026-02-26-new5678" "9.1.0.7"))
+
+     ;; Both should exist with distinct IDs (different stamps)
+     (check-not-equal? old-id new-id)
+     (check-equal? (length (installed-toolchain-ids)) 2)
+
+     ;; Switch to new snapshot
+     (set-default-toolchain! new-id)
+     (reshim!)
+     (define shim-out
+       (capture-output
+        (lambda () (system* (build-path (rackup-shims-dir) "racket")))))
+     (check-true (string-contains? shim-out "9.1.0.7"))
+
+     ;; Remove old snapshot, verify new one is unaffected
+     (remove-toolchain! old-id)
+     (check-equal? (installed-toolchain-ids) (list new-id))
+     (check-equal? (get-default-toolchain) new-id)))
+
   ;; Integration test: env vars pass through to rackup run subprocesses
   (with-temp-rackup-home
    (lambda (tmp)
