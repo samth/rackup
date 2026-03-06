@@ -348,4 +348,43 @@
    #px"PLT Scheme v102|historical release range"
    (lambda () (resolve-install-request/runtime "102" #:arch "i386")))
   (check-exn exn:fail?
-             (lambda () (resolve-install-request/runtime "203" #:arch "i386"))))
+             (lambda () (resolve-install-request/runtime "203" #:arch "i386")))
+
+  ;; Distribution fallback: when only minimal installers exist for an arch,
+  ;; requesting full should fall back to minimal.
+  (define minimal-only-table
+    (hash 'a "racket-minimal-9.1-riscv64-linux-cs.sh"
+          'b "racket-minimal-9.1-riscv64-linux-cs.tgz"
+          'c "racket-9.1-x86_64-linux-cs.sh"
+          'd "racket-minimal-9.1-x86_64-linux-cs.sh"))
+
+  ;; riscv64 has no full installer -- select-installer-filename should fail
+  (check-exn exn:fail?
+             (lambda ()
+               (select-installer-filename minimal-only-table
+                                          #:version-token "9.1"
+                                          #:variant 'cs
+                                          #:distribution 'full
+                                          #:arch "riscv64")))
+
+  ;; But minimal works fine for riscv64
+  (check-equal? (select-installer-filename minimal-only-table
+                                           #:version-token "9.1"
+                                           #:variant 'cs
+                                           #:distribution 'minimal
+                                           #:arch "riscv64")
+                "racket-minimal-9.1-riscv64-linux-cs.sh")
+
+  ;; x86_64 has full installer -- should still work
+  (check-equal? (select-installer-filename minimal-only-table
+                                           #:version-token "9.1"
+                                           #:variant 'cs
+                                           #:distribution 'full
+                                           #:arch "x86_64")
+                "racket-9.1-x86_64-linux-cs.sh")
+
+  ;; distribution-fallback? predicate
+  (check-true (distribution-fallback? 'minimal 'full))
+  (check-false (distribution-fallback? 'full 'full))
+  (check-false (distribution-fallback? 'minimal 'minimal))
+  (check-false (distribution-fallback? 'full 'minimal)))
