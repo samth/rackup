@@ -404,7 +404,7 @@ jobs:
           bin/rackup list
           bin/rackup doctor
           "$RACKUP_HOME/shims/racket" -e '(displayln "hello from rackup")'
-          bin/rackup remove "$(bin/rackup list | awk 'NR==1{print $2}')"
+          bin/rackup remove "$(bin/rackup list --ids | head -1)"
 
   macos-e2e-legacy-plt-dmg:
     name: macOS E2E (legacy PLT Scheme DMG)
@@ -431,7 +431,7 @@ jobs:
             bin/rackup install "$ver" --arch i386 --verbose
             bin/rackup list
             echo "--- Installed $ver successfully ---"
-            bin/rackup remove "$(bin/rackup list | awk 'END{print $2}')"
+            bin/rackup remove "$(bin/rackup list --ids | tail -1)"
           done
 
   macos-e2e-bootstrap:
