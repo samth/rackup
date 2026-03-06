@@ -199,7 +199,7 @@
   (dynamic-wind
    (lambda ()
      (system*/check 'hdiutil-attach
-                    "hdiutil" "attach"
+                    "/usr/bin/hdiutil" "attach"
                     "-nobrowse" "-noverify" "-noautoopen"
                     "-mountpoint" (path->string* mount-point)
                     (path->string* dmg)))
@@ -222,7 +222,7 @@
          [else mount-point]))
      (copy-directory/files src-dir dest #:keep-modify-seconds? #t))
    (lambda ()
-     (system* "hdiutil" "detach" (path->string* mount-point) "-quiet")
+     (system* "/usr/bin/hdiutil" "detach" (path->string* mount-point) "-quiet")
      (when (directory-exists? mount-point)
        (delete-directory mount-point)))))
 

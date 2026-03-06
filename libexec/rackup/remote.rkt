@@ -578,6 +578,7 @@
                                  #:variant [variant-override #f]
                                  #:distribution [distribution 'full]
                                  #:arch [arch (normalized-host-arch)]
+                                 #:platform [platform-override #f]
                                  #:snapshot-site [snapshot-site-opt 'auto]
                                  #:installer-ext [installer-ext-override #f])
   (define spec*
@@ -587,7 +588,7 @@
   (define kind (hash-ref spec* 'kind))
   (define distribution* (parse-distribution distribution))
   (define requested-spec (hash-ref spec* 'input ""))
-  (define platform (host-platform-token))
+  (define platform (or platform-override (host-platform-token)))
   (define preferred-exts
     (if installer-ext-override
         (list installer-ext-override)

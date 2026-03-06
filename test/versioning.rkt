@@ -48,8 +48,8 @@
                 "snapshot-utah-20260225-abcd-8.19.0.1-cs-x86_64-linux-full")
 
   ;; host-platform-token returns a recognized platform string
-  (check-true (member (host-platform-token) '("linux" "macosx"))
-              "host-platform-token must return a recognized platform")
+  (check-not-false (member (host-platform-token) '("linux" "macosx"))
+                   "host-platform-token must return a recognized platform")
 
   ;; macOS canonical IDs use "macosx" platform token
   (check-equal? (canonical-toolchain-id 'release

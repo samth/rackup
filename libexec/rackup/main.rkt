@@ -114,6 +114,8 @@
      (help-option-line "--set-default" "Set installed toolchain as the global default.")
      (help-option-line "--force" "Reinstall if the same canonical toolchain is already installed.")
      (help-option-line "--no-cache" "Redownload installer instead of using cache.")
+     (help-option-line "--installer-ext sh|tgz|dmg"
+                       "Force installer extension (default: platform-dependent).")
      (help-option-line "--quiet" "Show minimal output (errors + final result lines).")
      (help-option-line "--verbose" "Show detailed installer URL/path output.")
      (displayln "")
@@ -316,7 +318,9 @@
         "--quiet"
         0
         "--verbose"
-        0))
+        0
+        "--installer-ext"
+        1))
 
 (define (string-flag-like? s)
   (and (string? s) (> (string-length s) 0) (char=? (string-ref s 0) #\-)))

@@ -1054,6 +1054,7 @@
               --set-default           Set installed toolchain as the global default.
               --force                 Reinstall if the same canonical toolchain is already installed.
               --no-cache              Redownload installer instead of using cache.
+              --installer-ext sh|tgz|dmg  Force installer extension (default: platform-dependent).
               --quiet                 Show minimal output (errors + final result lines).
               --verbose               Show detailed installer URL/path output.
 

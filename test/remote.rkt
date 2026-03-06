@@ -265,7 +265,7 @@
     "209")
    "plt-209-bin-i386-linux-gcc2.sh")
 
-  (define legacy-req-209 (resolve-install-request/runtime "209" #:arch "i386"))
+  (define legacy-req-209 (resolve-install-request/runtime "209" #:arch "i386" #:platform "linux"))
   (check-equal? (hash-ref legacy-req-209 'installer-url)
                 "http://download.plt-scheme.org/bundles/209/plt/plt-209-bin-i386-linux.sh")
   (check-equal? (hash-ref legacy-req-209 'installer-filename)
@@ -274,7 +274,7 @@
                 "f70696da6302a9ca22a3df1fc9c951689f07669643859768489a372c04aef5c9")
   (check-equal? (hash-ref legacy-req-209 'legacy-install-kind) 'shell-basic)
 
-  (define legacy-req-103p1 (resolve-install-request/runtime "103p1" #:arch "i386"))
+  (define legacy-req-103p1 (resolve-install-request/runtime "103p1" #:arch "i386" #:platform "linux"))
   (check-equal? (hash-ref legacy-req-103p1 'installer-url)
                 "http://download.plt-scheme.org/bundles/103p1/plt/plt-103p1-bin-i386-linux.tgz")
   (check-equal? (hash-ref legacy-req-103p1 'installer-filename)
@@ -283,7 +283,7 @@
                 "7090e2d7df07c17530e50cbc5fde67b51b39f77c162b7f20413242dca923a20a")
   (check-equal? (hash-ref legacy-req-103p1 'legacy-install-kind) 'tgz)
 
-  (define legacy-req-4.2.5 (resolve-install-request/runtime "4.2.5" #:arch "x86_64"))
+  (define legacy-req-4.2.5 (resolve-install-request/runtime "4.2.5" #:arch "x86_64" #:platform "linux"))
   (check-equal? (hash-ref legacy-req-4.2.5 'installer-url)
                 "http://download.plt-scheme.org/bundles/4.2.5/plt/plt-4.2.5-bin-x86_64-linux-f7.sh")
   (check-equal? (hash-ref legacy-req-4.2.5 'legacy-install-kind) 'shell-unixstyle)
@@ -343,12 +343,12 @@
         (ensure-installer-cached/runtime-private "http://download.plt-scheme.org/example.sh")))))
 
   (check-exn exn:fail?
-             (lambda () (resolve-install-request/runtime "053" #:arch "i386")))
+             (lambda () (resolve-install-request/runtime "053" #:arch "i386" #:platform "linux")))
   (check-exn
    #px"PLT Scheme v102|historical release range"
-   (lambda () (resolve-install-request/runtime "102" #:arch "i386")))
+   (lambda () (resolve-install-request/runtime "102" #:arch "i386" #:platform "linux")))
   (check-exn exn:fail?
-             (lambda () (resolve-install-request/runtime "203" #:arch "i386")))
+             (lambda () (resolve-install-request/runtime "203" #:arch "i386" #:platform "linux")))
 
   ;; Extension preference: select-installer-filename/by-ext with macOS extensions
   (define fake-table-macos
