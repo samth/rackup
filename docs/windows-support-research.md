@@ -353,6 +353,127 @@ rackup needs a Racket runtime to run its own Racket code. On Windows:
 3. Add Scoop/winget distribution formulae.
 4. Documentation and migration guides.
 
+## Code Audit: Unix-Only Dependencies in rackup
+
+This section catalogs every file and pattern that would need Windows-specific
+handling.
+
+### 1. Shim Dispatcher (shims.rkt:24-219) -- CRITICAL
+
+The entire `dispatcher-script` function generates a Bash script that is the
+core of how rackup dispatches shim invocations. This is the single most
+important thing to replace. It uses: `#!/usr/bin/env bash`, `set -euo pipefail`,
+`BASH_SOURCE[0]`, `basename`, `tr`, `od` (for ELF header inspection), `uname`,
+`grep`, `/proc/sys/fs/binfmt_misc`, and `exec`.
+
+On Windows, needs: a native `.exe` dispatcher or a compiled Racket executable.
+
+### 2. Symlink Usage (12 call sites)
+
+Files using `make-file-or-directory-link`:
+- `install.rkt:227` -- toolchain bin directory link
+- `install.rkt:237` -- overlay links for env.sh
+- `shims.rkt:234` -- core rackup shim link
+- `shims.rkt:284` -- all tool shims -> dispatcher
+- `runtime.rkt:121` -- runtime `current` link
+
+Files using `link-exists?` / `resolve-path`:
+- `install.rkt:224,234,243,255,297` -- link management
+- `shims.rkt:232,258,259,282` -- shim detection
+- `runtime.rkt:51,53,115,211` -- runtime link management
+
+On Windows: Need to use directory junctions (for directory links) or hardlinks/
+shim file pairs (for file shims). `link-exists?` works on Windows for junctions.
+
+### 3. File Permissions (13 call sites)
+
+`file-or-directory-permissions` with octal modes (`#o755`, `#o644`):
+- `install.rkt:126,213,286,310`
+- `shims.rkt:226`
+- `rktd-io.rkt:39,51`
+- `runtime.rkt:73`
+- `legacy.rkt:244`
+- `main.rkt:962`
+- `util.rkt:48`
+
+On Windows: Octal permission modes are not supported. Racket's
+`file-or-directory-permissions` on Windows returns a limited set. These calls
+need platform-conditional behavior.
+
+### 4. Shell Executable (util.rkt:69-70)
+
+```racket
+(define (shell-exe)
+  (or (find-executable-path "sh") (string->path "/bin/sh")))
+```
+
+Used by: `install.rkt:155,161` (running Racket's `.sh` installer),
+`main.rkt:981` (running install.sh for self-upgrade).
+
+On Windows: Racket's Windows `.exe` installer is not run via a shell. Need
+platform-specific installer execution logic.
+
+### 5. Shell Integration (shell.rkt) -- Bash/Zsh Only
+
+The entire `shell.rkt` module is bash/zsh specific:
+- `bash-completion-script` (line 47)
+- `zsh-completion-script` (line 194)
+- RC file management for `.bashrc`/`.zshrc` (lines 350-430)
+- Shell detection defaults to "bash" (line 333)
+
+On Windows: Need PowerShell equivalents (`rackup.ps1` profile script,
+PowerShell tab completions via `Register-ArgumentCompleter`).
+
+### 6. Bootstrap Script (scripts/install.sh) -- POSIX Shell
+
+The entire 303-line script is POSIX `sh`. Uses: `curl`/`wget`, `tar`, `chmod`,
+`mktemp`, `find`, `sha256sum`/`shasum`, shell config editing.
+
+On Windows: Need `install.ps1` PowerShell equivalent using
+`Invoke-WebRequest`, `Expand-Archive`, registry PATH management.
+
+### 7. Bootstrap Helper (libexec/rackup-bootstrap.sh) -- POSIX Shell
+
+~420 lines of POSIX shell functions for: runtime selection, architecture
+detection (`uname -m`), stable version lookup, installer candidate selection,
+installer execution, lock file management.
+
+On Windows: Need Racket or PowerShell equivalents for all of these.
+
+### 8. Entry Point (bin/rackup) -- Bash Script
+
+The `bin/rackup` wrapper is a Bash script that sanitizes environment variables
+and invokes the Racket runtime.
+
+On Windows: Need `rackup.cmd` or `rackup.exe` wrapper.
+
+### 9. Subprocess Commands
+
+External commands invoked via `system*`:
+- `tar` -- for `.tgz` extraction (`runtime.rkt:96`, `install.rkt:191`)
+- `rm -rf` -- for uninstall (`main.rkt:905`)
+- `/bin/sh installer.sh` -- for Racket installer (`install.rkt:155`)
+- `sha256sum`/`shasum`/`openssl` -- for checksum verification (`install.rkt:94-98`)
+- `git` -- for source builds (`main.rkt:997`)
+
+On Windows: `tar` is available on modern Windows 10+, `rm -rf` needs
+`Remove-Item -Recurse -Force` or similar, SHA256 can use Racket's built-in
+`file/sha1` module (already partially done per commit history).
+
+### 10. Racket Windows Installer Considerations
+
+Key finding from research: **Racket's Windows `.exe` installer does NOT support
+`--in-place` or `--create-dir` flags.** These are Unix `.sh` installer only.
+The Windows NSIS installer is GUI-based with no equivalent CLI automation flags.
+
+However, Racket also provides `.tgz` archives for Windows which can be extracted
+with `tar`. The `.tgz` approach is likely the best path for rackup on Windows,
+avoiding the NSIS GUI entirely.
+
+Additionally: **Racket's Windows installer does NOT modify PATH.** This means
+rackup would be providing a genuinely useful improvement for Windows Racket
+users by managing PATH automatically.
+
 ## Summary Comparison Table
 
 | Aspect | rustup | GHCup | Volta | juliaup | Recommendation for rackup |
