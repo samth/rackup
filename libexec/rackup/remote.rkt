@@ -332,7 +332,8 @@
                                           variant
                                           distribution*
                                           arch
-                                          platform)
+                                          platform
+                                          preferred-exts)
   (cond
     [(version-maybe-plt-scheme? resolved-version)
      (define plt-request
@@ -616,7 +617,8 @@
                                        variant
                                        distribution*
                                        arch
-                                       platform)]
+                                       platform
+                                       preferred-exts)]
     ['release
      (define resolved-version (hash-ref spec* 'version))
      (define variant (variant-for resolved-version))
@@ -625,7 +627,8 @@
                                        variant
                                        distribution*
                                        arch
-                                       platform)]
+                                       platform
+                                       preferred-exts)]
     ['pre-release
      (define table (fetch-table-rktd pre-release-installers-base))
      ;; pre-release.racket-lang.org may not publish installers/version.rktd.

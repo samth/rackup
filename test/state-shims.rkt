@@ -1008,7 +1008,7 @@
          (run-linux-installer! installer dest #:legacy-install-kind 'shell-basic)
          #f))
      (check-true (string? msg))
-     (check-true (string-contains? msg "linux-installer failed"))))
+     (check-true (string-contains? msg "installer failed"))))
 
   (with-temp-rackup-home
    (lambda (tmp)

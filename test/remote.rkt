@@ -433,4 +433,4 @@
   (check-equal? (hash-ref p-macos-dmg 'platform-family) "macosx")
   (check-equal? (hash-ref p-macos-dmg 'variant) 'cs)
   (check-equal? (hash-ref p-macos-dmg 'ext) "dmg")
-  (check-equal? (hash-ref p-macos-dmg 'distribution) 'full)))
+  (check-equal? (hash-ref p-macos-dmg 'distribution) 'full))
