@@ -108,20 +108,22 @@
                     "-mountpoint" (path->string* mount-point)
                     (path->string* dmg)))
    (lambda ()
-     ;; Racket .dmg files contain a top-level directory like "Racket v9.1/"
-     ;; with the standard bin/, lib/, share/ layout inside.
+     ;; Racket .dmg files are drag-and-drop installers containing:
+     ;; - A directory like "Racket v9.1/" with bin/, lib/, share/ inside
+     ;; - A symlink to /Applications (for drag-and-drop UX)
+     ;; We must skip symlinks to avoid copying the system /Applications.
      (define top-dirs
        (for/list ([p (directory-list mount-point #:build? #t)]
-                  #:when (directory-exists? p))
+                  #:when (and (directory-exists? p)
+                              (not (link-exists? p))))
          p))
      (define src-dir
        (cond
-         [(and (= (length top-dirs) 1)
-               (directory-exists? (build-path (car top-dirs) "bin")))
-          (car top-dirs)]
+         [(for/or ([d (in-list top-dirs)])
+            (and (directory-exists? (build-path d "bin")) d))]
          [(directory-exists? (build-path mount-point "bin"))
           mount-point]
-         [(pair? top-dirs) (car top-dirs)]
+         [(= (length top-dirs) 1) (car top-dirs)]
          [else mount-point]))
      (copy-directory/files src-dir dest #:keep-modify-seconds? #t))
    (lambda ()
