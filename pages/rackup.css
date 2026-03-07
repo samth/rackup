@@ -1,0 +1,230 @@
+html, body {
+  background: white;
+  color: #333;
+}
+body {
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+}
+a {
+  color: #0679a7;
+}
+a:hover {
+  color: #034b6b;
+}
+.navbar.gumby-content {
+  background: white;
+  border-bottom: 1px solid #ddd;
+}
+.navbar ul li a,
+.navbar .logo {
+  color: #333;
+}
+.navbar ul li a {
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+.bodycontent {
+  margin: 0;
+  max-width: none;
+  padding: 0 0 4rem;
+}
+.rackup-page {
+  margin: 0 auto;
+  max-width: 1050px;
+  padding: 0 1.5rem;
+}
+
+/* Top install section */
+.rackup-top {
+  border-bottom: 1px solid #ddd;
+  padding: 2.5rem 0 2rem;
+}
+.rackup-top h1 {
+  color: #333;
+  font-size: 3rem;
+  font-weight: 600;
+  margin: 0 0 0.5rem;
+}
+.rackup-top h1 code {
+  background: none;
+  font-size: inherit;
+  padding: 0;
+}
+.rackup-top-desc {
+  color: #555;
+  font-size: 1.3rem;
+  margin: 0 0 1.5rem;
+  max-width: 50rem;
+}
+.rackup-install-row {
+  position: relative;
+}
+pre.rackup-shell {
+  background: #2d2d2d !important;
+  border: none !important;
+  border-radius: 6px;
+  color: #f0f0f0 !important;
+  margin: 0 !important;
+  overflow-x: auto;
+  padding: 0.8rem 1rem !important;
+}
+pre.rackup-shell::before,
+pre.rackup-shell::after {
+  content: none !important;
+  display: none !important;
+}
+pre.rackup-shell code {
+  background: transparent !important;
+  color: #f0f0f0 !important;
+  display: block;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 1rem !important;
+  line-height: 1.5 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  white-space: pre-wrap;
+}
+.rackup-shell + .rackup-shell {
+  margin-top: 0.6rem;
+}
+.rackup-copy-btn {
+  background: transparent;
+  border: none;
+  color: #888;
+  cursor: pointer;
+  display: inline-flex;
+  padding: 0.4rem;
+  position: absolute;
+  right: 0.6rem;
+  text-decoration: none;
+  top: 0.55rem;
+}
+.rackup-copy-btn:hover {
+  color: #ddd;
+}
+.rackup-copy-btn svg {
+  height: 18px;
+  width: 18px;
+}
+.rackup-top pre.rackup-shell code {
+  font-size: 1.3rem !important;
+}
+.rackup-note {
+  color: #666;
+  font-size: 0.9rem;
+  margin-top: 0.8rem;
+}
+code {
+  background: #f0f0f0;
+  border-radius: 3px;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 1em;
+  padding: 0.1rem 0.35rem;
+}
+
+/* Sections */
+.rackup-section {
+  border-bottom: 1px solid #ddd;
+  padding: 2rem 0;
+}
+.rackup-section:last-child {
+  border-bottom: none;
+}
+.rackup-section h2 {
+  color: #333;
+  font-size: 1.4rem;
+  font-weight: 600;
+  margin: 0 0 0.75rem;
+}
+.rackup-section > p {
+  color: #555;
+  margin: 0 0 1rem;
+  max-width: 50rem;
+}
+
+/* Toolchain type grid */
+.rackup-grid {
+  display: grid;
+  gap: 1.5rem;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  margin-top: 1rem;
+}
+.rackup-grid h3 {
+  color: #0679a7;
+  font-size: 1.05rem;
+  font-weight: 600;
+  margin: 0 0 0.3rem;
+}
+.rackup-grid p {
+  color: #555;
+  font-size: 0.95rem;
+  margin: 0 0 0.4rem;
+}
+.rackup-grid ul {
+  color: #555;
+  font-size: 0.9rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.rackup-grid ul li {
+  margin-bottom: 0.2rem;
+}
+.rackup-grid ul li code {
+  font-size: 0.95rem;
+}
+
+/* Two-column layout */
+.rackup-two-col {
+  display: grid;
+  gap: 2rem;
+  grid-template-columns: 1fr 1fr;
+  margin-top: 1rem;
+}
+@media (max-width: 700px) {
+  .rackup-two-col {
+    grid-template-columns: 1fr;
+  }
+}
+.rackup-two-col h3 {
+  font-size: 1.05rem;
+  font-weight: 600;
+  margin: 0 0 0.5rem;
+}
+.rackup-two-col p {
+  color: #555;
+  margin: 0 0 0.5rem;
+}
+.rackup-two-col ul {
+  color: #555;
+  margin: 0;
+  padding-left: 1.2rem;
+}
+.rackup-two-col ul li {
+  margin-bottom: 0.3rem;
+}
+
+/* Command reference */
+.rackup-cmd-table {
+  border: none !important;
+  border-collapse: collapse;
+  font-size: 0.95rem;
+  margin-top: 0.5rem;
+  width: 100%;
+}
+.rackup-cmd-table tr {
+  border: none !important;
+}
+.rackup-cmd-table td {
+  border: none !important;
+  padding: 0.4rem 0.8rem 0.4rem 0;
+  vertical-align: top;
+}
+.rackup-cmd-table td:first-child {
+  white-space: nowrap;
+}
+.rackup-cmd-table td:last-child {
+  color: #555;
+}

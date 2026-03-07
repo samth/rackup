@@ -5,7 +5,8 @@
          racket/runtime-path
          racket/string
          racket/system
-         file/sha1)
+         file/sha1
+         "../pages/site.rkt")
 
 (define-runtime-path here ".")
 (define root-dir (simplify-path (build-path here "..")))
@@ -44,10 +45,13 @@
         "libexec"
         "scripts/copy-filtered-tree.sh")
    ;; Build demodularized .zo before creating tarball
-   (run (find-executable-path "racket")
-        "-y"
-        (build-path root-dir "scripts" "build-demod.rkt")
-        (build-path src-stage "libexec"))
+   (let* ([libexec (build-path src-stage "libexec")]
+          [core (build-path libexec "rackup-core.rkt")]
+          [merged (build-path libexec "compiled" "rackup-core_rkt_merged.zo")])
+     (make-directory* (path-only merged))
+     (run (find-executable-path "raco")
+          "demod" "-s" "-M" "-g" "-o"
+          merged core))
 
    (run (find-executable-path "tar")
         "-C"
@@ -70,14 +74,9 @@
 
    ;; Generate HTML; Racket computes the install.sh checksum itself
    (make-directory* plt-web-stage)
-   (run (find-executable-path "racket")
-        (build-path root-dir "pages" "site.rkt")
-        "--install-sh"
-        (build-path out-dir "install.sh")
-        "-r"
-        "-o"
-        plt-web-stage
-        "-f")
+   (parameterize ([current-command-line-arguments
+                   (vector "-r" "-o" (path->string plt-web-stage) "-f")])
+     (generate-site (path->string (build-path out-dir "install.sh"))))
 
    ;; Copy plt-web output into out-dir
    (define www-dir (build-path plt-web-stage "www"))
