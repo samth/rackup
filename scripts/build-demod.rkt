@@ -7,6 +7,7 @@
 ;; Flags used with raco demod:
 ;;   -s  preserve syntax (required for define-runtime-path)
 ;;   -r  recompile for optimization
+;;   -g  prune unused definitions
 ;;   -o  explicit output path into compiled/ directory
 
 (require racket/file
@@ -33,6 +34,7 @@
                  "demod"
                  "-s"
                  "-r"
+                 "-g"
                  "-o"
                  (path->string merged)
                  (path->string core))
