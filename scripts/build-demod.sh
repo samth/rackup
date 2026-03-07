@@ -10,7 +10,7 @@ The output is placed at LIBEXEC_DIR/compiled/rackup-core_rkt_merged.zo.
 
 Flags used:
   -s  preserve syntax (required for define-runtime-path)
-  -r  recompile for optimization
+  -M  machine-independent output (recompiled to machine-dependent on install)
   -g  prune unused definitions
   -o  explicit output path into compiled/ directory
 EOF
@@ -32,7 +32,7 @@ fi
 MERGED="$LIBEXEC_DIR/compiled/rackup-core_rkt_merged.zo"
 mkdir -p "$(dirname "$MERGED")"
 
-raco demod -s -r -g -o "$MERGED" "$CORE"
+raco demod -s -M -g -o "$MERGED" "$CORE"
 
 if [ ! -f "$MERGED" ]; then
   echo "build-demod.sh: expected output not found at $MERGED" >&2
