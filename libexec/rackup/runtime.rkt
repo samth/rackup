@@ -297,28 +297,16 @@
   (when racket-exe
     (define merged-zo (demod-merged-zo-path))
     (if (file-exists? merged-zo)
-        ;; Recompile demodularized machine-independent .zo to machine-dependent
+        ;; Demodularized .zo is already machine-dependent; just verify it loads
         (let-values ([(ok? details)
                       (run-hidden-runtime/quiet
                        racket-exe
-                       "-l" "raco" "demod" "-r"
-                       (path->string* merged-zo))])
-          (cond
-            [ok?
-             ;; Verify the recompiled .zo loads correctly
-             (let-values ([(ok2? details2)
-                           (run-hidden-runtime/quiet
-                            racket-exe
-                            (path->string* merged-zo)
-                            "-e" "(void)")])
-               (unless ok2?
-                 (eprintf "rackup: warning: recompiled demod .zo failed smoke test\n")
-                 (unless (string-blank? details2)
-                   (eprintf "~a\n" details2))))]
-            [else
-             (eprintf "rackup: warning: failed to recompile demodularized .zo\n")
-             (unless (string-blank? details)
-               (eprintf "~a\n" details))]))
+                       (path->string* merged-zo)
+                       "-e" "(void)")])
+          (unless ok?
+            (eprintf "rackup: warning: demodularized .zo failed to load\n")
+            (unless (string-blank? details)
+              (eprintf "~a\n" details))))
         ;; Fallback: compile from source
         (let ([sources (rackup-source-paths)])
           (when (pair? sources)
