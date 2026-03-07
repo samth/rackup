@@ -3,7 +3,7 @@
 (require racket/runtime-path
          racket/string
          racket/file
-         racket/system)
+         "docker-run-transcript-matrix.rkt")
 
 (define-runtime-path here ".")
 (define root-dir (simplify-path (build-path here "..")))
@@ -22,15 +22,9 @@
 (printf "trace=~a\n" trace)
 (printf "transcript=~a\n" transcript-path)
 
-(unless (system* (find-executable-path "racket") "-y"
-                 (path->string (build-path root-dir "scripts" "docker-run-transcript-matrix.rkt"))
-                 "--host-racket"
-                 host-racket
-                 "--trace"
-                 trace
-                 "--transcript"
-                 transcript-path)
-  (error 'test-transcript-matrix "docker-run-transcript-matrix failed"))
+(run-transcript-matrix #:host-racket host-racket
+                       #:trace trace
+                       #:transcript-path transcript-path)
 
 (printf "Asserting transcript content...\n")
 
