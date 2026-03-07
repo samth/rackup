@@ -1,6 +1,7 @@
 #lang racket/base
 
-(require racket/file
+(require compiler/cm
+         racket/file
          racket/list
          racket/match
          racket/path
@@ -293,40 +294,29 @@
   (build-path (rackup-libexec-dir) "compiled" "rackup-core_rkt_merged.zo"))
 
 (define (precompile-rackup-sources!)
-  (define racket-exe (hidden-runtime-racket-path))
-  (when racket-exe
-    (define merged-zo (demod-merged-zo-path))
-    (if (file-exists? merged-zo)
-        ;; Demodularized .zo is already machine-dependent; just verify it loads
-        (let-values ([(ok? details)
-                      (run-hidden-runtime/quiet
-                       racket-exe
-                       (path->string* merged-zo)
-                       "-e" "(void)")])
-          (unless ok?
-            (eprintf "rackup: warning: demodularized .zo failed to load\n")
-            (unless (string-blank? details)
-              (eprintf "~a\n" details))))
-        ;; Fallback: compile from source
-        (let ([sources (rackup-source-paths)])
-          (when (pair? sources)
-            (define compile-expression
-              (string-join
-               '("(begin"
-                 "  (require compiler/cm racket/path)"
-                 "  (for ([arg (in-vector (current-command-line-arguments))])"
-                 "    (managed-compile-zo (path->complete-path (string->path arg)))))")
-               " "))
-            (let-values ([(ok? details)
-                          (apply run-hidden-runtime/quiet
-                                 racket-exe
-                                 "-e"
-                                 compile-expression
-                                 (map path->string* sources))])
-              (unless ok?
-                (eprintf "rackup: warning: failed to precompile rackup sources via compiler/cm\n")
-                (unless (string-blank? details)
-                  (eprintf "~a\n" details)))))))))
+  (define merged-zo (demod-merged-zo-path))
+  (cond
+    [(file-exists? merged-zo)
+     ;; Recompile demodularized machine-independent .zo to machine-dependent in place
+     (with-handlers ([exn:fail?
+                      (lambda (e)
+                        (eprintf "rackup: warning: failed to recompile demodularized .zo\n")
+                        (eprintf "~a\n" (exn-message e)))])
+       (define mi (parameterize ([read-accept-compiled #t])
+                    (call-with-input-file* merged-zo read)))
+       (define md (compiled-expression-recompile mi))
+       (call-with-output-file* merged-zo #:exists 'replace
+         (lambda (out) (write md out))))]
+    [else
+     ;; Fallback: compile from source
+     (define sources (rackup-source-paths))
+     (when (pair? sources)
+       (with-handlers ([exn:fail?
+                        (lambda (e)
+                          (eprintf "rackup: warning: failed to precompile rackup sources via compiler/cm\n")
+                          (eprintf "~a\n" (exn-message e)))])
+         (for ([src (in-list sources)])
+           (managed-compile-zo src))))]))
 
 (define (with-runtime-lock thunk)
   (ensure-rackup-layout!)

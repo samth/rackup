@@ -6,7 +6,7 @@
 ;;
 ;; Flags used with raco demod:
 ;;   -s  preserve syntax (required for define-runtime-path)
-;;   -r  recompile for optimization
+;;   -M  machine-independent output (recompiled to machine-dependent on install)
 ;;   -g  prune unused definitions
 ;;   -o  explicit output path into compiled/ directory
 
@@ -33,7 +33,7 @@
 (unless (system* (find-executable-path "raco")
                  "demod"
                  "-s"
-                 "-r"
+                 "-M"
                  "-g"
                  "-o"
                  (path->string merged)
