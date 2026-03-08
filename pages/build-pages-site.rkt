@@ -81,6 +81,14 @@
        [(directory-exists? entry) (copy-directory/files entry dest)]
        [else (copy-file entry dest #t)]))
 
+   ;; Generate docs page from Scribble source
+   (define docs-out (open-output-string))
+   (parameterize ([current-output-port docs-out])
+     (dynamic-require (build-path root-dir "docs" "rackup.scrbl") #f))
+   (call-with-output-file (build-path out-dir "docs.html")
+     (lambda (out) (display (get-output-string docs-out) out))
+     #:exists 'truncate/replace)
+
    ;; Create .nojekyll marker
    (call-with-output-file (build-path out-dir ".nojekyll") void #:exists 'truncate/replace)
 

@@ -26,7 +26,8 @@
 (define rackup-site
   (site "www"
         #:navigation
-        (list @a[href: "./install.sh"]{install.sh}
+        (list @a[href: "./docs.html"]{Docs}
+              @a[href: "./install.sh"]{install.sh}
               @a[href: "https://github.com/samth/rackup"]{GitHub}
               @a[href: "https://github.com/samth/rackup/blob/main/README.md"]{README})
         #:page-headers
