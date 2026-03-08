@@ -361,11 +361,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # tgz installer path — Intel has full tgz, ARM only has minimal tgz
+          # tgz installer path — macOS only has minimal tgz
           - runner: macos-15-intel       # Intel x86_64
             installer_format: tgz
             setup_racket_arch: x64
-            extra_install_flags: ""
+            extra_install_flags: "--distribution minimal"
           - runner: macos-14       # Apple Silicon arm64
             installer_format: tgz
             setup_racket_arch: arm64
