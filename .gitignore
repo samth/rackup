@@ -6,6 +6,11 @@ compiled/
 .rackup/
 .ci-cache/
 
+# Node (used by build tooling)
+node_modules/
+package.json
+package-lock.json
+
 # Misc
 .DS_Store
 *~
