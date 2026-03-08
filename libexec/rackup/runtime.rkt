@@ -295,28 +295,26 @@
 
 (define (precompile-rackup-sources!)
   (define merged-zo (demod-merged-zo-path))
-  (cond
-    [(file-exists? merged-zo)
-     ;; Recompile demodularized machine-independent .zo to machine-dependent in place
-     (with-handlers ([exn:fail?
-                      (lambda (e)
-                        (eprintf "rackup: warning: failed to recompile demodularized .zo\n")
-                        (eprintf "~a\n" (exn-message e)))])
-       (define mi (parameterize ([read-accept-compiled #t])
-                    (call-with-input-file* merged-zo read)))
-       (define md (compiled-expression-recompile mi))
-       (call-with-output-file* merged-zo #:exists 'replace
-         (lambda (out) (write md out))))]
-    [else
-     ;; Fallback: compile from source
-     (define sources (rackup-source-paths))
-     (when (pair? sources)
-       (with-handlers ([exn:fail?
-                        (lambda (e)
-                          (eprintf "rackup: warning: failed to precompile rackup sources via compiler/cm\n")
-                          (eprintf "~a\n" (exn-message e)))])
-         (for ([src (in-list sources)])
-           (managed-compile-zo src))))]))
+  ;; Try to recompile demodularized .zo if present
+  (when (file-exists? merged-zo)
+    (with-handlers ([exn:fail?
+                     (lambda (e)
+                       (eprintf "rackup: warning: failed to recompile demodularized .zo\n")
+                       (eprintf "~a\n" (exn-message e)))])
+      (define mi (parameterize ([read-accept-compiled #t])
+                   (call-with-input-file* merged-zo read)))
+      (define md (compiled-expression-recompile mi))
+      (call-with-output-file* merged-zo #:exists 'replace
+        (lambda (out) (write md out)))))
+  ;; Always compile source files so regular .zo files match the current runtime
+  (define sources (rackup-source-paths))
+  (when (pair? sources)
+    (with-handlers ([exn:fail?
+                     (lambda (e)
+                       (eprintf "rackup: warning: failed to precompile rackup sources via compiler/cm\n")
+                       (eprintf "~a\n" (exn-message e)))])
+      (for ([src (in-list sources)])
+        (managed-compile-zo src)))))
 
 (define (with-runtime-lock thunk)
   (ensure-rackup-layout!)
