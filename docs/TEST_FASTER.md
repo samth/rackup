@@ -50,7 +50,7 @@ successfully.
 ### 4. Skip redundant pages-site builds in bootstrap-curl
 
 The `docker-e2e-bootstrap-curl` job runs
-`pages/build-pages-site.sh` inside the container, which requires
+`pages/build-pages-site.rkt` inside the container, which requires
 installing the `plt-web` Racket package and running `racket
 pages/site.rkt`. The `pages-build` job already builds this exact
 artifact.
