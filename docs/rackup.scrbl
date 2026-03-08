@@ -28,10 +28,6 @@
 @(define (cmd-table . rows)
    (tabular #:style "rackup-cmd-table" rows))
 
-@; Bypass Scribble's decode-content so "--" stays literal (not en-dash).
-@(define (literal-tt s)
-   (make-element 'tt (list (make-element #f s))))
-
 @; ── Document ───────────────────────────────────────────────────────
 
 @title[#:style doc-style #:version "" #:tag-prefix "rackup"]{Documentation}
@@ -70,25 +66,25 @@ The @tt{<spec>} argument selects which toolchain to install:
 @subsection[#:style sub-style]{Flags}
 
 @opt-table[
-  @list[@literal-tt{--variant cs|bc}
+  @list[@exec{--variant cs|bc}
         "Override VM variant (default depends on version)."]
-  @list[@literal-tt{--distribution full|minimal}
+  @list[@exec{--distribution full|minimal}
         "Install full or minimal distribution (default: full)."]
-  @list[@literal-tt{--snapshot-site auto|utah|northwestern}
+  @list[@exec{--snapshot-site auto|utah|northwestern}
         "Choose snapshot mirror (default: auto)."]
-  @list[@literal-tt{--arch <arch>}
+  @list[@exec{--arch <arch>}
         "Override target architecture (default: host arch)."]
-  @list[@literal-tt{--set-default}
+  @list[@exec{--set-default}
         "Set installed toolchain as the global default."]
-  @list[@literal-tt{--force}
+  @list[@exec{--force}
         "Reinstall if the same canonical toolchain is already installed."]
-  @list[@literal-tt{--no-cache}
+  @list[@exec{--no-cache}
         "Redownload installer instead of using cache."]
-  @list[@literal-tt{--installer-ext sh|tgz|dmg}
+  @list[@exec{--installer-ext sh|tgz|dmg}
         "Force installer extension (default: platform-dependent)."]
-  @list[@literal-tt{--quiet}
+  @list[@exec{--quiet}
         "Show minimal output (errors + final result lines)."]
-  @list[@literal-tt{--verbose}
+  @list[@exec{--verbose}
         "Show detailed installer URL/path output."]
 ]
 
@@ -110,7 +106,7 @@ List installed toolchains and show default/active tags.
 @shell-block{rackup list [--ids]}
 
 @opt-table[
-  @list[@literal-tt{--ids}
+  @list[@exec{--ids}
         "Print only toolchain IDs, one per line (for scripting)."]
 ]
 
@@ -130,8 +126,8 @@ list of published releases.
 @shell-block{rackup available [--all|--limit N]}
 
 @opt-table[
-  @list[@literal-tt{--all}   "Show all parsed release versions."]
-  @list[@literal-tt{--limit N} "Show at most N release versions (default: 20)."]
+  @list[@exec{--all}   "Show all parsed release versions."]
+  @list[@exec{--limit N} "Show at most N release versions (default: 20)."]
 ]
 
 @subsection[#:tag "available-examples" #:style sub-style]{Examples}
@@ -162,7 +158,7 @@ not installed, interactive shells are prompted to install it.
   @list[@tt{set <toolchain>} "Set the given toolchain as the default."]
   @list[@tt{<toolchain>}   "Shorthand for set <toolchain>."]
   @list[@tt{clear}         "Clear the default toolchain."]
-  @list[@literal-tt{--unset}       "Same as clear."]
+  @list[@exec{--unset}       "Same as clear."]
 ]
 
 @subsection[#:tag "default-examples" #:style sub-style]{Examples}
@@ -196,7 +192,7 @@ Show the active toolchain and whether it comes from shell activation
 @section[#:tag "which" #:style 'unnumbered]{@tt{rackup which}}
 
 Show the real executable path for a tool in a toolchain.  Without
-@literal-tt{--toolchain}, uses the active toolchain.
+@exec{--toolchain}, uses the active toolchain.
 
 @shell-block{rackup which <exe> [--toolchain <toolchain>]}
 
@@ -256,7 +252,7 @@ the shell environment.  Sets @tt{PLTHOME}, @tt{PLTADDONDIR},
 
 @shell-block{rackup run <toolchain> -- <command> [args...]}
 
-The @literal-tt{--} separator is required between the toolchain spec and the
+The @exec{--} separator is required between the toolchain spec and the
 command to run.
 
 @subsection[#:tag "run-examples" #:style sub-style]{Examples}
@@ -287,9 +283,9 @@ metadata so that shims and @tt{rackup switch} work with it.
 ]
 
 @opt-table[
-  @list[@literal-tt{--set-default}
+  @list[@exec{--set-default}
         "Set the linked toolchain as the global default."]
-  @list[@literal-tt{--force}
+  @list[@exec{--force}
         "Replace an existing link with the same local name."]
 ]
 
@@ -329,10 +325,10 @@ speed.
 
 @opt-table[
   @list[@tt{(default)} "Print a compact label like racket-9.1."]
-  @list[@literal-tt{--long}    "Print the long bracketed form: [rk:<toolchain-id>]."]
-  @list[@literal-tt{--short}   "Same as default."]
-  @list[@literal-tt{--raw}     "Print only the active toolchain ID."]
-  @list[@literal-tt{--source}  "Print <id><TAB><env|default>."]
+  @list[@exec{--long}    "Print the long bracketed form: [rk:<toolchain-id>]."]
+  @list[@exec{--short}   "Same as default."]
+  @list[@exec{--raw}     "Print only the active toolchain ID."]
+  @list[@exec{--source}  "Print <id><TAB><env|default>."]
 ]
 
 @subsection[#:style sub-style]{Shell prompt integration}
@@ -370,7 +366,7 @@ wraps @tt{rackup switch} so it takes effect in the current shell.
 
 @shell-block{rackup init [--shell bash|zsh]}
 
-If @literal-tt{--shell} is omitted, the current shell is detected
+If @exec{--shell} is omitted, the current shell is detected
 automatically.
 
 @; ────────────────────────────────────────────────────────────────────
@@ -384,7 +380,7 @@ keeps your current shell config unchanged.
 @shell-block{rackup self-upgrade [--with-init]}
 
 @opt-table[
-  @list[@literal-tt{--with-init}
+  @list[@exec{--with-init}
         "Allow the installer to run shell init updates."]
 ]
 
@@ -422,7 +418,7 @@ destructive and cannot be undone.
 @shell-block{rackup uninstall [--yes]}
 
 @opt-table[
-  @list[@literal-tt{--yes}
+  @list[@exec{--yes}
         "Skip the interactive DELETE confirmation prompt."]
 ]
 
