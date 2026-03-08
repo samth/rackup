@@ -25,7 +25,7 @@ jobs:
       - name: Build Pages site
         shell: bash
         run: |
-          racket -y scripts/build-pages-site.rkt /tmp/rackup-pages-site
+          racket -y pages/build-pages-site.rkt /tmp/rackup-pages-site
           test -f /tmp/rackup-pages-site/index.html
           test -f /tmp/rackup-pages-site/install.sh
           test -f /tmp/rackup-pages-site/rackup-src.tar.gz
