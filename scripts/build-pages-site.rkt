@@ -59,14 +59,22 @@
                     (directory-list (path-only merged))
                     "(directory does not exist)"))
        (error 'build-pages-site
-              "raco demod succeeded but output file not found: ~a" merged)))
+              "raco demod succeeded but output file not found: ~a" merged))
+     (eprintf "build-pages-site: demod output ~a bytes at ~a\n"
+              (file-size merged) merged))
 
+   (eprintf "build-pages-site: staging tree ~a\n" (path->string src-stage))
+   (run (find-executable-path "find")
+        src-stage "-name" "*.zo" "-ls")
    (run (find-executable-path "tar")
         "-C"
         tmp-stage
         "-czf"
         (build-path out-dir "rackup-src.tar.gz")
         "rackup-src")
+   (eprintf "build-pages-site: tarball .zo check:\n")
+   (system (format "tar -tzf ~a | grep '\\.zo$' || echo 'NO .zo FILES IN TARBALL' >&2"
+                   (path->string (build-path out-dir "rackup-src.tar.gz"))))
 
    ;; Compute SHA-256 of tarball and substitute into install.sh
    (define src-sha256
