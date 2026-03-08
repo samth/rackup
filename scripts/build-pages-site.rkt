@@ -12,10 +12,11 @@
 (define root-dir (simplify-path (build-path here "..")))
 
 (define out-dir
-  (let ([args (current-command-line-arguments)])
-    (if (> (vector-length args) 0)
-        (vector-ref args 0)
-        "_site")))
+  (path->complete-path
+   (let ([args (current-command-line-arguments)])
+     (if (> (vector-length args) 0)
+         (vector-ref args 0)
+         "_site"))))
 
 (define tmp-stage (make-temporary-directory))
 (define plt-web-stage (build-path tmp-stage "plt-web-out"))
@@ -72,10 +73,9 @@
      (call-with-output-file p (lambda (out) (display install-content out)) #:exists 'truncate/replace)
      (file-or-directory-permissions p #o755))
 
-   ;; Generate HTML; Racket computes the install.sh checksum itself
+   ;; Generate HTML via plt-web; render-all writes to www/ under CWD
    (make-directory* plt-web-stage)
-   (parameterize ([current-command-line-arguments
-                   (vector "-r" "-o" (path->string plt-web-stage) "-f")])
+   (parameterize ([current-directory plt-web-stage])
      (generate-site (path->string (build-path out-dir "install.sh"))))
 
    ;; Copy plt-web output into out-dir
