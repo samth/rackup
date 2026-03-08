@@ -65,6 +65,13 @@ for _rackup_v in PLTHOME PLTCOLLECTS PLTADDONDIR PLTCOMPILEDROOTS PLTUSERHOME RA
 done
 unset PLTHOME PLTCOLLECTS PLTADDONDIR PLTCOMPILEDROOTS PLTUSERHOME RACKET_XPATCH PLT_COMPILED_FILE_CHECK
 
+# When falling back to system Racket (-y recompile), isolate compiled output
+# so system Racket's .zo files don't overwrite hidden-runtime compiled files.
+if [ "$USE_Y" -eq 1 ]; then
+  PLTCOMPILEDROOTS="${TMPDIR:-/tmp}/rackup-sys-compiled"
+  export PLTCOMPILEDROOTS
+fi
+
 rackup_run_core() {
   if [ "$CORE" = "$DEMOD_ZO" ]; then
     "$RACKET_EXE" -U -A "$RUNTIME_ADDON_DIR" "$CORE" "$@"

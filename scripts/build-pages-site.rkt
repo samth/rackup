@@ -52,7 +52,14 @@
      (make-directory* (path-only merged))
      (run (find-executable-path "raco")
           "demod" "-s" "-M" "-g" "-o"
-          merged core))
+          merged core)
+     (unless (file-exists? merged)
+       (eprintf "build-pages-site: compiled dir contents: ~a\n"
+                (if (directory-exists? (path-only merged))
+                    (directory-list (path-only merged))
+                    "(directory does not exist)"))
+       (error 'build-pages-site
+              "raco demod succeeded but output file not found: ~a" merged)))
 
    (run (find-executable-path "tar")
         "-C"
