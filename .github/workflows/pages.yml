@@ -12,8 +12,8 @@ on:
       - scripts/build-pages-site.rkt
       - scripts/build-pages-site.sh
       - scripts/copy-filtered-tree.sh
-      - scripts/docker-test-fresh-install.sh
-      - scripts/e2e-fresh-container.sh
+      - test/docker-test-fresh-install.sh
+      - test/e2e-fresh-container.sh
       - scripts/install.sh
   workflow_dispatch:
 
@@ -83,7 +83,7 @@ jobs:
       - name: Verify curl-pipe-sh bootstrap against built site bundle
         run: |
           RACKUP_E2E_PREBUILT_PAGES_DIR="$PWD/dist/site" \
-          scripts/docker-test-fresh-install.sh \
+          test/docker-test-fresh-install.sh \
             --mode bootstrap-curl \
             --host-racket absent \
             --spec stable

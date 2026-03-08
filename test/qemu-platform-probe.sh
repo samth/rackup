@@ -13,7 +13,7 @@ usage() {
 Run architecture/platform detection checks in an emulated Docker container.
 
 Usage:
-  scripts/qemu-platform-probe.sh --platform P --expected-arch A [options]
+  test/qemu-platform-probe.sh --platform P --expected-arch A [options]
 
 Options:
   --platform P         Docker platform (example: linux/riscv64, linux/arm/v7, linux/386)

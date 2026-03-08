@@ -125,7 +125,7 @@ jobs:
       - uses: docker/setup-buildx-action@v3
       - name: Docker bootstrap install smoke on distro
         run: |
-          scripts/docker-test-fresh-install.sh \
+          test/docker-test-fresh-install.sh \
             --mode bootstrap \
             --host-racket absent \
             --base-image "${{ matrix.base_image }}" \
@@ -161,7 +161,7 @@ jobs:
           platforms: arm,386,riscv64,ppc64le
       - name: Probe arch/platform detection
         run: |
-          scripts/qemu-platform-probe.sh \
+          test/qemu-platform-probe.sh \
             --platform "${{ matrix.platform }}" \
             --expected-arch "${{ matrix.expected_arch }}" \
             --base-image "${{ matrix.base_image }}" \
@@ -176,7 +176,7 @@ jobs:
       - uses: docker/setup-buildx-action@v3
       - name: Docker fresh-container installs and local-link smoke
         run: |
-          scripts/docker-test-fresh-install.sh \
+          test/docker-test-fresh-install.sh \
             --spec stable \
             --spec 8.18 \
             --spec 7.9
@@ -190,7 +190,7 @@ jobs:
       - uses: docker/setup-buildx-action@v3
       - name: Docker legacy 6.0 install smoke
         run: |
-          scripts/docker-test-fresh-install.sh \
+          test/docker-test-fresh-install.sh \
             --spec 6.0 \
             --skip-package-tests
 
@@ -203,7 +203,7 @@ jobs:
       - uses: docker/setup-buildx-action@v3
       - name: Docker pre-release fresh-container install
         run: |
-          scripts/docker-test-fresh-install.sh \
+          test/docker-test-fresh-install.sh \
             --spec pre-release
 
   native-i386-vm-103p1:
@@ -221,17 +221,17 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .ci-cache/native-i386-vm/downloads
-          key: native-i386-vm-downloads-${{ hashFiles('scripts/native-i386-vm-test.sh') }}
+          key: native-i386-vm-downloads-${{ hashFiles('test/native-i386-vm-test.sh') }}
       - name: Restore native i386 VM guest disk cache
         uses: actions/cache@v4
         with:
           path: .ci-cache/native-i386-vm/debian-i386.qcow2
-          key: native-i386-vm-disk-v1-${{ hashFiles('scripts/native-i386-vm-test.sh', 'scripts/ci-native-i386-vm-smoke.sh', 'vm/native-i386-firstboot.sh', 'vm/native-i386-firstboot.service') }}
+          key: native-i386-vm-disk-v1-${{ hashFiles('test/native-i386-vm-test.sh', 'test/ci-native-i386-vm-smoke.sh', 'test/vm/native-i386-firstboot.sh', 'test/vm/native-i386-firstboot.service') }}
       - name: Native i386 103p1 smoke
         shell: bash
         run: |
-          chmod +x scripts/native-i386-vm-test.sh scripts/ci-native-i386-vm-smoke.sh
-          scripts/ci-native-i386-vm-smoke.sh
+          chmod +x test/native-i386-vm-test.sh test/ci-native-i386-vm-smoke.sh
+          test/ci-native-i386-vm-smoke.sh
       - name: Upload native i386 VM artifacts on failure
         if: failure()
         uses: actions/upload-artifact@v4
@@ -252,7 +252,7 @@ jobs:
       - uses: docker/setup-buildx-action@v3
       - name: Docker bootstrap fresh-container install and local-link smoke
         run: |
-          scripts/docker-test-fresh-install.sh \
+          test/docker-test-fresh-install.sh \
             --mode bootstrap \
             --spec stable
 
@@ -265,7 +265,7 @@ jobs:
       - uses: docker/setup-buildx-action@v3
       - name: Docker bootstrap without host racket (hidden runtime)
         run: |
-          scripts/docker-test-fresh-install.sh \
+          test/docker-test-fresh-install.sh \
             --mode bootstrap \
             --host-racket absent \
             --spec stable \
@@ -293,7 +293,7 @@ jobs:
       - name: Docker curl-pipe-sh bootstrap smoke (no host racket)
         run: |
           RACKUP_E2E_PREBUILT_PAGES_DIR="$PWD/.ci-cache/pages-site" \
-          scripts/docker-test-fresh-install.sh \
+          test/docker-test-fresh-install.sh \
             --mode bootstrap-curl \
             --host-racket absent \
             --spec stable
@@ -307,7 +307,7 @@ jobs:
       - uses: docker/setup-buildx-action@v3
       - name: Docker upgrade path and snapshot site smoke
         run: |
-          scripts/docker-test-fresh-install.sh \
+          test/docker-test-fresh-install.sh \
             --spec stable \
             --snapshot-site auto
 
@@ -320,7 +320,7 @@ jobs:
       - uses: docker/setup-buildx-action@v3
       - name: Docker snapshot install from Utah
         run: |
-          scripts/docker-test-fresh-install.sh \
+          test/docker-test-fresh-install.sh \
             --spec stable \
             --snapshot-site utah
 
@@ -333,7 +333,7 @@ jobs:
       - uses: docker/setup-buildx-action@v3
       - name: Docker snapshot install from Northwestern
         run: |
-          scripts/docker-test-fresh-install.sh \
+          test/docker-test-fresh-install.sh \
             --spec stable \
             --snapshot-site northwestern
 
@@ -346,7 +346,7 @@ jobs:
       - uses: docker/setup-buildx-action@v3
       - name: Docker source-build local-link smoke
         run: |
-          scripts/docker-test-fresh-install.sh \
+          test/docker-test-fresh-install.sh \
             --spec stable \
             --local-link-mode build \
             --source-build-ref v8.18 \

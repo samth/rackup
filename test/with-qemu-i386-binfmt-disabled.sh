@@ -10,7 +10,7 @@ usage() {
 Run a command with qemu-i386 binfmt_misc temporarily disabled, then restore it.
 
 Usage:
-  scripts/with-qemu-i386-binfmt-disabled.sh <command> [args...]
+  test/with-qemu-i386-binfmt-disabled.sh <command> [args...]
 EOF
 }
 

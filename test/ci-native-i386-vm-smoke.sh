@@ -20,4 +20,4 @@ if [[ -f "$WORKDIR/debian-i386.qcow2" ]]; then
   args+=(--skip-install)
 fi
 
-exec "$ROOT_DIR/scripts/native-i386-vm-test.sh" "${args[@]}" "$@"
+exec "$ROOT_DIR/test/native-i386-vm-test.sh" "${args[@]}" "$@"

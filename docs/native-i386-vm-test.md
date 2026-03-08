@@ -30,7 +30,7 @@ The host also needs:
 
 ## What the script does
 
-`scripts/native-i386-vm-test.sh` performs these steps:
+`test/native-i386-vm-test.sh` performs these steps:
 
 1. Download the official Debian 12.13.0 `i386` netinst ISO.
 2. Verify the ISO checksum.
@@ -57,7 +57,7 @@ The host share captures:
 
 ## CI usage
 
-The CI job uses `scripts/ci-native-i386-vm-smoke.sh`, which:
+The CI job uses `test/ci-native-i386-vm-smoke.sh`, which:
 
 - runs the harness in `--mode smoke`
 - forces `--no-kvm` so it works on GitHub-hosted runners
@@ -77,16 +77,16 @@ dependencies.
 ## Usage
 
 ```sh
-scripts/native-i386-vm-test.sh
+test/native-i386-vm-test.sh
 ```
 
 Useful options:
 
 ```sh
-scripts/native-i386-vm-test.sh --download-only
-scripts/native-i386-vm-test.sh --workdir /tmp/rackup-native-i386-vm
-scripts/native-i386-vm-test.sh --skip-install
-scripts/native-i386-vm-test.sh --no-kvm
+test/native-i386-vm-test.sh --download-only
+test/native-i386-vm-test.sh --workdir /tmp/rackup-native-i386-vm
+test/native-i386-vm-test.sh --skip-install
+test/native-i386-vm-test.sh --no-kvm
 ```
 
 ## Current default inputs
