@@ -41,6 +41,9 @@ mkdir -p "$PLT_WEB_STAGE"
 racket "$ROOT_DIR/pages/site.rkt" --install-sh "$OUT_DIR/install.sh" -r -o "$PLT_WEB_STAGE" -f
 cp -R "$PLT_WEB_STAGE/www/." "$OUT_DIR/"
 
+# Generate docs page from Scribble source.
+racket "$ROOT_DIR/docs/rackup.scrbl" > "$OUT_DIR/docs.html"
+
 : >"$OUT_DIR/.nojekyll"
 
 echo "Built GitHub Pages site in $OUT_DIR"

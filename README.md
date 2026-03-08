@@ -2,7 +2,7 @@
 
 A Racket toolchain manager
 
-**[Documentation](docs/rackup.html)** — full command reference and usage guide
+**[Documentation](https://samth.github.io/rackup/docs.html)** — full command reference and usage guide
 ([Scribble source](docs/rackup.scrbl))
 
 ## Status
