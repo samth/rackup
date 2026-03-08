@@ -29,7 +29,9 @@ jobs:
           test -f /tmp/rackup-pages-site/index.html
           test -f /tmp/rackup-pages-site/install.sh
           test -f /tmp/rackup-pages-site/rackup-src.tar.gz
-          grep -Fq 'btn.innerHTML' /tmp/rackup-pages-site/index.html
+          test -f /tmp/rackup-pages-site/rackup.css
+          test -f /tmp/rackup-pages-site/rackup.js
+          grep -Fq 'btn.innerHTML' /tmp/rackup-pages-site/rackup.js
           grep -Fq 'sha256sum -c' /tmp/rackup-pages-site/index.html
           # Every user-facing command from `rackup help` must appear on the webpage.
           # Internal commands (help, shell, runtime) are excluded.
