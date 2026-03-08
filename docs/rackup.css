@@ -1,0 +1,269 @@
+/* ── rackup docs — scribble/manual style overrides ──────────────── */
+/* Makes scribble-generated HTML match the rackup site appearance.   */
+
+/* ── Base ───────────────────────────────────────────────────────── */
+
+body {
+  background: white !important;
+  color: #333 !important;
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif !important;
+  font-size: 16px !important;
+  line-height: 1.6 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+/* ── Hide scribble chrome ───────────────────────────────────────── */
+
+.tocset,
+.versionbox,
+.navsettop,
+.navsetbottom {
+  display: none !important;
+}
+
+/* ── Main content area ──────────────────────────────────────────── */
+
+.maincolumn {
+  margin: 0 auto !important;
+  max-width: 1050px !important;
+  padding: 0 1.5rem 4rem !important;
+  width: auto !important;
+}
+
+.main {
+  max-width: none !important;
+  margin: 0 !important;
+}
+
+/* ── Navbar (injected by rackup-navbar.js) ───────────────────────── */
+
+.rackup-navbar {
+  background: white;
+  border-bottom: 1px solid #ddd;
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  padding: 0.6rem 1.5rem;
+}
+
+.rackup-navbar .logo {
+  color: #333 !important;
+  font-size: 1.1rem;
+  font-weight: 700;
+  text-decoration: none !important;
+}
+
+.rackup-navbar a {
+  color: #333 !important;
+  font-size: 0.9rem;
+  font-weight: 600;
+  text-decoration: none !important;
+}
+
+.rackup-navbar a:hover {
+  color: #0679a7 !important;
+}
+
+/* ── Links ──────────────────────────────────────────────────────── */
+
+a {
+  color: #0679a7 !important;
+  text-decoration: none !important;
+}
+
+a:hover {
+  color: #034b6b !important;
+  text-decoration: underline !important;
+}
+
+/* ── Headings ───────────────────────────────────────────────────── */
+
+h2 {
+  border-bottom: 1px solid #ddd !important;
+  color: #333 !important;
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif !important;
+  font-size: 2rem !important;
+  font-weight: 600 !important;
+  margin: 2rem 0 0.5rem !important;
+  padding-bottom: 1rem !important;
+}
+
+h3 {
+  border-bottom: 1px solid #ddd !important;
+  color: #333 !important;
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif !important;
+  font-size: 1.4rem !important;
+  font-weight: 600 !important;
+  margin: 2rem 0 0.75rem !important;
+  padding-bottom: 0.5rem !important;
+}
+
+h4 {
+  border: none !important;
+  color: #333 !important;
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif !important;
+  font-size: 1.15rem !important;
+  font-weight: 600 !important;
+  margin: 1.5rem 0 0.5rem !important;
+}
+
+h5 {
+  color: #333 !important;
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif !important;
+  font-size: 1rem !important;
+  font-weight: 600 !important;
+  margin: 1rem 0 0.4rem !important;
+}
+
+/* ── Paragraphs ─────────────────────────────────────────────────── */
+
+p, .SIntrapara {
+  color: #555 !important;
+  max-width: 50rem;
+}
+
+/* ── Lists ──────────────────────────────────────────────────────── */
+
+ul, ol {
+  color: #555 !important;
+  max-width: 50rem;
+  padding-left: 1.5rem !important;
+}
+
+li {
+  margin-bottom: 0.4rem !important;
+}
+
+/* ── Inline code (.stt from @tt) ────────────────────────────────── */
+
+.stt {
+  background: #f0f0f0 !important;
+  border-radius: 3px !important;
+  color: #333 !important;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace !important;
+  font-size: 0.95em !important;
+  padding: 0.1rem 0.35rem !important;
+}
+
+/* ── Shell blocks (dark code blocks from shell-block helper) ───── */
+
+blockquote.rackup-shell,
+div.rackup-shell {
+  background: #2d2d2d !important;
+  border: none !important;
+  border-left: none !important;
+  border-radius: 6px !important;
+  color: #f0f0f0 !important;
+  margin: 0.5rem 0 !important;
+  overflow-x: auto !important;
+  padding: 0.8rem 1rem !important;
+}
+
+.rackup-shell table,
+.rackup-shell .RktBlk,
+.rackup-shell td {
+  background: transparent !important;
+  border: none !important;
+  color: #f0f0f0 !important;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace !important;
+  font-size: 1rem !important;
+  line-height: 1.5 !important;
+}
+
+.rackup-shell .RktMeta,
+.rackup-shell .RktPn,
+.rackup-shell .RktSym,
+.rackup-shell .RktVal,
+.rackup-shell .RktIn,
+.rackup-shell .RktOut,
+.rackup-shell .RktCmt,
+.rackup-shell .RktErr,
+.rackup-shell .RktRes,
+.rackup-shell .RktVar,
+.rackup-shell .RktRdr,
+.rackup-shell .RktKw,
+.rackup-shell .RktOpt {
+  background: transparent !important;
+  color: #f0f0f0 !important;
+}
+
+.rackup-shell .stt {
+  background: transparent !important;
+  color: #f0f0f0 !important;
+  padding: 0 !important;
+}
+
+/* ── Option tables ──────────────────────────────────────────────── */
+
+.rackup-opt-table,
+.rackup-cmd-table {
+  border: none !important;
+  border-collapse: collapse !important;
+  font-size: 0.95rem !important;
+  margin: 0.5rem 0 !important;
+  width: 100% !important;
+}
+
+.rackup-opt-table tr,
+.rackup-cmd-table tr {
+  border: none !important;
+}
+
+.rackup-opt-table td,
+.rackup-cmd-table td {
+  border: none !important;
+  padding: 0.35rem 0.8rem 0.35rem 0 !important;
+  vertical-align: top !important;
+}
+
+.rackup-opt-table td:first-child,
+.rackup-cmd-table td:first-child {
+  white-space: nowrap !important;
+}
+
+.rackup-opt-table td:last-child,
+.rackup-cmd-table td:last-child {
+  color: #555 !important;
+}
+
+/* ── Default code blocks (non-shell) ────────────────────────────── */
+
+.SCodeFlow {
+  margin: 0.5rem 0 !important;
+}
+
+.RktBlk {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace !important;
+  font-size: 1rem !important;
+}
+
+/* ── Table of contents ──────────────────────────────────────────── */
+
+.tocsublist {
+  border: none !important;
+  border-collapse: collapse !important;
+}
+
+.tocsublist td {
+  border: none !important;
+  padding: 0.2rem 0 !important;
+}
+
+.tocsublist a {
+  font-size: 0.95rem;
+}
+
+/* ── Emphasis ───────────────────────────────────────────────────── */
+
+em, .emph {
+  font-style: italic;
+}
+
+/* ── Responsive ─────────────────────────────────────────────────── */
+
+@media (max-width: 700px) {
+  .maincolumn {
+    padding: 0 1rem 2rem !important;
+  }
+}

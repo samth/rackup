@@ -41,8 +41,8 @@ mkdir -p "$PLT_WEB_STAGE"
 racket "$ROOT_DIR/pages/site.rkt" --install-sh "$OUT_DIR/install.sh" -r -o "$PLT_WEB_STAGE" -f
 cp -R "$PLT_WEB_STAGE/www/." "$OUT_DIR/"
 
-# Generate docs page from Scribble source.
-racket "$ROOT_DIR/docs/rackup.scrbl" > "$OUT_DIR/docs.html"
+# Generate docs page from Scribble source (scribble/manual → HTML).
+scribble --html --dest "$OUT_DIR" --dest-name docs "$ROOT_DIR/docs/rackup.scrbl"
 
 : >"$OUT_DIR/.nojekyll"
 
