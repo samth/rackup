@@ -122,7 +122,7 @@ elif [[ "$MODE" == "bootstrap-curl" ]]; then
   else
     PAGES_DIR="$TMPDIR/rackup-pages-site"
     rm -rf "$PAGES_DIR"
-    sh "$RUN_SRC/scripts/build-pages-site.sh" "$PAGES_DIR"
+    sh "$RUN_SRC/pages/build-pages-site.sh" "$PAGES_DIR"
   fi
   PAGES_PORT="${RACKUP_E2E_PAGES_PORT:-18765}"
   python3 -m http.server --bind 127.0.0.1 "$PAGES_PORT" --directory "$PAGES_DIR" >/tmp/rackup-e2e-pages.log 2>&1 &

@@ -290,7 +290,7 @@ if [[ "$MODE" == "bootstrap-curl" ]]; then
   else
     PREBUILT_PAGES_DIR="$(mktemp -d "${TMPDIR:-/tmp}/rackup-pages-prebuilt.XXXXXX")"
     PREBUILT_PAGES_DIR_OWNED=1
-    sh "$ROOT_DIR/scripts/build-pages-site.sh" "$PREBUILT_PAGES_DIR"
+    sh "$ROOT_DIR/pages/build-pages-site.sh" "$PREBUILT_PAGES_DIR"
   fi
   run_cmd+=(-v "$PREBUILT_PAGES_DIR:/prebuilt-pages:ro")
 fi
