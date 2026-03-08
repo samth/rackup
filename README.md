@@ -2,6 +2,9 @@
 
 A Racket toolchain manager
 
+**[Documentation](docs/rackup.html)** — full command reference and usage guide
+([Scribble source](docs/rackup.scrbl))
+
 ## Status
 
 Linux-first v1 scaffold implemented in Bash + Racket with:

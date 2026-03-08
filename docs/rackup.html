@@ -1,0 +1,659 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>rackup — Racket toolchain manager</title>
+<style>
+    html, body {
+      background: white;
+      color: #333;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+      font-size: 16px;
+      line-height: 1.6;
+    }
+    a { color: #0679a7; text-decoration: none; }
+    a:hover { color: #034b6b; text-decoration: underline; }
+
+    /* Navbar */
+    .navbar {
+      background: white;
+      border-bottom: 1px solid #ddd;
+      padding: 0.6rem 1.5rem;
+      display: flex;
+      align-items: center;
+      gap: 1.5rem;
+    }
+    .navbar .logo {
+      font-size: 1.1rem;
+      font-weight: 700;
+      color: #333;
+      text-decoration: none;
+    }
+    .navbar a {
+      font-size: 0.9rem;
+      font-weight: 600;
+      color: #333;
+    }
+    .navbar a:hover { color: #0679a7; }
+
+    /* Page container */
+    .rackup-page {
+      margin: 0 auto;
+      max-width: 1050px;
+      padding: 0 1.5rem 4rem;
+    }
+
+    /* Top install section */
+    .rackup-top {
+      border-bottom: 1px solid #ddd;
+      padding: 2.5rem 0 2rem;
+    }
+    .rackup-top h1 {
+      color: #333;
+      font-size: 3rem;
+      font-weight: 600;
+      margin: 0 0 0.5rem;
+    }
+    .rackup-top h1 code {
+      background: none;
+      font-size: inherit;
+      padding: 0;
+    }
+    .rackup-top-desc {
+      color: #555;
+      font-size: 1.3rem;
+      margin: 0 0 1.5rem;
+      max-width: 50rem;
+    }
+    pre.rackup-shell {
+      background: #2d2d2d;
+      border: none;
+      border-radius: 6px;
+      color: #f0f0f0;
+      margin: 0;
+      overflow-x: auto;
+      padding: 0.8rem 1rem;
+    }
+    pre.rackup-shell code {
+      background: transparent;
+      color: #f0f0f0;
+      display: block;
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+      font-size: 1rem;
+      line-height: 1.5;
+      margin: 0;
+      padding: 0;
+      white-space: pre-wrap;
+    }
+    .rackup-shell + .rackup-shell { margin-top: 0.6rem; }
+    .rackup-top pre.rackup-shell code { font-size: 1.3rem; }
+    .rackup-note {
+      color: #666;
+      font-size: 0.9rem;
+      margin-top: 0.8rem;
+    }
+    code {
+      background: #f0f0f0;
+      border-radius: 3px;
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+      font-size: 1em;
+      padding: 0.1rem 0.35rem;
+    }
+
+    /* Sections */
+    .rackup-section {
+      border-bottom: 1px solid #ddd;
+      padding: 2rem 0;
+    }
+    .rackup-section:last-child { border-bottom: none; }
+    .rackup-section h2 {
+      color: #333;
+      font-size: 1.4rem;
+      font-weight: 600;
+      margin: 0 0 0.75rem;
+    }
+    .rackup-section > p {
+      color: #555;
+      margin: 0 0 1rem;
+      max-width: 50rem;
+    }
+    .rackup-section > ul,
+    .rackup-section > ol {
+      color: #555;
+      max-width: 50rem;
+      padding-left: 1.5rem;
+    }
+    .rackup-section > ul li,
+    .rackup-section > ol li {
+      margin-bottom: 0.4rem;
+    }
+
+    /* Toolchain type grid */
+    .rackup-grid {
+      display: grid;
+      gap: 1.5rem;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      margin-top: 1rem;
+    }
+    .rackup-grid h3 {
+      color: #0679a7;
+      font-size: 1.05rem;
+      font-weight: 600;
+      margin: 0 0 0.3rem;
+    }
+    .rackup-grid p {
+      color: #555;
+      font-size: 0.95rem;
+      margin: 0 0 0.4rem;
+    }
+    .rackup-grid ul {
+      color: #555;
+      font-size: 0.9rem;
+      list-style: none;
+      margin: 0;
+      padding: 0;
+    }
+    .rackup-grid ul li { margin-bottom: 0.2rem; }
+    .rackup-grid ul li code { font-size: 0.95rem; }
+
+    /* Two-column layout */
+    .rackup-two-col {
+      display: grid;
+      gap: 2rem;
+      grid-template-columns: 1fr 1fr;
+      margin-top: 1rem;
+    }
+    @media (max-width: 700px) {
+      .rackup-two-col { grid-template-columns: 1fr; }
+    }
+    .rackup-two-col h3 {
+      font-size: 1.05rem;
+      font-weight: 600;
+      margin: 0 0 0.5rem;
+    }
+    .rackup-two-col p {
+      color: #555;
+      margin: 0 0 0.5rem;
+    }
+    .rackup-two-col ul {
+      color: #555;
+      margin: 0;
+      padding-left: 1.2rem;
+    }
+    .rackup-two-col ul li { margin-bottom: 0.3rem; }
+
+    /* Command reference table */
+    .rackup-cmd-table {
+      border: none;
+      border-collapse: collapse;
+      font-size: 0.95rem;
+      margin-top: 0.5rem;
+      width: 100%;
+    }
+    .rackup-cmd-table tr { border: none; }
+    .rackup-cmd-table td {
+      border: none;
+      padding: 0.4rem 0.8rem 0.4rem 0;
+      vertical-align: top;
+    }
+    .rackup-cmd-table td:first-child { white-space: nowrap; }
+    .rackup-cmd-table td:last-child { color: #555; }
+
+    /* Option lists */
+    .rackup-opt-table {
+      border: none;
+      border-collapse: collapse;
+      font-size: 0.95rem;
+      margin-top: 0.5rem;
+      width: 100%;
+    }
+    .rackup-opt-table tr { border: none; }
+    .rackup-opt-table td {
+      border: none;
+      padding: 0.3rem 0.8rem 0.3rem 0;
+      vertical-align: top;
+    }
+    .rackup-opt-table td:first-child { white-space: nowrap; }
+    .rackup-opt-table td:last-child { color: #555; }
+
+    /* Subsection headings inside sections */
+    .rackup-section h3 {
+      color: #333;
+      font-size: 1.15rem;
+      font-weight: 600;
+      margin: 1.5rem 0 0.5rem;
+    }
+    .rackup-section h3:first-child { margin-top: 0; }
+</style>
+</head>
+<body>
+<div class="navbar">
+ <a class="logo" href="https://samth.github.io/rackup/">rackup</a>
+ <a href="https://samth.github.io/rackup/install.sh">install.sh</a>
+ <a href="https://github.com/samth/rackup">GitHub</a>
+ <a href="https://github.com/samth/rackup/blob/main/README.md">README</a>
+</div>
+
+<div class="rackup-page">
+
+ <!-- Hero / install -->
+ <div class="rackup-top">
+  <h1><code>rackup</code></h1>
+  <p class="rackup-top-desc">
+   A toolchain manager for Racket. Install and switch between stable releases,
+   pre-releases, snapshots, old PLT Scheme builds, and local source trees.
+  </p>
+  <pre class="rackup-shell"><code>curl -fsSL https://samth.github.io/rackup/install.sh | sh</code></pre>
+  <p class="rackup-note">
+   This installs <code>rackup</code> itself. Then run <code>rackup install stable</code>
+   to install Racket.
+   Pass <code>-y</code> for non-interactive mode:
+  </p>
+  <pre class="rackup-shell"><code>curl -fsSL https://samth.github.io/rackup/install.sh | sh -s -- -y</code></pre>
+  <p class="rackup-note">
+   Or, to verify the install script's checksum before running it:
+  </p>
+  <pre class="rackup-shell"><code>curl -fsSL -o install.sh https://samth.github.io/rackup/install.sh
+echo "&lt;sha256&gt;  install.sh" | sha256sum -c -
+sh install.sh &amp;&amp; rm install.sh</code></pre>
+ </div>
+
+ <!-- What it manages -->
+ <div class="rackup-section">
+  <h2>What it manages</h2>
+  <p>
+   Racket has stable releases, historical releases going back to PLT Scheme,
+   pre-release builds, snapshot builds, and local source trees. <code>rackup</code>
+   handles all of them with the same interface.
+  </p>
+  <div class="rackup-grid">
+   <div>
+    <h3>Stable releases</h3>
+    <p>Current or specific versions.</p>
+    <ul>
+     <li><code>rackup install stable</code></li>
+     <li><code>rackup install 8.18</code></li>
+     <li><code>rackup install 5.2</code></li>
+    </ul>
+   </div>
+   <div>
+    <h3>Historical</h3>
+    <p>PLT Scheme-era installers.</p>
+    <ul>
+     <li><code>rackup install 4.2.5</code></li>
+     <li><code>rackup install 372</code></li>
+     <li><code>rackup available 4.</code></li>
+    </ul>
+   </div>
+   <div>
+    <h3>Pre-release and snapshots</h3>
+    <p>From <a href="https://pre-release.racket-lang.org">pre-release</a>
+       and <a href="https://snapshot.racket-lang.org">snapshot</a> builds.</p>
+    <ul>
+     <li><code>rackup install pre-release</code></li>
+     <li><code>rackup install snapshot</code></li>
+     <li><code>rackup install snapshot:utah</code></li>
+    </ul>
+   </div>
+   <div>
+    <h3>Local source trees</h3>
+    <p>Link a built-from-source tree.</p>
+    <ul>
+     <li><code>rackup link dev ~/racket</code></li>
+     <li>Exports <code>scheme</code> and <code>petite</code> too</li>
+    </ul>
+   </div>
+  </div>
+ </div>
+
+ <!-- Switching and shims -->
+ <div class="rackup-section">
+  <h2>Switching and shims</h2>
+  <div class="rackup-two-col">
+   <div>
+    <p>
+     When you install a toolchain, <code>rackup</code> creates shims for all of its
+     executables: <code>racket</code>, <code>raco</code>, <code>scribble</code>, <code>slideshow</code>,
+     <code>drracket</code>, and others. The shims go on your <code>PATH</code>, so your
+     shell, editor, and scripts use <code>racket</code> directly.
+    </p>
+    <p>
+     Switch the active toolchain with <code>rackup default</code>. The first
+     toolchain you install becomes the default automatically.
+    </p>
+   </div>
+   <div>
+    <pre class="rackup-shell"><code>$ rackup install stable
+$ rackup install pre-release
+$ rackup default stable
+$ racket -e '(displayln (version))'
+$ raco pkg install gregor</code></pre>
+   </div>
+  </div>
+ </div>
+
+ <!-- Command reference -->
+ <div class="rackup-section">
+  <h2>Commands</h2>
+  <table class="rackup-cmd-table">
+   <tr><td><code>rackup install &lt;spec&gt;</code></td><td>Install a toolchain</td></tr>
+   <tr><td><code>rackup list</code></td><td>List installed toolchains</td></tr>
+   <tr><td><code>rackup available</code></td><td>List installable toolchains</td></tr>
+   <tr><td><code>rackup default &lt;name&gt;</code></td><td>Set the global default toolchain</td></tr>
+   <tr><td><code>rackup current</code></td><td>Show the active toolchain and its source</td></tr>
+   <tr><td><code>rackup switch &lt;name&gt;</code></td><td>Switch the active toolchain in this shell</td></tr>
+   <tr><td><code>rackup run &lt;name&gt; -- &lt;cmd&gt;</code></td><td>Run a command using a specific toolchain</td></tr>
+   <tr><td><code>rackup which &lt;cmd&gt;</code></td><td>Show path for a shimmed command</td></tr>
+   <tr><td><code>rackup link &lt;name&gt; &lt;path&gt;</code></td><td>Link a local source tree</td></tr>
+   <tr><td><code>rackup remove &lt;name&gt;</code></td><td>Remove an installed toolchain</td></tr>
+   <tr><td><code>rackup prompt</code></td><td>Print toolchain info for shell prompt</td></tr>
+   <tr><td><code>rackup reshim</code></td><td>Rebuild shims from installed toolchains</td></tr>
+   <tr><td><code>rackup doctor</code></td><td>Print diagnostics</td></tr>
+   <tr><td><code>rackup init --shell &lt;sh&gt;</code></td><td>Set up shell integration</td></tr>
+   <tr><td><code>rackup self-upgrade</code></td><td>Upgrade rackup itself</td></tr>
+   <tr><td><code>rackup uninstall</code></td><td>Remove rackup and all managed state</td></tr>
+   <tr><td><code>rackup version</code></td><td>Print version info</td></tr>
+  </table>
+ </div>
+
+ <!-- install -->
+ <div class="rackup-section">
+  <h2><code>rackup install</code></h2>
+  <p>Install a Racket toolchain from official release, pre-release, or snapshot installers.</p>
+  <pre class="rackup-shell"><code>rackup install &lt;spec&gt; [flags]</code></pre>
+  <h3>Install specs</h3>
+  <p>The <code>&lt;spec&gt;</code> argument selects which toolchain to install:</p>
+  <ul>
+   <li><code>stable</code> — the current stable Racket release</li>
+   <li><code>pre-release</code> — the latest pre-release build</li>
+   <li><code>snapshot</code> — the latest snapshot build (auto-selects a mirror)</li>
+   <li><code>snapshot:utah</code> or <code>snapshot:northwestern</code> — snapshot from a specific mirror</li>
+   <li>A numeric version like <code>8.18</code>, <code>7.9</code>, <code>5.2</code>, <code>4.2.5</code>, or <code>372</code></li>
+  </ul>
+  <h3>Flags</h3>
+  <table class="rackup-opt-table">
+   <tr><td><code>--variant cs|bc</code></td><td>Override VM variant (default depends on version).</td></tr>
+   <tr><td><code>--distribution full|minimal</code></td><td>Install full or minimal distribution (default: full).</td></tr>
+   <tr><td><code>--snapshot-site auto|utah|northwestern</code></td><td>Choose snapshot mirror (default: auto).</td></tr>
+   <tr><td><code>--arch &lt;arch&gt;</code></td><td>Override target architecture (default: host arch).</td></tr>
+   <tr><td><code>--set-default</code></td><td>Set installed toolchain as the global default.</td></tr>
+   <tr><td><code>--force</code></td><td>Reinstall if the same canonical toolchain is already installed.</td></tr>
+   <tr><td><code>--no-cache</code></td><td>Redownload installer instead of using cache.</td></tr>
+   <tr><td><code>--installer-ext sh|tgz|dmg</code></td><td>Force installer extension (default: platform-dependent).</td></tr>
+   <tr><td><code>--quiet</code></td><td>Show minimal output (errors + final result lines).</td></tr>
+   <tr><td><code>--verbose</code></td><td>Show detailed installer URL/path output.</td></tr>
+  </table>
+  <h3>Examples</h3>
+  <pre class="rackup-shell"><code>rackup install stable
+rackup install 8.18 --variant cs
+rackup install snapshot --snapshot-site utah
+rackup install pre-release --set-default</code></pre>
+ </div>
+
+ <!-- list -->
+ <div class="rackup-section">
+  <h2><code>rackup list</code></h2>
+  <p>List installed toolchains and show default/active tags.</p>
+  <pre class="rackup-shell"><code>rackup list [--ids]</code></pre>
+  <table class="rackup-opt-table">
+   <tr><td><code>--ids</code></td><td>Print only toolchain IDs, one per line (for scripting).</td></tr>
+  </table>
+ </div>
+
+ <!-- available -->
+ <div class="rackup-section">
+  <h2><code>rackup available</code></h2>
+  <p>List install aliases (stable, pre-release, snapshot) and numeric release versions.</p>
+  <pre class="rackup-shell"><code>rackup available [--all|--limit N]</code></pre>
+  <table class="rackup-opt-table">
+   <tr><td><code>--all</code></td><td>Show all parsed release versions.</td></tr>
+   <tr><td><code>--limit N</code></td><td>Show at most N release versions (default: 20).</td></tr>
+  </table>
+  <h3>Examples</h3>
+  <pre class="rackup-shell"><code>rackup available
+rackup available --limit 50
+rackup available --all</code></pre>
+ </div>
+
+ <!-- default -->
+ <div class="rackup-section">
+  <h2><code>rackup default</code></h2>
+  <p>Show, set, or clear the global default toolchain.
+     If the requested toolchain spec is not installed, interactive shells
+     are prompted to install it.</p>
+  <pre class="rackup-shell"><code>rackup default [id|status|set &lt;toolchain&gt;|clear|&lt;toolchain&gt;|--unset]</code></pre>
+  <h3>Examples</h3>
+  <pre class="rackup-shell"><code>rackup default              # show current default
+rackup default stable       # set default to stable
+rackup default set 8.18     # set default to 8.18
+rackup default status       # print set/unset and id
+rackup default clear        # clear the default
+rackup default --unset      # same as clear</code></pre>
+ </div>
+
+ <!-- current -->
+ <div class="rackup-section">
+  <h2><code>rackup current</code></h2>
+  <p>Show the active toolchain and whether it comes from shell activation or global default.</p>
+  <pre class="rackup-shell"><code>rackup current [id|source|line]</code></pre>
+  <table class="rackup-opt-table">
+   <tr><td><code>id</code></td><td>Print only the active toolchain id (blank if none).</td></tr>
+   <tr><td><code>source</code></td><td>Print <code>env</code>, <code>default</code>, or <code>none</code>.</td></tr>
+   <tr><td><code>line</code></td><td>Print <code>&lt;id&gt;&lt;TAB&gt;&lt;source&gt;</code>.</td></tr>
+  </table>
+ </div>
+
+ <!-- which -->
+ <div class="rackup-section">
+  <h2><code>rackup which</code></h2>
+  <p>Show the real executable path for a tool in a toolchain.</p>
+  <pre class="rackup-shell"><code>rackup which &lt;exe&gt; [--toolchain &lt;toolchain&gt;]</code></pre>
+ </div>
+
+ <!-- switch -->
+ <div class="rackup-section">
+  <h2><code>rackup switch</code></h2>
+  <p>Switch the active toolchain in the current shell without changing the default.
+     When run via the shell integration installed by <code>rackup init</code>, this
+     updates the current shell. Otherwise, it emits shell code that you can
+     <code>eval</code>.</p>
+  <pre class="rackup-shell"><code>rackup switch &lt;toolchain&gt; | rackup switch --unset</code></pre>
+  <h3>Examples</h3>
+  <pre class="rackup-shell"><code>rackup switch stable
+rackup switch 8.18
+rackup switch --unset</code></pre>
+ </div>
+
+ <!-- shell -->
+ <div class="rackup-section">
+  <h2><code>rackup shell</code></h2>
+  <p>Emit shell code to activate/deactivate a toolchain in the current shell.
+     This is the low-level form used by <code>rackup switch</code> and the shell
+     wrapper.</p>
+  <pre class="rackup-shell"><code>rackup shell &lt;toolchain&gt; | rackup shell --deactivate</code></pre>
+ </div>
+
+ <!-- run -->
+ <div class="rackup-section">
+  <h2><code>rackup run</code></h2>
+  <p>Run a command under a specific toolchain without changing defaults.</p>
+  <pre class="rackup-shell"><code>rackup run &lt;toolchain&gt; -- &lt;command&gt; [args...]</code></pre>
+  <h3>Example</h3>
+  <pre class="rackup-shell"><code>rackup run 8.18 -- racket -e '(displayln (version))'</code></pre>
+ </div>
+
+ <!-- link -->
+ <div class="rackup-section">
+  <h2><code>rackup link</code></h2>
+  <p>Link an in-place/local Racket build as a managed toolchain.</p>
+  <pre class="rackup-shell"><code>rackup link &lt;name&gt; &lt;path&gt; [--set-default] [--force]</code></pre>
+  <h3>Accepted paths</h3>
+  <ul>
+   <li>A source checkout root containing <code>racket/bin</code> and <code>racket/collects</code>.</li>
+   <li>A <code>PLTHOME</code> directory containing <code>bin</code> and <code>collects</code>.</li>
+  </ul>
+  <table class="rackup-opt-table">
+   <tr><td><code>--set-default</code></td><td>Set the linked toolchain as the global default.</td></tr>
+   <tr><td><code>--force</code></td><td>Replace an existing link with the same local name.</td></tr>
+  </table>
+  <h3>Example</h3>
+  <pre class="rackup-shell"><code>rackup link dev ~/src/racket</code></pre>
+ </div>
+
+ <!-- remove -->
+ <div class="rackup-section">
+  <h2><code>rackup remove</code></h2>
+  <p>Remove one installed or linked toolchain and its addon directory.</p>
+  <pre class="rackup-shell"><code>rackup remove &lt;toolchain&gt;</code></pre>
+ </div>
+
+ <!-- prompt -->
+ <div class="rackup-section">
+  <h2><code>rackup prompt</code></h2>
+  <p>Print prompt/status information for the active toolchain.
+     Prints nothing when no active/default toolchain is configured.
+     Handled by the shell wrapper without starting Racket when possible.</p>
+  <pre class="rackup-shell"><code>rackup prompt [--long|--short|--raw|--source]</code></pre>
+  <table class="rackup-opt-table">
+   <tr><td><code>--long</code></td><td>Print the long bracketed form: <code>[rk:&lt;toolchain-id&gt;]</code>.</td></tr>
+   <tr><td><code>--short</code></td><td>Print a compact label like <code>racket-9.1</code> (same as default).</td></tr>
+   <tr><td><code>--raw</code></td><td>Print only the active toolchain id.</td></tr>
+   <tr><td><code>--source</code></td><td>Print <code>&lt;id&gt;&lt;TAB&gt;&lt;env|default&gt;</code>.</td></tr>
+  </table>
+  <h3>Shell prompt integration</h3>
+  <pre class="rackup-shell"><code>PS1='$(rackup prompt) '$PS1</code></pre>
+ </div>
+
+ <!-- reshim -->
+ <div class="rackup-section">
+  <h2><code>rackup reshim</code></h2>
+  <p>Rebuild shim executables from the union of installed toolchain executables.
+     This runs automatically on install and link but can be run manually if
+     shims get out of sync.</p>
+  <pre class="rackup-shell"><code>rackup reshim</code></pre>
+ </div>
+
+ <!-- init -->
+ <div class="rackup-section">
+  <h2><code>rackup init</code></h2>
+  <p>Install or update shell integration in <code>~/.bashrc</code> or <code>~/.zshrc</code>.
+     Writes a managed block that sources <code>~/.rackup/shell/rackup.&lt;shell&gt;</code>.</p>
+  <pre class="rackup-shell"><code>rackup init [--shell bash|zsh]</code></pre>
+ </div>
+
+ <!-- self-upgrade -->
+ <div class="rackup-section">
+  <h2><code>rackup self-upgrade</code></h2>
+  <p>Upgrade rackup's code by rerunning the bootstrap installer into the
+     current <code>RACKUP_HOME</code>. By default this skips shell init edits and
+     keeps your current shell config unchanged.</p>
+  <pre class="rackup-shell"><code>rackup self-upgrade [--with-init]</code></pre>
+  <table class="rackup-opt-table">
+   <tr><td><code>--with-init</code></td><td>Allow the installer to run shell init updates.</td></tr>
+  </table>
+ </div>
+
+ <!-- runtime -->
+ <div class="rackup-section">
+  <h2><code>rackup runtime</code></h2>
+  <p>Manage rackup's hidden internal runtime used to run rackup itself.</p>
+  <pre class="rackup-shell"><code>rackup runtime status|install|upgrade</code></pre>
+  <table class="rackup-opt-table">
+   <tr><td><code>status</code></td><td>Show whether the hidden runtime is present and its metadata.</td></tr>
+   <tr><td><code>install</code></td><td>Install the hidden runtime if missing (or adopt existing).</td></tr>
+   <tr><td><code>upgrade</code></td><td>Install a newer hidden runtime if one is available.</td></tr>
+  </table>
+ </div>
+
+ <!-- uninstall -->
+ <div class="rackup-section">
+  <h2><code>rackup uninstall</code></h2>
+  <p>Remove rackup-managed data and shell init blocks. This is destructive and
+     cannot be undone. It deletes all installed toolchains, the hidden runtime,
+     shims, caches, and per-toolchain addon directories. It also removes
+     rackup-managed init blocks from <code>~/.bashrc</code> and <code>~/.zshrc</code>.</p>
+  <pre class="rackup-shell"><code>rackup uninstall [--yes]</code></pre>
+  <table class="rackup-opt-table">
+   <tr><td><code>--yes</code></td><td>Skip interactive DELETE confirmation.</td></tr>
+  </table>
+ </div>
+
+ <!-- doctor -->
+ <div class="rackup-section">
+  <h2><code>rackup doctor</code></h2>
+  <p>Print diagnostics for rackup paths, hidden runtime, and installed toolchains.
+     Useful when troubleshooting installation or shim issues.</p>
+  <pre class="rackup-shell"><code>rackup doctor</code></pre>
+ </div>
+
+ <!-- version -->
+ <div class="rackup-section">
+  <h2><code>rackup version</code></h2>
+  <p>Print rackup version information (git commit and date).</p>
+  <pre class="rackup-shell"><code>rackup version</code></pre>
+ </div>
+
+ <!-- Shell integration -->
+ <div class="rackup-section">
+  <h2>Shell integration</h2>
+  <p>After bootstrapping, run <code>rackup init</code> to set up your shell.
+     This adds a small managed block to your <code>.bashrc</code> or <code>.zshrc</code>
+     that puts the shims directory on your <code>PATH</code> and enables the
+     <code>rackup switch</code> shell function.</p>
+  <pre class="rackup-shell"><code>rackup init --shell bash   # or zsh</code></pre>
+  <p>Once initialized, switching toolchains takes effect immediately in
+     the current shell without starting a subshell:</p>
+  <pre class="rackup-shell"><code>rackup switch 8.18
+racket --version            # uses 8.18</code></pre>
+ </div>
+
+ <!-- Environment variables -->
+ <div class="rackup-section">
+  <h2>Environment variables</h2>
+  <table class="rackup-opt-table">
+   <tr><td><code>RACKUP_HOME</code></td><td>Override the rackup state directory (default: <code>~/.rackup</code>).</td></tr>
+   <tr><td><code>RACKUP_TOOLCHAIN</code></td><td>Override the active toolchain for the current shell session.</td></tr>
+  </table>
+  <p>When <code>rackup</code> activates a toolchain it sets <code>PLTHOME</code>,
+     <code>PLTADDONDIR</code>, and <code>PATH</code> so that <code>racket</code>, <code>raco</code>,
+     and other executables resolve to the correct installation.</p>
+ </div>
+
+ <!-- Migrating from racket-dev-goodies -->
+ <div class="rackup-section">
+  <h2>Migrating from racket-dev-goodies</h2>
+  <p>If you previously used
+     <a href="https://github.com/takikawa/racket-dev-goodies">racket-dev-goodies</a>
+     (the <code>plt</code> shell function and <code>plt-bin</code> symlinks), rackup replaces
+     it entirely.</p>
+  <ol>
+   <li>Remove the <code>plt-alias.bash</code> source line from your
+       <code>.bashrc</code>/<code>.zshrc</code> and remove any <code>plt-bin</code> symlinks
+       from your <code>PATH</code>. The <code>plt</code> function sets <code>PLTHOME</code>
+       globally, which conflicts with rackup's per-toolchain environment
+       management.</li>
+   <li>Install rackup and re-register your Racket builds:</li>
+  </ol>
+  <pre class="rackup-shell"><code>rackup link dev ~/src/racket
+rackup link 8.15 /usr/local/racket-8.15
+rackup default set dev</code></pre>
+  <p>For release versions you can also use <code>rackup install</code>:</p>
+  <pre class="rackup-shell"><code>rackup install stable
+rackup install 8.15</code></pre>
+  <h3>Equivalents at a glance</h3>
+  <table class="rackup-cmd-table">
+   <tr><td><code>plt ~/src/racket</code></td><td><code>rackup link dev ~/src/racket &amp;&amp; rackup default set dev</code></td></tr>
+   <tr><td><code>plt</code> (show current)</td><td><code>rackup current</code></td></tr>
+   <tr><td><code>plt-make-links.sh</code></td><td><code>rackup reshim</code> (automatic on install/link)</td></tr>
+   <tr><td><code>plt-fresh-build</code></td><td>Build manually, then <code>rackup link</code></td></tr>
+  </table>
+ </div>
+
+</div>
+</body>
+</html>
