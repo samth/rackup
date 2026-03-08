@@ -44,17 +44,19 @@ jobs:
             }
           done
           if [ "$missing" -eq 1 ]; then exit 1; fi
-          if tar -tzf /tmp/rackup-pages-site/rackup-src.tar.gz | grep -E '\.dep$'; then
+          # Dump tarball listing once to avoid pipefail+SIGPIPE issues with tar|grep
+          tar_contents=$(tar -tzf /tmp/rackup-pages-site/rackup-src.tar.gz)
+          if printf '%s\n' "$tar_contents" | grep -E '\.dep$'; then
             echo "rackup-src.tar.gz contains unexpected .dep files" >&2
             exit 1
           fi
-          unexpected_zo=$(tar -tzf /tmp/rackup-pages-site/rackup-src.tar.gz | grep -E '\.zo$' | grep -v 'rackup-core_rkt_merged\.zo$' || true)
+          unexpected_zo=$(printf '%s\n' "$tar_contents" | grep -E '\.zo$' | grep -v 'rackup-core_rkt_merged\.zo$' || true)
           if [ -n "$unexpected_zo" ]; then
             echo "rackup-src.tar.gz contains unexpected .zo files:" >&2
             echo "$unexpected_zo" >&2
             exit 1
           fi
-          if ! tar -tzf /tmp/rackup-pages-site/rackup-src.tar.gz | grep -q 'rackup-core_rkt_merged\.zo$'; then
+          if ! printf '%s\n' "$tar_contents" | grep -q 'rackup-core_rkt_merged\.zo$'; then
             echo "rackup-src.tar.gz missing demodularized .zo" >&2
             exit 1
           fi
