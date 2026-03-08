@@ -85,7 +85,7 @@
                              "/work"
                              image-tag
                              "bash"
-                             "/work/scripts/e2e-transcript-matrix-container.sh")
+                             "/work/test/e2e-transcript-matrix-container.sh")
                        " ")
           transcript-path))
 

@@ -32,7 +32,7 @@ system Racket for direct-mode tests, but host-Racket-less bootstrap mode can
 also be tested with `--host-racket absent`.
 
 Usage:
-  scripts/docker-test-fresh-install.sh [options]
+  test/docker-test-fresh-install.sh [options]
 
 Options:
   --image TAG             Docker image tag (default: rackup-e2e:<host-racket>-<base-image>)
@@ -58,12 +58,12 @@ Options:
   -h, --help              Show help
 
 Examples:
-  scripts/docker-test-fresh-install.sh
-  scripts/docker-test-fresh-install.sh --mode bootstrap --spec stable
-  scripts/docker-test-fresh-install.sh --mode bootstrap-curl --host-racket absent --spec stable
-  scripts/docker-test-fresh-install.sh --spec stable --spec pre-release
-  scripts/docker-test-fresh-install.sh --spec stable --local-link-mode build --source-build-ref v8.18
-  scripts/docker-test-fresh-install.sh --mode bootstrap --host-racket absent --spec stable
+  test/docker-test-fresh-install.sh
+  test/docker-test-fresh-install.sh --mode bootstrap --spec stable
+  test/docker-test-fresh-install.sh --mode bootstrap-curl --host-racket absent --spec stable
+  test/docker-test-fresh-install.sh --spec stable --spec pre-release
+  test/docker-test-fresh-install.sh --spec stable --local-link-mode build --source-build-ref v8.18
+  test/docker-test-fresh-install.sh --mode bootstrap --host-racket absent --spec stable
 USAGE
 }
 
@@ -320,4 +320,4 @@ fi
   -v "$ROOT_DIR:/work" \
   -w /work \
   "$IMAGE_TAG" \
-  bash /work/scripts/e2e-fresh-container.sh
+  bash /work/test/e2e-fresh-container.sh

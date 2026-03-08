@@ -102,7 +102,7 @@ rackup install 8.15
 To test `rackup` installing a Racket toolchain in a fresh Linux container:
 
 ```bash
-scripts/docker-test-fresh-install.sh
+test/docker-test-fresh-install.sh
 ```
 
 This builds a Docker image (`ubuntu:24.04` + distro `racket`) and then runs an
@@ -116,11 +116,11 @@ Useful variants:
 
 ```bash
 # Test the bootstrap script path too (copies repo into a fresh prefix first)
-scripts/docker-test-fresh-install.sh --mode bootstrap
+test/docker-test-fresh-install.sh --mode bootstrap
 
 # Also test pre-release install (network-dependent and slower)
-scripts/docker-test-fresh-install.sh --spec stable --spec pre-release
+test/docker-test-fresh-install.sh --spec stable --spec pre-release
 
 # Snapshot test from a specific site
-scripts/docker-test-fresh-install.sh --spec snapshot --snapshot-site utah
+test/docker-test-fresh-install.sh --spec snapshot --snapshot-site utah
 ```

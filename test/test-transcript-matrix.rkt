@@ -23,7 +23,7 @@
 (printf "transcript=~a\n" transcript-path)
 
 (unless (system* (find-executable-path "racket") "-y"
-                 (path->string (build-path root-dir "scripts" "docker-run-transcript-matrix.rkt"))
+                 (path->string (build-path root-dir "test" "docker-run-transcript-matrix.rkt"))
                  "--host-racket"
                  host-racket
                  "--trace"

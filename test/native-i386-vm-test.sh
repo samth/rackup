@@ -26,7 +26,7 @@ Boot a disposable native i386 Debian VM under KVM and run a rackup 103p1 smoke t
 This avoids the host's qemu-user/binfmt path by using a full 32-bit guest OS.
 
 Usage:
-  scripts/native-i386-vm-test.sh [options]
+  test/native-i386-vm-test.sh [options]
 
 Options:
   --workdir DIR           Working directory (default: /tmp/rackup-native-i386-vm)
@@ -264,8 +264,8 @@ xorriso -osirrox on -indev "$ISO_PATH" -extract /install.386/initrd.gz "$INITRD_
 rm -rf "$INITRD_EXTRA_TREE"
 mkdir -p "$INITRD_EXTRA_TREE"
 cp "$PRESEED_PATH" "$INITRD_EXTRA_TREE/preseed.cfg"
-cp "$ROOT_DIR/vm/native-i386-firstboot.sh" "$INITRD_EXTRA_TREE/rackup-native-i386-firstboot.sh"
-cp "$ROOT_DIR/vm/native-i386-firstboot.service" "$INITRD_EXTRA_TREE/rackup-native-i386-firstboot.service"
+cp "$ROOT_DIR/test/vm/native-i386-firstboot.sh" "$INITRD_EXTRA_TREE/rackup-native-i386-firstboot.sh"
+cp "$ROOT_DIR/test/vm/native-i386-firstboot.service" "$INITRD_EXTRA_TREE/rackup-native-i386-firstboot.service"
 (
   cd "$INITRD_EXTRA_TREE"
   find . -print0 | cpio --null -o -H newc --quiet | gzip -9 >"$INITRD_EXTRA"
