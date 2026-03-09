@@ -645,6 +645,15 @@ rackup install stable
 rackup install 8.15
 }|
 
+If you used the short @tt{r} and @tt{dr} aliases from
+racket-dev-goodies, enable them in rackup with:
+
+@shell-block|{rackup reshim --short-aliases}|
+
+This creates @tt{r} (for @tt{racket}) and @tt{dr} (for
+@tt{drracket}) shims. You can also pass @tt{--short-aliases} to
+@tt{rackup install}.
+
 @subsection[#:style sub-style]{Equivalents at a glance}
 
 @cmd-table[
@@ -656,4 +665,6 @@ rackup install 8.15
         @elem{@tt{rackup reshim} (automatic on install/link)}]
   @list[@tt{plt-fresh-build}
         @elem{Build manually, then @tt{rackup link}}]
+  @list[@elem{@tt{r} / @tt{dr} aliases}
+        @tt{rackup reshim --short-aliases}]
 ]

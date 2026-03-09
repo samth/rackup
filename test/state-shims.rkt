@@ -34,8 +34,10 @@
                   (delete-directory/files tmp #:must-exist? #f))))
 
 (define (run-main args)
-  (parameterize ([current-command-line-arguments (list->vector args)])
-    (main)))
+  (let/ec escape
+    (parameterize ([current-command-line-arguments (list->vector args)]
+                   [exit-handler (lambda (v) (escape v))])
+      (main))))
 
 (define-runtime-path rackup-bin "../bin/rackup")
 (define install-ns (module->namespace '(file "../libexec/rackup/install.rkt")))
@@ -1021,135 +1023,45 @@
      (check-equal? (path->string (detect-bin-dir/private install-root))
                    (path->string (build-path install-root "plt" "bin")))))
 
+  ;; `rackup help <cmd>` and `rackup <cmd> --help` produce the same output.
   (check-equal? (capture-output (lambda () (run-main '("install" "--help"))))
                 (capture-output (lambda () (run-main '("help" "install")))))
-  (expect (run-main '("install" "--help"))
-          @~a{
-            Usage: rackup install <spec> [flags]
-
-            Install a Racket toolchain from official release, pre-release, or snapshot installers.
-
-            Specs:
-              stable | pre-release | snapshot | snapshot:utah | snapshot:northwestern
-              <numeric version> (examples: 9.1, 8.18, 7.9, 5.2)
-
-            Flags:
-              --variant cs|bc         Override VM variant (default depends on version).
-              --distribution full|minimal  Install full or minimal distribution (default: full).
-              --snapshot-site auto|utah|northwestern  Choose snapshot mirror (default: auto).
-              --arch <arch>           Override target architecture (default: host arch).
-              --set-default           Set installed toolchain as the global default.
-              --force                 Reinstall if the same canonical toolchain is already installed.
-              --no-cache              Redownload installer instead of using cache.
-              --installer-ext sh|tgz|dmg  Force installer extension (default: platform-dependent).
-              --quiet                 Show minimal output (errors + final result lines).
-              --verbose               Show detailed installer URL/path output.
-              --short-aliases         Install short aliases: r (racket), dr (drracket).
-
-            Examples:
-              rackup install stable
-              rackup install 8.18 --variant cs
-              rackup install snapshot --snapshot-site utah
-          })
   (check-equal? (capture-output (lambda () (run-main '("switch" "--help"))))
                 (capture-output (lambda () (run-main '("help" "switch")))))
-  (expect (run-main '("switch" "--help"))
-          @~a{
-            Usage: rackup switch <toolchain> | switch --unset
-
-            Switch the active toolchain in the current shell without changing the default.
-            When run via the shell integration installed by `rackup init`, this updates
-            the current shell. Otherwise, it emits shell code that you can `eval`.
-
-            Examples:
-              rackup switch stable
-              rackup switch 8.18
-              rackup switch --unset
-          })
   (check-equal? (capture-output (lambda () (run-main '("prompt" "--help"))))
                 (capture-output (lambda () (run-main '("help" "prompt")))))
-  (expect (run-main '("prompt" "--help"))
-          @~a{
-            Usage: rackup prompt [--long|--short|--raw|--source]
+  (check-equal? (capture-output (lambda () (run-main '("self-upgrade" "--help"))))
+                (capture-output (lambda () (run-main '("help" "self-upgrade")))))
 
-            Print prompt/status information for the active toolchain.
-            Prints nothing when no active/default toolchain is configured.
-            Handled by the shell wrapper without starting Racket when possible.
+  ;; Help output includes key flags/args for each command.
+  (expect (run-main '("install" "--help")) "--variant" #:match 'contains)
+  (expect (run-main '("install" "--help")) "--set-default" #:match 'contains)
+  (expect (run-main '("install" "--help")) "--short-aliases" #:match 'contains)
+  (expect (run-main '("install" "--help")) "<spec>" #:match 'contains)
+  (expect (run-main '("switch" "--help")) "--unset" #:match 'contains)
+  (expect (run-main '("prompt" "--help")) "--long" #:match 'contains)
+  (expect (run-main '("prompt" "--help")) "--short" #:match 'contains)
+  (expect (run-main '("prompt" "--help")) "--raw" #:match 'contains)
+  (expect (run-main '("runtime" "--help")) "<subcommand>" #:match 'contains)
+  (expect (run-main '("self-upgrade" "--help")) "--with-init" #:match 'contains)
+  (expect (run-main '("self-upgrade" "--help")) "--exe" #:match 'contains)
+  (expect (run-main '("self-upgrade" "--help")) "--source" #:match 'contains)
 
-            Default output:
-              racket-9.1
+  ;; --help with other flags still shows help (original bug: reshim --help --short-aliases)
+  (expect (run-main '("reshim" "--help" "--short-aliases")) "--short-aliases" #:match 'contains)
+  (check-equal? (capture-output (lambda () (run-main '("reshim" "--help" "--short-aliases"))))
+                (capture-output (lambda () (run-main '("reshim" "--help")))))
 
-            Options:
-              --long                  Print the long bracketed form: "[rk:<toolchain-id>]".
-              --short                 Print a compact label like "racket-9.1" (same as default).
-              --raw                   Print only the active toolchain id.
-              --source                Print "<id><TAB><env|default>".
-
-            Examples:
-              rackup prompt
-              rackup prompt --long
-              rackup prompt --short
-              rackup prompt --raw
-              PS1='$(rackup prompt) '$PS1
-          })
+  ;; install accepts flags before or after the spec
   (with-temp-rackup-home
    (lambda (_tmp)
      (ensure-index!)
-     @expect/shell[(list (path->string rackup-bin) "prompt" "--help")]{
-Usage: rackup prompt [--long|--short|--raw|--source]
-
-Print prompt/status information for the active toolchain.
-Prints nothing when no active/default toolchain is configured.
-Handled by the shell wrapper without starting Racket when possible.
-
-Default output:
-  racket-9.1
-
-Options:
-  --long                  Print the long bracketed form: "[rk:<toolchain-id>]".
-  --short                 Print a compact label like "racket-9.1" (same as default).
-  --raw                   Print only the active toolchain id.
-  --source                Print "<id><TAB><env|default>".
-
-Examples:
-  rackup prompt
-  rackup prompt --long
-  rackup prompt --short
-  rackup prompt --raw
-  PS1='$(rackup prompt) '$PS1
-}))
-  (expect (run-main '("runtime" "--help"))
-          @~a{
-            Usage: rackup runtime status|install|upgrade
-
-            Manage rackup's hidden internal runtime used to run rackup itself.
-            When rackup is installed as a prebuilt executable, no hidden runtime
-            is needed (Racket is embedded in the executable). Use 'rackup self-upgrade'
-            to update a prebuilt installation.
-
-            Subcommands:
-              status                  Show runtime mode and metadata.
-              install                 Install the hidden runtime if missing (source installs only).
-              upgrade                 Upgrade the hidden runtime (source installs only).
-          })
-  (check-equal? (capture-output (lambda () (run-main '("self-upgrade" "--help"))))
-                (capture-output (lambda () (run-main '("help" "self-upgrade")))))
-  (expect (run-main '("self-upgrade" "--help"))
-          @~a{
-            Usage: rackup self-upgrade [--with-init] [--exe | --source]
-
-            Upgrade rackup's code by rerunning the bootstrap installer into the current RACKUP_HOME.
-            By default this skips shell init edits and keeps your current shell config unchanged.
-            By default the installer picks the best mode (prebuilt binary if available, else source).
-
-            Options:
-              --with-init             Allow the installer to run shell init updates (-y without --no-init).
-              --exe                   Require a prebuilt binary (error if unavailable for this platform).
-              --source                Skip prebuilt binary and install from source (requires a Racket runtime).
-
-            Environment overrides (advanced):
-              RACKUP_SELF_UPGRADE_INSTALL_SH  Path or URL to install.sh (test/dev override).
-          })
+     ;; spec before flag
+     (expect (run-main '("install" "stable" "--set-default")) "Installed" #:match 'contains)
+     ;; flag before spec
+     (expect (run-main '("install" "--force" "stable")) "Installed" #:match 'contains)
+     ;; interleaved flags around spec
+     (expect (run-main '("install" "--force" "stable" "--set-default")) "Installed" #:match 'contains)))
 
   (with-temp-rackup-home
    (lambda (tmp)

@@ -435,13 +435,29 @@
   (reshim!)
   (displayln "Reshim complete."))
 
+;; Reorder install args so flags precede the positional spec.
+;; command-line stops flag processing at the first non-flag arg, so
+;; `rackup install stable --set-default` needs the flag moved before `stable`.
+(define install-flags-with-arg
+  '("--variant" "--distribution" "--snapshot-site" "--arch" "--installer-ext"))
+
+(define (reorder-install-args rest)
+  (let loop ([flags '()] [positionals '()] [xs rest])
+    (cond
+      [(null? xs) (append (reverse flags) (reverse positionals))]
+      [(string-prefix? (car xs) "-")
+       (if (and (member (car xs) install-flags-with-arg) (pair? (cdr xs)))
+           (loop (list* (cadr xs) (car xs) flags) positionals (cddr xs))
+           (loop (cons (car xs) flags) positionals (cdr xs)))]
+      [else (loop flags (cons (car xs) positionals) (cdr xs))])))
+
 (define (cmd-install rest)
   (define short-aliases? #f)
   (define opts-rev '())
   (define (flag! . args) (set! opts-rev (append (reverse args) opts-rev)))
   (define spec
     (command-line #:program "rackup install"
-                  #:argv rest
+                  #:argv (reorder-install-args rest)
                   #:once-each
                   [("--variant") v "cs|bc - Override VM variant" (flag! "--variant" v)]
                   [("--distribution") d "full|minimal - Distribution type" (flag! "--distribution" d)]
