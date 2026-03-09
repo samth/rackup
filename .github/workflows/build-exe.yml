@@ -29,10 +29,10 @@ jobs:
             setup_racket_arch: arm64
             cross_target: ""
           # Cross-compiled builds for platforms without native GHA runners.
-          # NOTE: arm32-linux is omitted — raco cross normalises to "arm32" but
-          # the Racket download server names the file "arm-linux", so the
-          # download fails.  See https://github.com/racket/raco-cross/issues/12
-          # for a related upstream issue.
+          - runs_on: ubuntu-latest
+            artifact_name: arm32-linux
+            setup_racket_arch: x64
+            cross_target: arm32-linux
           - runs_on: ubuntu-latest
             artifact_name: i386-linux
             setup_racket_arch: x64
