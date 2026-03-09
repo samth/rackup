@@ -1058,6 +1058,7 @@
               --installer-ext sh|tgz|dmg  Force installer extension (default: platform-dependent).
               --quiet                 Show minimal output (errors + final result lines).
               --verbose               Show detailed installer URL/path output.
+              --short-aliases         Install short aliases: r (racket), dr (drracket).
 
             Examples:
               rackup install stable
