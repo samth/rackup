@@ -642,7 +642,7 @@ else
 fi
 echo "linked racket version=$linked_version"
 linked_plthome="$(shim_racket -e '(display (or (getenv "PLTHOME") ""))')"
-assert_eq "${local_src_root}/racket" "$linked_plthome" "linked shim should export PLTHOME"
+assert_eq "${local_src_root}" "$linked_plthome" "linked shim should export PLTHOME"
 linked_collects="$(shim_racket -e '(display (or (getenv "PLTCOLLECTS") ""))')"
 assert_contains "${local_collects_dir}" "$linked_collects" "linked shim should export PLTCOLLECTS"
 linked_addon="$(shim_racket -e '(display (or (getenv "PLTADDONDIR") ""))')"
@@ -651,7 +651,7 @@ linked_addon_path="$(shim_racket -e '(display (find-system-path (quote addon-dir
 assert_eq "$linked_addon_path" "$linked_addon" "linked shim PLTADDONDIR should match the linked installation addon dir"
 echo "linked shim environment verified"
 link_run_plthome="$(run_rackup run localsrc -- racket -e '(display (or (getenv "PLTHOME") ""))')"
-assert_eq "${local_src_root}/racket" "$link_run_plthome" "rackup run should apply linked toolchain env"
+assert_eq "${local_src_root}" "$link_run_plthome" "rackup run should apply linked toolchain env"
 echo "rackup run environment verified"
 if [[ "$LOCAL_LINK_MODE" == "build" ]]; then
   run_rackup run localsrc -- raco help >/dev/null
