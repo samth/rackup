@@ -59,7 +59,7 @@ jobs:
               [ -f "$tarball" ] || continue
               base="$(basename "$tarball")"
               cp "$tarball" "/tmp/rackup-pages-site/$base"
-              sha256sum "$tarball" | sed "s|.*/|  |" > "/tmp/rackup-pages-site/${base}.sha256"
+              sha256sum "$tarball" | sed "s|  .*/|  |" > "/tmp/rackup-pages-site/${base}.sha256"
               echo "Added binary dist: $base (+ .sha256)"
             done
           done
