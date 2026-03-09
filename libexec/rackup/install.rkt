@@ -296,11 +296,19 @@
 
 (define (local-chez-wrapper-targets layout)
   (define plthome (string->path (hash-ref layout 'plthome)))
-  (define petite-boot (build-path plthome "lib" "racket" "petite.boot"))
-  (define scheme-boot (build-path plthome "lib" "racket" "scheme.boot"))
-  (if (file-exists? petite-boot)
+  ;; Boot files are at lib/racket/ in installed-prefix layouts but
+  ;; at lib/ in in-place source builds.
+  (define (find-boot name)
+    (define installed (build-path plthome "lib" "racket" name))
+    (define in-place (build-path plthome "lib" name))
+    (cond [(file-exists? installed) installed]
+          [(file-exists? in-place) in-place]
+          [else #f]))
+  (define petite-boot (find-boot "petite.boot"))
+  (define scheme-boot (find-boot "scheme.boot"))
+  (if petite-boot
       (append (list (cons "petite" (list "-B" (path->string* petite-boot))))
-              (if (file-exists? scheme-boot)
+              (if scheme-boot
                   (list (cons "scheme"
                               (list "-B"
                                     (path->string* petite-boot)
@@ -545,14 +553,25 @@
 (define (local-layout-env-vars layout [addon-dir #f])
   (define collects-dir (hash-ref layout 'collects-dir))
   (define pkgs-dir (hash-ref layout 'pkgs-dir #f))
+  (define source-root (hash-ref layout 'source-root #f))
+  ;; PLTHOME should be the checkout root when linking a source tree,
+  ;; matching the plt-bin convention.  For installed-prefix layouts
+  ;; (no source-root), use the racket installation directory.
+  (define plthome-env (or source-root (hash-ref layout 'plthome)))
   (define collects-path
     (if pkgs-dir
         (path-join/colon (list collects-dir pkgs-dir))
         (path-join/colon (list collects-dir))))
-  (append (list (cons "PLTHOME" (hash-ref layout 'plthome))
+  ;; For source checkouts, default PLTADDONDIR to <checkout>/add-on
+  ;; (matching the plt-bin convention).
+  (define effective-addon-dir
+    (or addon-dir
+        (and source-root
+             (path->string* (build-path (string->path source-root) "add-on")))))
+  (append (list (cons "PLTHOME" plthome-env)
                 (cons "PLTCOLLECTS" collects-path))
-          (if (and (string? addon-dir) (not (string-blank? addon-dir)))
-              (list (cons "PLTADDONDIR" addon-dir))
+          (if (and (string? effective-addon-dir) (not (string-blank? effective-addon-dir)))
+              (list (cons "PLTADDONDIR" effective-addon-dir))
               null)))
 
 (define (probe-local-racket-version+variant+addon-dir bin-dir env-vars)
@@ -791,7 +810,7 @@
        (when (hash-ref parsed-opts 'set-default? #f)
          (set-default-toolchain! id))
        (reshim!)
-       (displayln (format "Linked ~a => ~a" id (hash-ref layout 'plthome)))
+       (displayln (format "Linked ~a => ~a" id (hash-ref layout 'input-path)))
        id)]))
 
 (define (report-default-change! before after id explicit?)

@@ -500,7 +500,8 @@
      (void (if old-pltaddon
                (putenv "PLTADDONDIR" old-pltaddon)
                (putenv "PLTADDONDIR" "")))
-     (check-true (regexp-match? (regexp (regexp-quote (format "PLTHOME=~a" (path->string plthome))))
+     ;; PLTHOME should be the checkout root, not the racket/ subdirectory
+     (check-true (regexp-match? (regexp (regexp-quote (format "PLTHOME=~a" (path->string src-root))))
                                 shim-out))
      (check-true (regexp-match? (regexp (regexp-quote (format "PLTCOLLECTS=~a:~a"
                                                               (path->string collects-dir)
