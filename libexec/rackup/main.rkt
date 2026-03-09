@@ -275,11 +275,14 @@
      (help-usage "runtime status|install|upgrade")
      (displayln "")
      (displayln "Manage rackup's hidden internal runtime used to run rackup itself.")
+     (displayln "When rackup is installed as a prebuilt executable, no hidden runtime")
+     (displayln "is needed (Racket is embedded in the executable). Use 'rackup self-upgrade'")
+     (displayln "to update a prebuilt installation.")
      (displayln "")
      (displayln "Subcommands:")
-     (help-option-line "status" "Show whether the hidden runtime is present and its metadata.")
-     (help-option-line "install" "Install the hidden runtime if missing (or adopt existing).")
-     (help-option-line "upgrade" "Install a newer hidden runtime if one is available.")
+     (help-option-line "status" "Show runtime mode and metadata.")
+     (help-option-line "install" "Install the hidden runtime if missing (source installs only).")
+     (help-option-line "upgrade" "Upgrade the hidden runtime (source installs only).")
      #t]
     [(doctor)
      (help-usage "doctor")
@@ -502,7 +505,13 @@
                              (hash-ref m 'resolved-version "?")
                              (hash-ref m 'variant "?")
                              (hash-ref m 'distribution "?"))))
-        (printf "~a~a  ~a\n" tag-str id meta-str))))
+        (define names (toolchain-short-names id idx))
+        (define names-str
+          (if (null? names)
+              ""
+              (format "\n  aka ~a"
+                      (ansi "90" (string-join (sort names string<?) ", ")))))
+        (printf "~a~a  ~a~a\n" tag-str id meta-str names-str))))
 
 (define (default-id->line)
   (define id (get-default-toolchain))

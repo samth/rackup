@@ -1136,11 +1136,14 @@ Examples:
             Usage: rackup runtime status|install|upgrade
 
             Manage rackup's hidden internal runtime used to run rackup itself.
+            When rackup is installed as a prebuilt executable, no hidden runtime
+            is needed (Racket is embedded in the executable). Use 'rackup self-upgrade'
+            to update a prebuilt installation.
 
             Subcommands:
-              status                  Show whether the hidden runtime is present and its metadata.
-              install                 Install the hidden runtime if missing (or adopt existing).
-              upgrade                 Install a newer hidden runtime if one is available.
+              status                  Show runtime mode and metadata.
+              install                 Install the hidden runtime if missing (source installs only).
+              upgrade                 Upgrade the hidden runtime (source installs only).
           })
   (check-equal? (capture-output (lambda () (run-main '("self-upgrade" "--help"))))
                 (capture-output (lambda () (run-main '("help" "self-upgrade")))))
