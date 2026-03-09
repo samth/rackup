@@ -91,7 +91,7 @@ jobs:
           - runs_on: macos-15-intel
             arch_name: x64-macos
             setup_racket_arch: x64
-          - runs_on: macos-14
+          - runs_on: macos-15
             arch_name: arm64-macos
             setup_racket_arch: arm64
     timeout-minutes: 20
@@ -381,7 +381,7 @@ jobs:
         include:
           - runner: macos-15-intel       # Intel x86_64
             setup_racket_arch: x64
-          - runner: macos-14       # Apple Silicon arm64
+          - runner: macos-15       # Apple Silicon arm64
             setup_racket_arch: arm64
     timeout-minutes: 60
     steps:
@@ -435,7 +435,7 @@ jobs:
       matrix:
         include:
           - runner: macos-15-intel       # Intel x86_64
-          - runner: macos-14       # Apple Silicon arm64
+          - runner: macos-15       # Apple Silicon arm64
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
