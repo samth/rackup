@@ -50,9 +50,12 @@
         (build-path out-dir "rackup-src.tar.gz")
         "rackup-src")
 
-   ;; Compute SHA-256 of tarball and substitute into install.sh
+   ;; Compute SHA-256 of tarball, write sidecar file, and substitute into install.sh
    (define src-sha256
      (bytes->hex-string (call-with-input-file (build-path out-dir "rackup-src.tar.gz") sha256-bytes)))
+   (call-with-output-file (build-path out-dir "rackup-src.tar.gz.sha256")
+     (lambda (out) (fprintf out "~a  rackup-src.tar.gz\n" src-sha256))
+     #:exists 'truncate/replace)
    (define install-content
      (string-replace (file->string (build-path root-dir "scripts" "install.sh"))
                      "@@RACKUP_SRC_SHA256@@"
