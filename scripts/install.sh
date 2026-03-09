@@ -233,12 +233,12 @@ verify_sha256() {
 }
 
 # Targets for which prebuilt binaries are published.
-# This list must match the build-exe matrix in .github/workflows/ci.yml.
+# This list must match the build-exe matrix in .github/workflows/build-exe.yml.
 has_prebuilt_binary() {
   target="$1"
   case "$target" in
     x86_64-linux | aarch64-linux | x86_64-macosx | aarch64-macosx | \
-      i386-linux | arm-linux)
+      i386-linux)
       return 0
       ;;
     *)
@@ -272,7 +272,7 @@ if [ -z "$FROM_LOCAL" ] && [ "$FORCE_SOURCE" -eq 0 ]; then
   fi
   if [ "$FORCE_EXE" -eq 1 ] && ! has_prebuilt_binary "$HOST_TARGET"; then
     warn "Error: no prebuilt binary is published for $HOST_TARGET."
-    warn "Available targets: x86_64-linux, aarch64-linux, x86_64-macosx, aarch64-macosx, i386-linux, arm-linux"
+    warn "Available targets: x86_64-linux, aarch64-linux, x86_64-macosx, aarch64-macosx, i386-linux"
     exit 1
   fi
 

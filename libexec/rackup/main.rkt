@@ -486,32 +486,34 @@
     (newline))
   (if (null? ids)
       (displayln "No toolchains installed.")
-      (for ([id ids])
-        (define m (read-toolchain-meta id))
-        (define is-default? (equal? id default-id))
-        (define is-active? (equal? id active-id))
-        (define tags
-          (filter values
-                  (list (and is-default? "default") (and is-active? "active"))))
-        (define tag-str
-          (if (null? tags)
-              ""
-              (string-append
-               (ansi (if is-active? "32" "36")
-                     (format "[~a]" (string-join tags ",")))
-               " ")))
-        (define meta-str
-          (ansi "90" (format "(~a, ~a, ~a)"
-                             (hash-ref m 'resolved-version "?")
-                             (hash-ref m 'variant "?")
-                             (hash-ref m 'distribution "?"))))
-        (define names (toolchain-short-names id idx))
-        (define names-str
-          (if (null? names)
-              ""
-              (format "\n  aka ~a"
-                      (ansi "90" (string-join (sort names string<?) ", ")))))
-        (printf "~a~a  ~a~a\n" tag-str id meta-str names-str))))
+      (let ([all-meta (for/list ([id ids])
+                        (cons id (read-toolchain-meta id)))])
+        (for ([id ids])
+          (define m (cdr (assoc id all-meta)))
+          (define is-default? (equal? id default-id))
+          (define is-active? (equal? id active-id))
+          (define tags
+            (filter values
+                    (list (and is-default? "default") (and is-active? "active"))))
+          (define tag-str
+            (if (null? tags)
+                ""
+                (string-append
+                 (ansi (if is-active? "32" "36")
+                       (format "[~a]" (string-join tags ",")))
+                 " ")))
+          (define meta-str
+            (ansi "90" (format "(~a, ~a, ~a)"
+                               (hash-ref m 'resolved-version "?")
+                               (hash-ref m 'variant "?")
+                               (hash-ref m 'distribution "?"))))
+          (define names (toolchain-short-names id idx #:all-meta all-meta))
+          (define names-str
+            (if (null? names)
+                ""
+                (format "\n  aka ~a"
+                        (ansi "90" (string-join (sort names string<?) ", ")))))
+          (printf "~a~a  ~a~a\n" tag-str id meta-str names-str)))))
 
 (define (default-id->line)
   (define id (get-default-toolchain))

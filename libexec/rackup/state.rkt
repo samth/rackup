@@ -183,58 +183,52 @@
                            null)])
           (remove-duplicates (append spec-names pairs triple))))))
 
-(define (find-local-toolchain name [idx (load-index)])
-  (define ids (installed-toolchain-ids idx))
+;; Core name resolution against pre-loaded metadata.
+;; Returns the matching toolchain ID or #f.
+(define (resolve-name-with-meta name ids aliases all-meta)
+  (define (unique xs) (and (= (length xs) 1) (car xs)))
   (cond
-    [(or (not name) (string-blank? name)) (get-default-toolchain idx)]
-    [(hash-has-key? (hash-ref idx 'aliases (hash)) name) (hash-ref (hash-ref idx 'aliases) name)]
+    [(hash-has-key? aliases name) (hash-ref aliases name)]
     [(member name ids) name]
     [else
-     (define (unique xs)
-       (and (= (length xs) 1) (car xs)))
      (or (unique (filter (lambda (id) (string-prefix? id name)) ids))
-         (unique (for/list ([id ids]
-                            #:when (toolchain-meta-matches-spec?
-                                    (read-toolchain-meta id) name))
-                   id))
-         (unique (for/list ([id ids]
-                            #:when (toolchain-meta-matches-parts?
-                                    (read-toolchain-meta id) name))
-                   id))
+         (unique (for/list ([pair (in-list all-meta)]
+                            #:when (toolchain-meta-matches-spec? (cdr pair) name))
+                   (car pair)))
+         (unique (for/list ([pair (in-list all-meta)]
+                            #:when (toolchain-meta-matches-parts? (cdr pair) name))
+                   (car pair)))
          #f)]))
 
+(define (find-local-toolchain name [idx (load-index)])
+  (cond
+    [(or (not name) (string-blank? name)) (get-default-toolchain idx)]
+    [else
+     (define ids (installed-toolchain-ids idx))
+     (define aliases (hash-ref idx 'aliases (hash)))
+     (define all-meta
+       (for/list ([id ids])
+         (cons id (read-toolchain-meta id))))
+     (resolve-name-with-meta name ids aliases all-meta)]))
+
 ;; Return the short names that uniquely resolve to this toolchain.
-;; Loads all metadata once to avoid repeated file reads.
-(define (toolchain-short-names id [idx (load-index)])
+;; Accepts optional #:all-meta to avoid redundant file reads when
+;; called in a loop (e.g. from cmd-list).
+(define (toolchain-short-names id [idx (load-index)] #:all-meta [preloaded-meta #f])
   (define ids (installed-toolchain-ids idx))
   (define all-meta
-    (for/list ([tid ids])
-      (cons tid (read-toolchain-meta tid))))
+    (or preloaded-meta
+        (for/list ([tid ids])
+          (cons tid (read-toolchain-meta tid)))))
   (define m (cdr (assoc id all-meta)))
   (define candidates (toolchain-meta-names m))
+  (define aliases (hash-ref idx 'aliases (hash)))
   (define alias-names
-    (for/list ([(k v) (in-hash (hash-ref idx 'aliases (hash)))]
+    (for/list ([(k v) (in-hash aliases)]
                #:when (equal? v id))
       k))
-  ;; Check which candidates uniquely resolve to this toolchain, using
-  ;; the same priority logic as find-local-toolchain but with
-  ;; pre-loaded metadata to avoid O(N²) file reads.
-  (define (resolves-to? name)
-    (define (unique xs) (and (= (length xs) 1) (car xs)))
-    (equal? id
-            (cond
-              [(hash-has-key? (hash-ref idx 'aliases (hash)) name)
-               (hash-ref (hash-ref idx 'aliases) name)]
-              [(member name ids) name]
-              [else
-               (or (unique (filter (lambda (tid) (string-prefix? tid name)) ids))
-                   (unique (for/list ([pair (in-list all-meta)]
-                                     #:when (toolchain-meta-matches-spec? (cdr pair) name))
-                             (car pair)))
-                   (unique (for/list ([pair (in-list all-meta)]
-                                     #:when (toolchain-meta-matches-parts? (cdr pair) name))
-                             (car pair))))])))
-  (filter resolves-to? (remove-duplicates (append alias-names candidates))))
+  (filter (lambda (name) (equal? id (resolve-name-with-meta name ids aliases all-meta)))
+          (remove-duplicates (append alias-names candidates))))
 
 (define (ensure-toolchain-addon-dir! id)
   (ensure-directory* (rackup-addon-dir id)))

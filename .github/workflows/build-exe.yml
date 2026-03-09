@@ -1,0 +1,80 @@
+name: Build Exe
+
+on:
+  workflow_call:
+
+jobs:
+  build-exe:
+    name: "Build Exe (${{ matrix.artifact_name }})"
+    runs-on: ${{ matrix.runs_on }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Native builds on GHA runners
+          - runs_on: ubuntu-latest
+            artifact_name: x86_64-linux
+            setup_racket_arch: x64
+            cross_target: ""
+          - runs_on: ubuntu-24.04-arm
+            artifact_name: aarch64-linux
+            setup_racket_arch: arm64
+            cross_target: ""
+          - runs_on: macos-15-intel
+            artifact_name: x86_64-macosx
+            setup_racket_arch: x64
+            cross_target: ""
+          - runs_on: macos-14
+            artifact_name: aarch64-macosx
+            setup_racket_arch: arm64
+            cross_target: ""
+          # Cross-compiled builds for platforms without native GHA runners.
+          # NOTE: arm32-linux is omitted — raco cross normalises to "arm32" but
+          # the Racket download server names the file "arm-linux", so the
+          # download fails.  See https://github.com/racket/raco-cross/issues/12
+          # for a related upstream issue.
+          - runs_on: ubuntu-latest
+            artifact_name: i386-linux
+            setup_racket_arch: x64
+            cross_target: i386-linux
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Racket
+        uses: Bogdanp/setup-racket@v1.14
+        with:
+          architecture: ${{ matrix.setup_racket_arch }}
+          distribution: full
+          variant: CS
+          version: stable
+      - name: Install raco cross (cross-compilation only)
+        if: matrix.cross_target != ''
+        shell: bash
+        run: raco pkg install --auto raco-cross
+      - name: Build executable distribution
+        shell: bash
+        run: |
+          mkdir -p dist
+          if [ -n "${{ matrix.cross_target }}" ]; then
+            scripts/build-dist.sh \
+              --cross "${{ matrix.cross_target }}" \
+              --output "dist/rackup-${{ matrix.artifact_name }}.tar.gz"
+          else
+            scripts/build-dist.sh \
+              --output "dist/rackup-${{ matrix.artifact_name }}.tar.gz"
+          fi
+      - name: Smoke test (native builds only)
+        if: matrix.cross_target == ''
+        shell: bash
+        run: |
+          mkdir -p /tmp/rackup-exe-test
+          tar -xzf "dist/rackup-${{ matrix.artifact_name }}.tar.gz" -C /tmp/rackup-exe-test
+          export RACKUP_HOME=/tmp/rackup-exe-test/rackup
+          /tmp/rackup-exe-test/rackup/bin/rackup version
+          /tmp/rackup-exe-test/rackup/bin/rackup help
+      - name: Upload exe artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: "rackup-exe-${{ matrix.artifact_name }}"
+          path: "dist/rackup-${{ matrix.artifact_name }}.tar.gz"
+          if-no-files-found: error
