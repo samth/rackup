@@ -41,6 +41,30 @@ jobs:
       - name: Install checkbashisms
         run: sudo apt-get install -y -qq devscripts
 
+      - name: install.sh smoke (self-upgrade code path)
+        shell: bash
+        run: |
+          # Verify install.sh can be parsed and reach the download phase
+          # under /bin/sh in self-upgrade mode.  This catches function-ordering
+          # bugs where a function is called before it is defined.
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+          # The script will try to download a checksum and fail, which is fine.
+          # We just need it to get past all function definitions and the
+          # up-to-date check without "not found" errors.
+          set +e
+          output="$(RACKUP_BOOTSTRAP_MODE=self-upgrade \
+            /bin/sh scripts/install.sh -y --no-init --prefix "$tmp/rackup" 2>&1)"
+          rc=$?
+          set -e
+          echo "$output"
+          # The script should fail with a download error, not a "not found" error.
+          if echo "$output" | grep -q ': not found'; then
+            echo "FAIL: install.sh has an undefined function reference"
+            exit 1
+          fi
+          echo "install.sh self-upgrade smoke OK (exit=$rc)"
+
       - name: checkbashisms (POSIX portability)
         shell: bash
         run: |

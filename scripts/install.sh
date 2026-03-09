@@ -145,50 +145,6 @@ if [ "$FORCE_EXE" -eq 1 ] && [ -n "$FROM_LOCAL" ]; then
   exit 2
 fi
 
-# --- Early up-to-date check for self-upgrade ---
-# On self-upgrade from the default repo, download just the tiny checksum
-# file and compare to the stored hash.  Skip the full install if they match.
-if [ "$BOOTSTRAP_MODE" = "self-upgrade" ] && [ -z "$FROM_LOCAL" ] &&
-  [ -z "$ARCHIVE_URL_OVERRIDE" ] && [ "$REPO" = "samth/rackup" ] &&
-  [ "$REF" = "main" ]; then
-  _upgrade_base_url="https://samth.github.io/rackup"
-  _installed_sha_file="$PREFIX/.installed-sha256"
-  if [ "$FORCE_SOURCE" -eq 1 ]; then
-    _remote_sha_url="$_upgrade_base_url/rackup-src.tar.gz.sha256"
-  elif [ "$FORCE_EXE" -eq 1 ]; then
-    _host_arch="$(detect_arch)"
-    _host_platform="$(detect_platform)"
-    _remote_sha_url="$_upgrade_base_url/rackup-${_host_arch}-${_host_platform}.tar.gz.sha256"
-  else
-    # Auto mode: check the exe checksum if a prebuilt is available, source otherwise.
-    _host_arch="$(detect_arch)"
-    _host_platform="$(detect_platform)"
-    if has_prebuilt_binary "${_host_arch}-${_host_platform}"; then
-      _remote_sha_url="$_upgrade_base_url/rackup-${_host_arch}-${_host_platform}.tar.gz.sha256"
-    else
-      _remote_sha_url="$_upgrade_base_url/rackup-src.tar.gz.sha256"
-    fi
-  fi
-  if [ -f "$_installed_sha_file" ]; then
-    _installed_sha="$(cat "$_installed_sha_file")"
-    _remote_sha=""
-    if command -v curl >/dev/null 2>&1; then
-      _remote_sha_content="$(curl -fsSL "$_remote_sha_url" 2>/dev/null)" || true
-    elif command -v wget >/dev/null 2>&1; then
-      _remote_sha_content="$(wget -qO- "$_remote_sha_url" 2>/dev/null)" || true
-    else
-      _remote_sha_content=""
-    fi
-    if [ -n "$_remote_sha_content" ]; then
-      _remote_sha="$(echo "$_remote_sha_content" | cut -d ' ' -f 1)"
-    fi
-    if [ -n "$_remote_sha" ] && [ "$_installed_sha" = "$_remote_sha" ]; then
-      ok "Already up to date."
-      exit 0
-    fi
-  fi
-fi
-
 TMPDIR_INSTALL="$(mktemp -d "${TMPDIR:-/tmp}/rackup-install.XXXXXX")"
 cleanup() {
   rm -rf "$TMPDIR_INSTALL"
@@ -290,6 +246,50 @@ has_prebuilt_binary() {
       ;;
   esac
 }
+
+# --- Early up-to-date check for self-upgrade ---
+# On self-upgrade from the default repo, download just the tiny checksum
+# file and compare to the stored hash.  Skip the full install if they match.
+if [ "$BOOTSTRAP_MODE" = "self-upgrade" ] && [ -z "$FROM_LOCAL" ] &&
+  [ -z "$ARCHIVE_URL_OVERRIDE" ] && [ "$REPO" = "samth/rackup" ] &&
+  [ "$REF" = "main" ]; then
+  _upgrade_base_url="https://samth.github.io/rackup"
+  _installed_sha_file="$PREFIX/.installed-sha256"
+  if [ "$FORCE_SOURCE" -eq 1 ]; then
+    _remote_sha_url="$_upgrade_base_url/rackup-src.tar.gz.sha256"
+  elif [ "$FORCE_EXE" -eq 1 ]; then
+    _host_arch="$(detect_arch)"
+    _host_platform="$(detect_platform)"
+    _remote_sha_url="$_upgrade_base_url/rackup-${_host_arch}-${_host_platform}.tar.gz.sha256"
+  else
+    # Auto mode: check the exe checksum if a prebuilt is available, source otherwise.
+    _host_arch="$(detect_arch)"
+    _host_platform="$(detect_platform)"
+    if has_prebuilt_binary "${_host_arch}-${_host_platform}"; then
+      _remote_sha_url="$_upgrade_base_url/rackup-${_host_arch}-${_host_platform}.tar.gz.sha256"
+    else
+      _remote_sha_url="$_upgrade_base_url/rackup-src.tar.gz.sha256"
+    fi
+  fi
+  if [ -f "$_installed_sha_file" ]; then
+    _installed_sha="$(cat "$_installed_sha_file")"
+    _remote_sha=""
+    if command -v curl >/dev/null 2>&1; then
+      _remote_sha_content="$(curl -fsSL "$_remote_sha_url" 2>/dev/null)" || true
+    elif command -v wget >/dev/null 2>&1; then
+      _remote_sha_content="$(wget -qO- "$_remote_sha_url" 2>/dev/null)" || true
+    else
+      _remote_sha_content=""
+    fi
+    if [ -n "$_remote_sha_content" ]; then
+      _remote_sha="$(echo "$_remote_sha_content" | cut -d ' ' -f 1)"
+    fi
+    if [ -n "$_remote_sha" ] && [ "$_installed_sha" = "$_remote_sha" ]; then
+      ok "Already up to date."
+      exit 0
+    fi
+  fi
+fi
 
 # --- Try prebuilt binary before falling back to source ---
 INSTALLED_PREBUILT=0
