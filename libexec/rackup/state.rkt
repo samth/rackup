@@ -139,6 +139,14 @@
     (when (pair? (hash-keys new-installed))
       (set-default-toolchain! (car (sort (hash-keys new-installed) string<?))))))
 
+;; Extract the string forms of version, variant, and distribution from
+;; toolchain metadata.  Returns (values ver var dist) where each is a
+;; string or #f.
+(define (toolchain-meta-fields m)
+  (values (hash-ref m 'resolved-version #f)
+          (let ([v (hash-ref m 'variant #f)]) (and v (format "~a" v)))
+          (let ([v (hash-ref m 'distribution #f)]) (and v (format "~a" v)))))
+
 ;; Does `name` match the toolchain's requested-spec or resolved-version?
 (define (toolchain-meta-matches-spec? m name)
   (and (hash? m)
@@ -152,11 +160,10 @@
   (and (hash? m)
        (let ([parts (string-split name "-")])
          (and (>= (length parts) 2)
-              (let ([vals (list (hash-ref m 'resolved-version #f)
-                               (format "~a" (hash-ref m 'variant #f))
-                               (format "~a" (hash-ref m 'distribution #f)))])
-                (for/and ([part (in-list parts)])
-                  (member part vals)))))))
+              (let-values ([(ver var dist) (toolchain-meta-fields m)])
+                (let ([vals (list ver var dist)])
+                  (for/and ([part (in-list parts)])
+                    (member part vals))))))))
 
 ;; Return all candidate short names derivable from a toolchain's metadata:
 ;; requested-spec, resolved-version, and multi-part combinations of
@@ -164,19 +171,17 @@
 (define (toolchain-meta-names m)
   (if (not (hash? m))
       null
-      (let* ([spec (hash-ref m 'requested-spec #f)]
-             [ver  (hash-ref m 'resolved-version #f)]
-             [var  (let ([v (hash-ref m 'variant #f)]) (and v (format "~a" v)))]
-             [dist (let ([v (hash-ref m 'distribution #f)]) (and v (format "~a" v)))]
-             [spec-names (filter values (list spec ver))]
-             [fields (filter values (list ver var dist))]
-             [pairs (for*/list ([i (in-range (length fields))]
-                                [j (in-range (add1 i) (length fields))])
-                      (string-join (list (list-ref fields i) (list-ref fields j)) "-"))]
-             [triple (if (= (length fields) 3)
-                         (list (string-join fields "-"))
-                         null)])
-        (remove-duplicates (append spec-names pairs triple)))))
+      (let-values ([(ver var dist) (toolchain-meta-fields m)])
+        (let* ([spec (hash-ref m 'requested-spec #f)]
+               [spec-names (filter values (list spec ver))]
+               [fields (filter values (list ver var dist))]
+               [pairs (for*/list ([i (in-range (length fields))]
+                                  [j (in-range (add1 i) (length fields))])
+                        (string-join (list (list-ref fields i) (list-ref fields j)) "-"))]
+               [triple (if (= (length fields) 3)
+                           (list (string-join fields "-"))
+                           null)])
+          (remove-duplicates (append spec-names pairs triple))))))
 
 (define (find-local-toolchain name [idx (load-index)])
   (define ids (installed-toolchain-ids idx))
@@ -199,15 +204,37 @@
          #f)]))
 
 ;; Return the short names that uniquely resolve to this toolchain.
+;; Loads all metadata once to avoid repeated file reads.
 (define (toolchain-short-names id [idx (load-index)])
-  (define m (read-toolchain-meta id))
+  (define ids (installed-toolchain-ids idx))
+  (define all-meta
+    (for/list ([tid ids])
+      (cons tid (read-toolchain-meta tid))))
+  (define m (cdr (assoc id all-meta)))
   (define candidates (toolchain-meta-names m))
   (define alias-names
     (for/list ([(k v) (in-hash (hash-ref idx 'aliases (hash)))]
                #:when (equal? v id))
       k))
-  (filter (lambda (name) (equal? (find-local-toolchain name idx) id))
-          (remove-duplicates (append alias-names candidates))))
+  ;; Check which candidates uniquely resolve to this toolchain, using
+  ;; the same priority logic as find-local-toolchain but with
+  ;; pre-loaded metadata to avoid O(N²) file reads.
+  (define (resolves-to? name)
+    (define (unique xs) (and (= (length xs) 1) (car xs)))
+    (equal? id
+            (cond
+              [(hash-has-key? (hash-ref idx 'aliases (hash)) name)
+               (hash-ref (hash-ref idx 'aliases) name)]
+              [(member name ids) name]
+              [else
+               (or (unique (filter (lambda (tid) (string-prefix? tid name)) ids))
+                   (unique (for/list ([pair (in-list all-meta)]
+                                     #:when (toolchain-meta-matches-spec? (cdr pair) name))
+                             (car pair)))
+                   (unique (for/list ([pair (in-list all-meta)]
+                                     #:when (toolchain-meta-matches-parts? (cdr pair) name))
+                             (car pair))))])))
+  (filter resolves-to? (remove-duplicates (append alias-names candidates))))
 
 (define (ensure-toolchain-addon-dir! id)
   (ensure-directory* (rackup-addon-dir id)))
