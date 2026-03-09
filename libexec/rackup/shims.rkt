@@ -16,7 +16,10 @@
          resolve-active-toolchain-id
          resolve-executable-path
          reshim!
-         current-toolchain-source)
+         current-toolchain-source
+         shim-aliases-installed?
+         install-shim-aliases!
+         remove-shim-aliases!)
 
 (define bootstrap-shim-names
   '("racket" "raco"))
@@ -29,6 +32,10 @@ SELF="${BASH_SOURCE[0]}"
 LIBEXEC_DIR="$(cd -P "$(dirname "$SELF")" && pwd)"
 HOME_DIR="${RACKUP_HOME:-$(cd -P "$LIBEXEC_DIR/.." && pwd)}"
 SHIM_NAME="$(basename "$0")"
+case "$SHIM_NAME" in
+  r) SHIM_NAME=racket ;;
+  dr) SHIM_NAME=drracket ;;
+esac
 DEFAULT_FILE="$HOME_DIR/state/default-toolchain"
 DEFAULT_ID=""
 ENV_FILE=""
@@ -269,13 +276,33 @@ EOF
                                           null))))
         string<?))
 
+;; Short aliases: r -> racket, dr -> drracket.
+;; The dispatcher script already contains the case statement to remap these.
+;; These are opt-in: enabled via `rackup install --aliases` or
+;; `rackup reshim --aliases`.
+(define shim-alias-pairs '(("r" . "racket") ("dr" . "drracket")))
+
+(define (shim-aliases-installed?)
+  (file-exists? (rackup-shim-aliases-file)))
+
+(define (install-shim-aliases!)
+  (write-string-file (rackup-shim-aliases-file) ""))
+
+(define (remove-shim-aliases!)
+  (when (file-exists? (rackup-shim-aliases-file))
+    (delete-file (rackup-shim-aliases-file))))
+
 (define (reshim!)
   (ensure-shim-dispatcher!)
   (ensure-core-rackup-shim!)
   (define shims-dir (rackup-shims-dir))
   (define dispatcher (rackup-shim-dispatcher))
+  (define aliases-on? (shim-aliases-installed?))
   (define desired
-    (list->set (append '("rackup") bootstrap-shim-names (all-installed-executables))))
+    (list->set (append '("rackup")
+                       bootstrap-shim-names
+                       (all-installed-executables)
+                       (if aliases-on? (map car shim-alias-pairs) null))))
   (for ([name (in-set desired)])
     (unless (equal? name "rackup")
       (define p (build-path shims-dir name))
