@@ -92,10 +92,7 @@ jobs:
             arch_name: x64-macos
             setup_racket_arch: x64
           - runs_on: macos-14
-            arch_name: arm64-macos-14
-            setup_racket_arch: arm64
-          - runs_on: macos-15
-            arch_name: arm64-macos-15
+            arch_name: arm64-macos
             setup_racket_arch: arm64
     timeout-minutes: 20
     steps:
@@ -376,34 +373,16 @@ jobs:
             --source-build-jobs "$(nproc)"
 
   macos-e2e:
-    name: "macOS E2E (${{ matrix.runner }} / ${{ matrix.installer_format }})"
+    name: "macOS E2E (${{ matrix.runner }})"
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          # tgz installer path — macOS only has minimal tgz
           - runner: macos-15-intel       # Intel x86_64
-            installer_format: tgz
             setup_racket_arch: x64
-            extra_install_flags: "--distribution minimal"
           - runner: macos-14       # Apple Silicon arm64
-            installer_format: tgz
             setup_racket_arch: arm64
-            extra_install_flags: "--distribution minimal"
-          - runner: macos-15       # Apple Silicon arm64
-            installer_format: tgz
-            setup_racket_arch: arm64
-            extra_install_flags: "--distribution minimal"
-          # dmg installer path — test on one Intel + one ARM
-          - runner: macos-15-intel       # Intel x86_64
-            installer_format: dmg
-            setup_racket_arch: x64
-            extra_install_flags: ""
-          - runner: macos-14       # Apple Silicon arm64
-            installer_format: dmg
-            setup_racket_arch: arm64
-            extra_install_flags: ""
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
@@ -417,33 +396,26 @@ jobs:
       - name: Build
         shell: bash
         run: raco make libexec/rackup-core.rkt libexec/rackup/*.rkt
-      - name: "E2E install stable (${{ matrix.installer_format }})"
+      - name: E2E install stable (tgz)
         shell: bash
         run: |
-          export RACKUP_HOME="$(mktemp -d)/rackup-e2e"
-          bin/rackup install stable --set-default --installer-ext "${{ matrix.installer_format }}" ${{ matrix.extra_install_flags }}
+          export RACKUP_HOME="$(mktemp -d)/rackup-e2e-tgz"
+          bin/rackup install stable --set-default --installer-ext tgz --distribution minimal
           bin/rackup list
           bin/rackup doctor
           "$RACKUP_HOME/shims/racket" -e '(displayln "hello from rackup")'
           bin/rackup remove "$(bin/rackup list --ids | head -1)"
-
-  macos-e2e-legacy-plt-dmg:
-    name: macOS E2E (legacy PLT Scheme DMG)
-    runs-on: macos-15-intel
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-      - name: Setup Racket
-        uses: Bogdanp/setup-racket@v1.14
-        with:
-          architecture: x64
-          distribution: full
-          variant: CS
-          version: stable
-      - name: Build
+      - name: E2E install stable (dmg)
         shell: bash
-        run: raco make libexec/rackup-core.rkt libexec/rackup/*.rkt
+        run: |
+          export RACKUP_HOME="$(mktemp -d)/rackup-e2e-dmg"
+          bin/rackup install stable --set-default --installer-ext dmg
+          bin/rackup list
+          bin/rackup doctor
+          "$RACKUP_HOME/shims/racket" -e '(displayln "hello from rackup")'
+          bin/rackup remove "$(bin/rackup list --ids | head -1)"
       - name: Legacy PLT Scheme DMG install (4.2.5, 4.0, 350)
+        if: matrix.setup_racket_arch == 'x64'
         shell: bash
         run: |
           export RACKUP_HOME="$(mktemp -d)/rackup-legacy"
