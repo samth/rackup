@@ -849,21 +849,6 @@
   (check-false changed?)
   (check-equal? unchanged "export PATH=/usr/bin\n")
 
-  (let-values ([(spec opts)
-                (split-install-command-args '("--distribution" "minimal" "stable"))])
-    (check-equal? spec "stable")
-    (check-equal? opts '("--distribution" "minimal")))
-  (let-values ([(spec opts)
-                (split-install-command-args '("stable" "--distribution" "minimal" "--force"))])
-    (check-equal? spec "stable")
-    (check-equal? opts '("--distribution" "minimal" "--force")))
-  (let-values ([(spec opts)
-                (split-install-command-args '("--quiet" "stable" "--distribution" "minimal"))])
-    (check-equal? spec "stable")
-    (check-equal? opts '("--quiet" "--distribution" "minimal")))
-  (check-exn exn:fail?
-             (lambda () (split-install-command-args '("stable" "8.18"))))
-
   (with-temp-rackup-home
    (lambda (tmp)
      (define installer (build-path tmp "racket-textual-5.2-bin-x86_64-linux-fake.sh"))

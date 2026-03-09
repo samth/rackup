@@ -1,6 +1,7 @@
 #lang racket/base
 
-(require racket/file
+(require racket/cmdline
+         racket/file
          racket/list
          racket/match
          racket/path
@@ -417,8 +418,13 @@
            meta)]))
 
 (define (cmd-runtime rest)
-  (match rest
-    [(list "status")
+  (define subcommand
+    (command-line #:program "rackup runtime"
+                  #:argv rest
+                  #:args (subcommand)
+                  subcommand))
+  (match subcommand
+    ["status"
      (cond
        [(running-as-exe?)
         (displayln "mode: embedded-exe")
@@ -437,7 +443,7 @@
                 (printf "distribution: ~a\n" (hash-ref m 'distribution ""))
                 (printf "installed-at: ~a\n" (hash-ref m 'installed-at ""))))
             (displayln "present: no"))])]
-    [(list "install")
+    ["install"
      (cond
        [(running-as-exe?)
         (displayln "Running as prebuilt executable; no hidden runtime needed.")
@@ -445,7 +451,7 @@
        [else
         (install-hidden-runtime!)
         (precompile-rackup-sources!)])]
-    [(list "upgrade")
+    ["upgrade"
      (cond
        [(running-as-exe?)
         (displayln "Running as prebuilt executable; no hidden runtime to upgrade.")
