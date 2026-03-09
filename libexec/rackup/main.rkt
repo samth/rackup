@@ -55,7 +55,7 @@
   (usage-line "init [--shell bash|zsh]" "Install/update shell integration in ~/.bashrc or ~/.zshrc.")
   (usage-line "uninstall [--yes]"
               "Remove rackup, its toolchains/runtime, and shell init blocks (destructive).")
-  (usage-line "self-upgrade [--with-init]"
+  (usage-line "self-upgrade [--with-init] [--exe | --source]"
               "Upgrade rackup's code by rerunning the installer into the current RACKUP_HOME.")
   (usage-line "runtime status|install|upgrade"
               "Manage rackup's hidden internal runtime used to run rackup itself.")
@@ -250,16 +250,22 @@
      (help-option-line "--yes" "Skip interactive DELETE confirmation.")
      #t]
     [(self-upgrade)
-     (help-usage "self-upgrade [--with-init]")
+     (help-usage "self-upgrade [--with-init] [--exe | --source]")
      (displayln "")
      (displayln
       "Upgrade rackup's code by rerunning the bootstrap installer into the current RACKUP_HOME.")
      (displayln
       "By default this skips shell init edits and keeps your current shell config unchanged.")
+     (displayln
+      "By default the installer picks the best mode (prebuilt binary if available, else source).")
      (displayln "")
      (displayln "Options:")
      (help-option-line "--with-init"
                        "Allow the installer to run shell init updates (-y without --no-init).")
+     (help-option-line "--exe"
+                       "Require a prebuilt binary (error if unavailable for this platform).")
+     (help-option-line "--source"
+                       "Skip prebuilt binary and install from source (requires a Racket runtime).")
      (displayln "")
      (displayln "Environment overrides (advanced):")
      (help-option-line "RACKUP_SELF_UPGRADE_INSTALL_SH"
@@ -957,17 +963,29 @@
 
 (define (parse-self-upgrade-options rest)
   (define with-init? #f)
+  (define mode #f) ; #f = auto, 'exe, 'source
   (let loop ([xs rest])
     (match xs
-      ['() (hash 'with-init? with-init?)]
+      ['() (hash 'with-init? with-init? 'mode mode)]
       [(list "--with-init" more ...)
        (set! with-init? #t)
        (loop more)]
+      [(list "--exe" more ...)
+       (when (eq? mode 'source)
+         (rackup-error "--exe and --source are mutually exclusive"))
+       (set! mode 'exe)
+       (loop more)]
+      [(list "--source" more ...)
+       (when (eq? mode 'exe)
+         (rackup-error "--exe and --source are mutually exclusive"))
+       (set! mode 'source)
+       (loop more)]
       [(list flag _ ...)
-       (rackup-error "usage: rackup self-upgrade [--with-init] (unknown flag ~a)" flag)])))
+       (rackup-error "usage: rackup self-upgrade [--with-init] [--exe | --source] (unknown flag ~a)" flag)])))
 
 (define (cmd-self-upgrade rest)
   (define opts (parse-self-upgrade-options rest))
+  (define mode (hash-ref opts 'mode #f))
   (define source (self-upgrade-script-source))
   (define script-path
     (cond
@@ -988,6 +1006,10 @@
             (if (hash-ref opts 'with-init? #f)
                 null
                 (list "--no-init"))
+            (cond
+              [(eq? mode 'exe)    (list "--exe")]
+              [(eq? mode 'source) (list "--source")]
+              [else               null])
             (list "--prefix" home-str)))
   (define env (environment-variables-copy (current-environment-variables)))
   (environment-variables-set! env #"RACKUP_BOOTSTRAP_MODE" #"self-upgrade")

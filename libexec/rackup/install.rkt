@@ -935,25 +935,31 @@
   (define ids (installed-toolchain-ids idx))
   (define default-id (get-default-toolchain idx))
   (define runtime-status (hidden-runtime-status))
+  (define runtime-mode (hash-ref runtime-status 'mode #f))
   (define runtime-meta (hash-ref runtime-status 'meta #f))
   (define wrapper-runtime-source
     (cond
+      [(eq? runtime-mode 'embedded-exe) 'embedded-exe]
       [(hash-ref runtime-status 'present? #f) 'internal]
       [(find-executable-path "racket") 'system]
       [else 'none]))
   (define findings
-    (list (cons 'home (path->string* (rackup-home)))
-          (cons 'bin (path->string* (rackup-bin-entry)))
-          (cons 'shim-dispatcher (path->string* (rackup-shim-dispatcher)))
-          (cons 'shims-dir (path->string* (rackup-shims-dir)))
-          (cons 'installed-count (length ids))
-          (cons 'default default-id)
-          (cons 'runtime-present (hash-ref runtime-status 'present? #f))
-          (cons 'runtime-id (hash-ref runtime-status 'id #f))
-          (cons 'runtime-version
-                (and (hash? runtime-meta) (hash-ref runtime-meta 'resolved-version #f)))
-          (cons 'runtime-racket (hash-ref runtime-status 'racket-path #f))
-          (cons 'wrapper-runtime-source wrapper-runtime-source)))
+    (append
+     (list (cons 'home (path->string* (rackup-home)))
+           (cons 'bin (path->string* (rackup-bin-entry)))
+           (cons 'shim-dispatcher (path->string* (rackup-shim-dispatcher)))
+           (cons 'shims-dir (path->string* (rackup-shims-dir)))
+           (cons 'installed-count (length ids))
+           (cons 'default default-id)
+           (cons 'wrapper-runtime-source wrapper-runtime-source))
+     (if (eq? runtime-mode 'embedded-exe)
+         (list (cons 'runtime-mode 'embedded-exe)
+               (cons 'runtime-present #t))
+         (list (cons 'runtime-present (hash-ref runtime-status 'present? #f))
+               (cons 'runtime-id (hash-ref runtime-status 'id #f))
+               (cons 'runtime-version
+                     (and (hash? runtime-meta) (hash-ref runtime-meta 'resolved-version #f)))
+               (cons 'runtime-racket (hash-ref runtime-status 'racket-path #f))))))
   (for ([kv findings])
     (printf "~a: ~a\n" (ansi "1" (format "~a" (car kv))) (cdr kv)))
   (for ([id ids])
