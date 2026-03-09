@@ -13,7 +13,9 @@
 @(define doc-style
    (make-style #f
      (list (css-addition css-path)
-           (js-addition js-path))))
+           (js-addition js-path)
+           (head-extra
+            '(link ((rel "icon") (type "image/svg+xml") (href "../favicon.svg")))))))
 
 @(define sub-style
    (make-style #f '(unnumbered toc-hidden)))
@@ -375,13 +377,19 @@ automatically.
 
 Upgrade rackup's own code by rerunning the bootstrap installer into the
 current @tt{RACKUP_HOME}.  By default this skips shell init edits and
-keeps your current shell config unchanged.
+keeps your current shell config unchanged.  The installer picks the
+best mode automatically (prebuilt binary if available for the current
+platform, otherwise source).
 
-@shell-block{rackup self-upgrade [--with-init]}
+@shell-block{rackup self-upgrade [--with-init] [--exe | --source]}
 
 @opt-table[
   @list[@exec{--with-init}
         "Allow the installer to run shell init updates."]
+  @list[@exec{--exe}
+        "Require a prebuilt binary (error if unavailable for this platform)."]
+  @list[@exec{--source}
+        "Force source installation, even if a prebuilt binary is available."]
 ]
 
 @subsection[#:style sub-style]{Advanced}
@@ -393,19 +401,27 @@ the install script source (useful for testing dev branches).
 
 @section[#:tag "runtime" #:style 'unnumbered]{@tt{rackup runtime}}
 
-Manage rackup's hidden internal Racket runtime.  This is a minimal
-Racket installation used to run rackup itself; it is separate from user
+Manage rackup's internal Racket runtime.
+
+When rackup is installed from @bold{source}, it uses a hidden minimal
+Racket installation to run itself.  This runtime is separate from user
 toolchains and is not exposed via shims or @tt{PATH}.
+
+When rackup is installed as a @bold{prebuilt executable}, Racket is
+embedded in the @tt{rackup-core} binary and no hidden runtime is
+needed.  In this mode, @tt{runtime install} and @tt{runtime upgrade}
+are no-ops; use @tt{rackup self-upgrade} to update the executable
+instead.
 
 @shell-block{rackup runtime status|install|upgrade}
 
 @opt-table[
   @list[@tt{status}
-        "Show whether the hidden runtime is present and its metadata."]
+        "Show runtime mode and metadata."]
   @list[@tt{install}
-        "Install the hidden runtime if missing (or adopt an existing Racket)."]
+        "Install the hidden runtime if missing (source installs only)."]
   @list[@tt{upgrade}
-        "Install a newer hidden runtime if one is available."]
+        "Upgrade the hidden runtime if a newer version is available (source installs only)."]
 ]
 
 @; ────────────────────────────────────────────────────────────────────
@@ -425,7 +441,8 @@ destructive and cannot be undone.
 @subsection[#:style sub-style]{What gets deleted}
 
 @itemlist[
-  @item{The hidden runtime used to run rackup.}
+  @item{The hidden runtime (source installs) or prebuilt executable
+        and shared libraries (exe installs).}
   @item{All installed toolchains and linked-toolchain metadata/overlays.}
   @item{Shims, caches, downloaded installers, and per-toolchain addon
         dirs/packages.}
@@ -527,23 +544,41 @@ settings to the subprocess.
 
 @section[#:tag "directory-layout" #:style 'unnumbered]{Directory layout}
 
-All rackup state lives under @tt{RACKUP_HOME} (default @tt{~/.rackup}):
+All rackup state lives under @tt{RACKUP_HOME} (default @tt{~/.rackup}).
+The layout differs slightly depending on how rackup was installed.
+
+@subsection[#:style sub-style]{Source installation}
 
 @shell-block|{
 ~/.rackup/
-  bin/rackup              # the rackup script
+  bin/rackup              # the rackup shell wrapper
   libexec/                # rackup's Racket source code
   runtime/                # hidden internal Racket runtime
   toolchains/             # installed/linked toolchains
-    racket-9.1-cs-full/   #   example installed toolchain
-    local-dev/            #   example linked toolchain (symlink)
   addons/                 # per-toolchain addon directories
-    racket-9.1-cs-full/   #   packages, compiled files, etc.
   shims/                  # executable shims (racket, raco, ...)
   shell/                  # generated shell integration scripts
   cache/                  # downloaded installer cache
   index.rktd              # toolchain registry
 }|
+
+@subsection[#:style sub-style]{Prebuilt executable installation}
+
+@shell-block|{
+~/.rackup/
+  bin/rackup              # the rackup shell wrapper
+  bin/rackup-core         # prebuilt executable (embeds Racket)
+  lib/                    # shared libraries for the executable
+  toolchains/             # installed/linked toolchains
+  addons/                 # per-toolchain addon directories
+  shims/                  # executable shims (racket, raco, ...)
+  shell/                  # generated shell integration scripts
+  cache/                  # downloaded installer cache
+  index.rktd              # toolchain registry
+}|
+
+No @tt{runtime/} or @tt{libexec/} directories are needed in exe mode
+because Racket is embedded in the @tt{rackup-core} binary.
 
 @; ────────────────────────────────────────────────────────────────────
 

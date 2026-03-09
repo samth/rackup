@@ -440,14 +440,16 @@
     [(list "install")
      (cond
        [(running-as-exe?)
-        (void)]  ; no hidden runtime needed
+        (displayln "Running as prebuilt executable; no hidden runtime needed.")
+        (displayln "Use 'rackup self-upgrade' to update the executable.")]
        [else
         (install-hidden-runtime!)
         (precompile-rackup-sources!)])]
     [(list "upgrade")
      (cond
        [(running-as-exe?)
-        (displayln "Running as prebuilt executable; use 'rackup self-upgrade' to update.")]
+        (displayln "Running as prebuilt executable; no hidden runtime to upgrade.")
+        (displayln "Use 'rackup self-upgrade' to update the executable.")]
        [else
         (upgrade-hidden-runtime!)
         (precompile-rackup-sources!)])]

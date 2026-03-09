@@ -32,6 +32,7 @@
               @a[href: "https://github.com/samth/rackup/blob/main/README.md"]{README})
         #:page-headers
         @list{
+          @link[rel: "icon" type: "image/svg+xml" href: "./favicon.svg"]
           @style[type: "text/css"]{
             html, body {
               background: white;

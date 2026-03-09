@@ -86,6 +86,9 @@
         "--html" "--dest" out-dir "--dest-name" "docs"
         (build-path root-dir "docs" "rackup.scrbl"))
 
+   ;; Copy favicon
+   (copy-file (build-path here "favicon.svg") (build-path out-dir "favicon.svg") #t)
+
    ;; Create .nojekyll marker
    (call-with-output-file (build-path out-dir ".nojekyll") void #:exists 'truncate/replace)
 
