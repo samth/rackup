@@ -118,6 +118,7 @@
                        "Force installer extension (default: platform-dependent).")
      (help-option-line "--quiet" "Show minimal output (errors + final result lines).")
      (help-option-line "--verbose" "Show detailed installer URL/path output.")
+     (help-option-line "--short-aliases" "Install short aliases: r (racket), dr (drracket).")
      (displayln "")
      (displayln "Examples:")
      (displayln "  rackup install stable")
@@ -231,9 +232,12 @@
      (displayln "Remove one installed or linked toolchain and its addon directory.")
      #t]
     [(reshim)
-     (help-usage "reshim")
+     (help-usage "reshim [--short-aliases|--no-short-aliases]")
      (displayln "")
      (displayln "Rebuild shim executables from the union of installed toolchain executables.")
+     (displayln "")
+     (help-option-line "--short-aliases" "Enable short aliases: r (racket), dr (drracket).")
+     (help-option-line "--no-short-aliases" "Remove short aliases.")
      #t]
     [(init)
      (help-usage "init [--shell bash|zsh]")
@@ -331,7 +335,9 @@
         "--verbose"
         0
         "--installer-ext"
-        1))
+        1
+        "--short-aliases"
+        0))
 
 (define (string-flag-like? s)
   (and (string? s) (> (string-length s) 0) (char=? (string-ref s 0) #\-)))
@@ -687,8 +693,20 @@
             (rackup-error "no matching installed toolchain: ~a" spec))])]
     [_ (rackup-error "usage: rackup remove <toolchain>")]))
 
-(define (cmd-reshim)
+(define (cmd-reshim rest)
+  (define aliases? #f)
+  (define no-aliases? #f)
+  (let loop ([xs rest])
+    (match xs
+      ['() (void)]
+      [(list "--short-aliases" more ...) (set! aliases? #t) (loop more)]
+      [(list "--no-short-aliases" more ...) (set! no-aliases? #t) (loop more)]
+      [(list flag _ ...) (rackup-error "unknown reshim flag: ~a" flag)]))
+  (when (and aliases? no-aliases?)
+    (rackup-error "--short-aliases and --no-short-aliases are mutually exclusive"))
   (ensure-index!)
+  (when aliases? (install-shim-aliases!))
+  (when no-aliases? (remove-shim-aliases!))
   (reshim!)
   (displayln "Reshim complete."))
 
@@ -696,7 +714,12 @@
   (if (ormap help-flag? rest)
       (show-command-help 'install)
       (let-values ([(spec opts) (split-install-command-args rest)])
-        (void (install-toolchain! spec opts)))))
+        (define aliases? (member "--short-aliases" opts))
+        (define filtered-opts (remove "--short-aliases" opts))
+        (void (install-toolchain! spec filtered-opts))
+        (when aliases?
+          (install-shim-aliases!)
+          (reshim!)))))
 
 (define (prompt-short-label id)
   (define meta (and id (read-toolchain-meta id)))
@@ -1094,7 +1117,7 @@
          [(list "shell" rest ...) (cmd-shell rest)]
          [(list "run" rest ...) (cmd-run rest)]
          [(list "remove" rest ...) (cmd-remove rest)]
-         [(list "reshim" _ ...) (cmd-reshim)]
+         [(list "reshim" rest ...) (cmd-reshim rest)]
          [(list "init" rest ...) (cmd-init rest)]
          [(list "uninstall" rest ...) (cmd-uninstall rest)]
          [(list "self-upgrade" rest ...) (cmd-self-upgrade rest)]

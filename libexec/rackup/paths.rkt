@@ -27,6 +27,7 @@
          rackup-index-file
          rackup-config-file
          rackup-default-file
+         rackup-shim-aliases-file
          rackup-shim-dispatcher
          rackup-bin-entry
          rackup-shell-script
@@ -95,6 +96,8 @@
   (build-path (rackup-state-dir) "config.rktd"))
 (define (rackup-default-file)
   (build-path (rackup-state-dir) "default-toolchain"))
+(define (rackup-shim-aliases-file)
+  (build-path (rackup-state-dir) "shim-aliases"))
 
 (define (rackup-shim-dispatcher)
   (build-path (rackup-libexec-dir) "rackup-shim"))
