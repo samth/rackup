@@ -1146,13 +1146,16 @@ Examples:
                 (capture-output (lambda () (run-main '("help" "self-upgrade")))))
   (expect (run-main '("self-upgrade" "--help"))
           @~a{
-            Usage: rackup self-upgrade [--with-init]
+            Usage: rackup self-upgrade [--with-init] [--exe | --source]
 
             Upgrade rackup's code by rerunning the bootstrap installer into the current RACKUP_HOME.
             By default this skips shell init edits and keeps your current shell config unchanged.
+            By default the installer picks the best mode (prebuilt binary if available, else source).
 
             Options:
               --with-init             Allow the installer to run shell init updates (-y without --no-init).
+              --exe                   Require a prebuilt binary (error if unavailable for this platform).
+              --source                Skip prebuilt binary and install from source (requires a Racket runtime).
 
             Environment overrides (advanced):
               RACKUP_SELF_UPGRADE_INSTALL_SH  Path or URL to install.sh (test/dev override).
@@ -1366,6 +1369,40 @@ Examples:
                (call-with-input-file mode-log
                  (lambda (in) (filter (lambda (s) (not (string=? s ""))) (port->lines in))))])
           (check-equal? mode-lines (list "self-upgrade"))))
+      (lambda ()
+        (if old-override
+            (putenv "RACKUP_SELF_UPGRADE_INSTALL_SH" old-override)
+            (putenv "RACKUP_SELF_UPGRADE_INSTALL_SH" ""))))))
+
+  ;; self-upgrade --exe forwards to install.sh
+  (with-temp-rackup-home
+   (lambda (tmp)
+     (ensure-index!)
+     (define fake-installer (build-path tmp "fake-install-exe.sh"))
+     (define args-log (build-path tmp "self-upgrade-exe-args.log"))
+     (write-string-file
+      fake-installer
+      (format
+       "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$@\" > ~s\nexit 0\n"
+       (path->string args-log)))
+     (file-or-directory-permissions fake-installer #o755)
+     (define old-override (getenv "RACKUP_SELF_UPGRADE_INSTALL_SH"))
+     (dynamic-wind
+      (lambda () (putenv "RACKUP_SELF_UPGRADE_INSTALL_SH" (path->string fake-installer)))
+      (lambda ()
+        (run-main '("self-upgrade" "--exe"))
+        (let ([args-lines
+               (call-with-input-file args-log
+                 (lambda (in) (filter (lambda (s) (not (string=? s ""))) (port->lines in))))])
+          (check-equal? args-lines
+                        (list "-y" "--no-init" "--exe" "--prefix" (path->string (rackup-home)))))
+        ;; Also verify --source
+        (run-main '("self-upgrade" "--source"))
+        (let ([args-lines
+               (call-with-input-file args-log
+                 (lambda (in) (filter (lambda (s) (not (string=? s ""))) (port->lines in))))])
+          (check-equal? args-lines
+                        (list "-y" "--no-init" "--source" "--prefix" (path->string (rackup-home))))))
       (lambda ()
         (if old-override
             (putenv "RACKUP_SELF_UPGRADE_INSTALL_SH" old-override)

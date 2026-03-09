@@ -4,7 +4,8 @@
          racket/path
          "util.rkt")
 
-(provide rackup-home
+(provide running-as-exe?
+         rackup-home
          rackup-bin-dir
          rackup-libexec-dir
          rackup-shims-dir
@@ -36,6 +37,13 @@
          rackup-toolchain-env-file
          rackup-addon-dir
          ensure-rackup-layout!)
+
+;; True when rackup was installed as a prebuilt raco-exe binary.
+;; Detected by checking for the compiled rackup-core executable next to the
+;; shell wrapper.  When true the hidden runtime is unnecessary (the exe
+;; embeds its own Racket).
+(define (running-as-exe?)
+  (executable-file? (build-path (rackup-bin-dir) "rackup-core")))
 
 (define (rackup-home)
   (define env (getenv "RACKUP_HOME"))
@@ -109,16 +117,24 @@
   (build-path (rackup-addons-dir) id))
 
 (define (ensure-rackup-layout!)
-  (for ([p (list (rackup-home)
-                 (rackup-bin-dir)
-                 (rackup-libexec-dir)
-                 (rackup-shims-dir)
-                 (rackup-shell-dir)
-                 (rackup-toolchains-dir)
-                 (rackup-addons-dir)
-                 (rackup-runtime-dir)
-                 (rackup-runtime-addon-dir)
-                 (rackup-runtime-versions-dir)
-                 (rackup-download-cache-dir)
-                 (rackup-state-dir))])
+  (define base-dirs
+    (list (rackup-home)
+          (rackup-bin-dir)
+          (rackup-libexec-dir)
+          (rackup-shims-dir)
+          (rackup-shell-dir)
+          (rackup-toolchains-dir)
+          (rackup-addons-dir)
+          (rackup-download-cache-dir)
+          (rackup-state-dir)))
+  ;; Only create hidden runtime directories when not running as a
+  ;; prebuilt exe (the exe embeds its own Racket runtime).
+  (define dirs
+    (if (running-as-exe?)
+        base-dirs
+        (append base-dirs
+                (list (rackup-runtime-dir)
+                      (rackup-runtime-addon-dir)
+                      (rackup-runtime-versions-dir)))))
+  (for ([p dirs])
     (ensure-directory* p)))

@@ -5,6 +5,7 @@ set -eu
 SELF_DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
 LIBEXEC_DIR="$SELF_DIR/../libexec"
 CORE="$LIBEXEC_DIR/rackup-core.rkt"
+CORE_EXE="$SELF_DIR/rackup-core"
 BOOTSTRAP_SH="$LIBEXEC_DIR/rackup-bootstrap.sh"
 
 if [ ! -r "$BOOTSTRAP_SH" ]; then
@@ -40,6 +41,62 @@ if [ "${1:-}" = "help" ] && [ "${2:-}" = "prompt" ] && [ "$#" -eq 2 ]; then
   rackup_prompt_help_shell
   exit 0
 fi
+
+# --- Prebuilt binary path: if rackup-core binary exists, use it directly ---
+if [ -x "$CORE_EXE" ]; then
+  # Save user's Racket env vars for pass-through (rackup run), then clear
+  # so the embedded runtime is not affected.
+  for _rackup_v in PLTHOME PLTCOLLECTS PLTADDONDIR PLTCOMPILEDROOTS PLTUSERHOME RACKET_XPATCH PLT_COMPILED_FILE_CHECK; do
+    eval "_rackup_val=\${$_rackup_v:-}"
+    if [ -n "$_rackup_val" ]; then
+      eval "export _RACKUP_ORIG_$_rackup_v=\"\$_rackup_val\""
+    fi
+  done
+  unset PLTHOME PLTCOLLECTS PLTADDONDIR PLTCOMPILEDROOTS PLTUSERHOME RACKET_XPATCH PLT_COMPILED_FILE_CHECK
+
+  if [ "${1:-}" = "uninstall" ]; then
+    REQUEST_DIR="$(mktemp -d "${TMPDIR:-/tmp}/rackup-uninstall.XXXXXX")"
+    REQUEST_FILE="$REQUEST_DIR/request.txt"
+    # shellcheck disable=SC2317  # invoked via trap
+    cleanup_uninstall_request() {
+      rm -rf "$REQUEST_DIR"
+    }
+    trap cleanup_uninstall_request EXIT INT TERM HUP
+    export RACKUP_UNINSTALL_REQUEST_FILE="$REQUEST_FILE"
+    "$CORE_EXE" "$@"
+    status=$?
+    if [ "$status" -ne 0 ]; then
+      exit "$status"
+    fi
+    unset RACKUP_UNINSTALL_REQUEST_FILE
+    if [ ! -f "$REQUEST_FILE" ]; then
+      echo "rackup: uninstall request was not produced" >&2
+      exit 1
+    fi
+    TARGET_HOME="$(sed -n '1p' "$REQUEST_FILE")"
+    if [ -z "$TARGET_HOME" ]; then
+      echo "rackup: uninstall request did not include a target path" >&2
+      exit 1
+    fi
+    if [ -e "$TARGET_HOME" ]; then
+      rm -rf -- "$TARGET_HOME"
+    fi
+    echo "rackup uninstalled."
+    if [ "$(wc -l <"$REQUEST_FILE")" -gt 1 ]; then
+      echo "Removed rackup shell init blocks from:"
+      sed -n '2,$p' "$REQUEST_FILE" | while IFS= read -r rc_path; do
+        [ -n "$rc_path" ] || continue
+        printf '  %s\n' "$rc_path"
+      done
+    fi
+    echo "Rackup home deletion completed synchronously."
+    echo "Your current shell may still have rackup-related PATH/env changes until you start a new shell."
+    exit 0
+  fi
+
+  exec "$CORE_EXE" "$@"
+fi
+# --- End prebuilt binary path ---
 
 USE_Y=0
 if rackup_hidden_runtime_present; then

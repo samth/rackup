@@ -395,37 +395,60 @@
       (install-hidden-runtime!)))
 
 (define (hidden-runtime-status)
-  (define racket-exe (hidden-runtime-racket-path))
-  (define id (runtime-current-id))
-  (define meta (runtime-current-meta))
-  (hash 'present?
-        (and racket-exe #t)
-        'racket-path
-        (and racket-exe (path->string* racket-exe))
-        'id
-        id
-        'meta
-        meta))
+  (cond
+    [(running-as-exe?)
+     (hash 'present? #t
+           'mode 'embedded-exe
+           'racket-path #f
+           'id #f
+           'meta #f)]
+    [else
+     (define racket-exe (hidden-runtime-racket-path))
+     (define id (runtime-current-id))
+     (define meta (runtime-current-meta))
+     (hash 'present?
+           (and racket-exe #t)
+           'mode 'hidden-runtime
+           'racket-path
+           (and racket-exe (path->string* racket-exe))
+           'id
+           id
+           'meta
+           meta)]))
 
 (define (cmd-runtime rest)
   (match rest
     [(list "status")
-     (define s (hidden-runtime-status))
-     (if (hash-ref s 'present? #f)
-         (let ([m (hash-ref s 'meta #f)])
-           (printf "present: yes\n")
-           (printf "id: ~a\n" (or (hash-ref s 'id #f) ""))
-           (printf "racket: ~a\n" (or (hash-ref s 'racket-path #f) ""))
-           (when (hash? m)
-             (printf "version: ~a\n" (hash-ref m 'resolved-version ""))
-             (printf "variant: ~a\n" (hash-ref m 'variant ""))
-             (printf "distribution: ~a\n" (hash-ref m 'distribution ""))
-             (printf "installed-at: ~a\n" (hash-ref m 'installed-at ""))))
-         (displayln "present: no"))]
+     (cond
+       [(running-as-exe?)
+        (displayln "mode: embedded-exe")
+        (displayln "present: yes (runtime embedded in rackup-core executable)")
+        (displayln "hidden-runtime: not needed")]
+       [else
+        (define s (hidden-runtime-status))
+        (if (hash-ref s 'present? #f)
+            (let ([m (hash-ref s 'meta #f)])
+              (printf "present: yes\n")
+              (printf "id: ~a\n" (or (hash-ref s 'id #f) ""))
+              (printf "racket: ~a\n" (or (hash-ref s 'racket-path #f) ""))
+              (when (hash? m)
+                (printf "version: ~a\n" (hash-ref m 'resolved-version ""))
+                (printf "variant: ~a\n" (hash-ref m 'variant ""))
+                (printf "distribution: ~a\n" (hash-ref m 'distribution ""))
+                (printf "installed-at: ~a\n" (hash-ref m 'installed-at ""))))
+            (displayln "present: no"))])]
     [(list "install")
-     (install-hidden-runtime!)
-     (precompile-rackup-sources!)]
+     (cond
+       [(running-as-exe?)
+        (void)]  ; no hidden runtime needed
+       [else
+        (install-hidden-runtime!)
+        (precompile-rackup-sources!)])]
     [(list "upgrade")
-     (upgrade-hidden-runtime!)
-     (precompile-rackup-sources!)]
+     (cond
+       [(running-as-exe?)
+        (displayln "Running as prebuilt executable; use 'rackup self-upgrade' to update.")]
+       [else
+        (upgrade-hidden-runtime!)
+        (precompile-rackup-sources!)])]
     [_ (rackup-error "usage: rackup runtime status|install|upgrade")]))

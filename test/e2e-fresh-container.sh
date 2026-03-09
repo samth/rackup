@@ -416,6 +416,36 @@ else
   assert_contains "present: " "$runtime_status" "runtime status output missing"
 fi
 
+# Self-upgrade test: only in bootstrap modes where the hidden runtime is already
+# installed, so the test stays hermetic (no network download of a runtime).
+if [[ "$MODE" == "bootstrap" || "$MODE" == "bootstrap-curl" ]]; then
+  echo
+  echo "== Self-upgrade smoke test =="
+  # Self-upgrade using the local install.sh and local source tree so the test
+  # is hermetic (no network fetch for the source tarball / binary).
+  # RACKUP_SELF_UPGRADE_INSTALL_SH  → use the repo's install.sh directly
+  # RACKUP_FROM_LOCAL               → install.sh installs from the local tree
+  RACKUP_SELF_UPGRADE_INSTALL_SH="$RUN_SRC/scripts/install.sh" \
+    RACKUP_FROM_LOCAL="$RUN_SRC" \
+    run_rackup self-upgrade
+  # After self-upgrade, basic commands should still work.
+  run_rackup version
+  run_rackup doctor
+  post_upgrade_runtime="$(run_rackup runtime status)"
+  echo "$post_upgrade_runtime"
+  if [[ -x "$RACKUP_HOME/bin/rackup-core" ]]; then
+    echo "Exe mode detected after self-upgrade."
+    # In exe mode the hidden runtime directory should not exist.
+    if [[ -d "$RACKUP_HOME/runtime/current" ]]; then
+      fail "hidden runtime directory should not exist in exe mode after self-upgrade"
+    fi
+    assert_contains "embedded-exe" "$post_upgrade_runtime" "exe self-upgrade should report embedded-exe mode"
+  else
+    echo "Source mode detected after self-upgrade."
+    assert_contains "present: yes" "$post_upgrade_runtime" "source self-upgrade should preserve hidden runtime"
+  fi
+fi
+
 IFS=',' read -r -a SPECS <<<"$SPECS_CSV"
 declare -a INSTALLED_IDS=()
 declare -a INSTALLED_SPECS=()
