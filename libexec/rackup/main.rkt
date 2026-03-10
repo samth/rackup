@@ -18,7 +18,8 @@
          "shell.rkt"
          "shims.rkt"
          "state.rkt"
-         "util.rkt")
+         "util.rkt"
+         "versioning.rkt")
 
 (provide main
          cmd-version)
@@ -66,8 +67,20 @@
   (displayln "")
   (displayln "Use `rackup <command> --help` or `rackup help <command>` for command help."))
 
+;; If spec is a meta-name like "stable", try resolving it to an actual
+;; version number and look up locally.  Returns the ID or #f.
+(define (try-resolve-meta-spec spec)
+  (with-handlers ([exn:fail? (lambda (_) #f)])
+    (define spec* (parse-install-spec spec))
+    (match (hash-ref spec* 'kind)
+      ['stable
+       (define ver (lookup-stable-version))
+       (find-local-toolchain ver)]
+      [_ #f])))
+
 (define (resolve-toolchain-or-die spec)
-  (define id (find-local-toolchain spec))
+  (define id (or (find-local-toolchain spec)
+                 (try-resolve-meta-spec spec)))
   (unless id
     (rackup-error "no matching installed toolchain: ~a" spec))
   id)
@@ -135,7 +148,8 @@
                     (close-output-port tty-out)))))
 
 (define (resolve-toolchain-or-offer-install spec)
-  (define id (find-local-toolchain spec))
+  (define id (or (find-local-toolchain spec)
+                 (try-resolve-meta-spec spec)))
   (cond
     [id id]
     [(not (call-with-user-tty (lambda (_in _out) #t)))

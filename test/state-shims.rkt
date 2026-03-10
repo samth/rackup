@@ -1354,8 +1354,8 @@
      (register-fake-toolchain! id-full "9.0" 'cs 'full)
      (register-fake-toolchain! id-minimal "9.0" 'cs 'minimal)
 
-     ;; "9.0" alone is ambiguous (two matches)
-     (check-false (find-local-toolchain "9.0"))
+     ;; "9.0" alone matches both, but prefers "full" distribution
+     (check-equal? (find-local-toolchain "9.0") id-full)
      ;; "9.0-minimal" disambiguates via metadata parts
      (check-equal? (find-local-toolchain "9.0-minimal") id-minimal)
      ;; "9.0-full" disambiguates the other way

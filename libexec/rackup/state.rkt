@@ -168,13 +168,22 @@
 ;; Return all candidate short names derivable from a toolchain's metadata:
 ;; requested-spec, resolved-version, and multi-part combinations of
 ;; version/variant/distribution.
+;; For linked (local) toolchains, skip version-based names since the
+;; version is a snapshot that changes over time.
 (define (toolchain-meta-names m)
   (if (not (hash? m))
       null
       (let-values ([(ver var dist) (toolchain-meta-fields m)])
-        (let* ([spec (hash-ref m 'requested-spec #f)]
-               [spec-names (filter values (list spec ver))]
-               [fields (filter values (list ver var dist))]
+        (let* ([local? (equal? (hash-ref m 'kind #f) 'local)]
+               [spec (hash-ref m 'requested-spec #f)]
+               ;; For local toolchains, don't use resolved-version as an alias
+               [spec-names (if local?
+                               (filter values (list spec))
+                               (filter values (list spec ver)))]
+               ;; For local toolchains, don't generate version-based combinations
+               [fields (if local?
+                           (filter values (list var dist))
+                           (filter values (list ver var dist)))]
                [pairs (for*/list ([i (in-range (length fields))]
                                   [j (in-range (add1 i) (length fields))])
                         (string-join (list (list-ref fields i) (list-ref fields j)) "-"))]
@@ -185,19 +194,38 @@
 
 ;; Core name resolution against pre-loaded metadata.
 ;; Returns the matching toolchain ID or #f.
-(define (resolve-name-with-meta name ids aliases all-meta)
+;; When #:error-on-ambiguous? is #t, raises an error listing the
+;; matches instead of returning #f for ambiguous names.
+(define (resolve-name-with-meta name ids aliases all-meta
+                                #:error-on-ambiguous? [error-on-ambiguous? #f])
   (define (unique xs) (and (= (length xs) 1) (car xs)))
+  ;; When multiple toolchains match, prefer "full" distribution over others.
+  ;; If still ambiguous and error-on-ambiguous?, raise an error.
+  (define (unique-or-prefer-full xs)
+    (or (unique xs)
+        (let ([fulls (filter (lambda (id)
+                               (let ([m (cdr (assoc id all-meta))])
+                                 (and (hash? m)
+                                      (equal? (format "~a" (hash-ref m 'distribution #f))
+                                              "full"))))
+                             xs)])
+          (or (unique fulls)
+              (and error-on-ambiguous? (> (length xs) 1)
+                   (rackup-error
+                    "ambiguous toolchain '~a' matches multiple installed toolchains:\n  ~a\nUse a more specific name."
+                    name
+                    (string-join xs "\n  ")))))))
   (cond
     [(hash-has-key? aliases name) (hash-ref aliases name)]
     [(member name ids) name]
     [else
      (or (unique (filter (lambda (id) (string-prefix? id name)) ids))
-         (unique (for/list ([pair (in-list all-meta)]
-                            #:when (toolchain-meta-matches-spec? (cdr pair) name))
-                   (car pair)))
-         (unique (for/list ([pair (in-list all-meta)]
-                            #:when (toolchain-meta-matches-parts? (cdr pair) name))
-                   (car pair)))
+         (unique-or-prefer-full (for/list ([pair (in-list all-meta)]
+                                           #:when (toolchain-meta-matches-spec? (cdr pair) name))
+                                  (car pair)))
+         (unique-or-prefer-full (for/list ([pair (in-list all-meta)]
+                                           #:when (toolchain-meta-matches-parts? (cdr pair) name))
+                                  (car pair)))
          #f)]))
 
 (define (find-local-toolchain name [idx (load-index)])
@@ -209,7 +237,8 @@
      (define all-meta
        (for/list ([id ids])
          (cons id (read-toolchain-meta id))))
-     (resolve-name-with-meta name ids aliases all-meta)]))
+     (resolve-name-with-meta name ids aliases all-meta
+                              #:error-on-ambiguous? #t)]))
 
 ;; Return the short names that uniquely resolve to this toolchain.
 ;; Accepts optional #:all-meta to avoid redundant file reads when

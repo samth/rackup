@@ -589,8 +589,14 @@
      racket-exe
      "-e"
      "(display (find-system-path 'addon-dir))"))
+  (define (normalize-vm-name s)
+    (and s (not (string-blank? s))
+         (match (string-downcase s)
+           ["chez-scheme" "cs"]
+           ["racket" "bc"]
+           [v v])))
   (values (and version-out (not (string-blank? version-out)) version-out)
-          (and variant-out (not (string-blank? variant-out)) (string-downcase variant-out))
+          (normalize-vm-name variant-out)
           (and addon-out (not (string-blank? addon-out)) addon-out)))
 
 (define (installed-toolchain-env-vars real-bin-dir)
