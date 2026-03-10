@@ -407,3 +407,6 @@
   (define existing (read-string-file rc ""))
   (write-string-file rc (replace-managed-block existing (managed-rc-block shell*)))
   rc)
+
+(module+ for-testing
+  (provide shell-helper-script))

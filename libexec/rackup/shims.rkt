@@ -53,7 +53,9 @@ if [[ -z "$ACTIVE" ]]; then
   echo "Inspect choices with: rackup list | rackup available --limit 20" >&2
   exit 2
 fi
-TARGET="$HOME_DIR/toolchains/$ACTIVE/bin/$SHIM_NAME"
+BIN_DIR="$HOME_DIR/toolchains/$ACTIVE/bin"
+BIN_REAL="$(cd -P "$BIN_DIR" 2>/dev/null && pwd)" || BIN_REAL="$BIN_DIR"
+TARGET="$BIN_REAL/$SHIM_NAME"
 ENV_FILE="$HOME_DIR/toolchains/$ACTIVE/env.sh"
 if [[ ! -x "$TARGET" ]]; then
   echo "rackup: executable '$SHIM_NAME' not found in toolchain '$ACTIVE'" >&2

@@ -10,7 +10,12 @@
          "../libexec/rackup/install.rkt"
          "../libexec/rackup/legacy-plt-catalog.rkt"
          "../libexec/rackup/remote.rkt"
-         "../libexec/rackup/runtime.rkt")
+         "../libexec/rackup/runtime.rkt"
+         (submod "../libexec/rackup/remote.rkt" for-testing)
+         (rename-in (submod "../libexec/rackup/install.rkt" for-testing)
+                    [ensure-installer-cached! install-ensure-installer-cached!])
+         (rename-in (submod "../libexec/rackup/runtime.rkt" for-testing)
+                    [ensure-installer-cached! runtime-ensure-installer-cached!]))
 
 (module+ test
   (define-runtime-path repo-root "..")
@@ -34,28 +39,6 @@
     (check-false (regexp-match? #px"\\bwget\\b" (string-downcase content))
                  (format "~a should not shell out to wget" (path->string src))))
 
-  (define resolve-install-request/runtime
-    (dynamic-require '(file "../libexec/rackup/remote.rkt") 'resolve-install-request))
-
-  (define remote-ns (module->namespace '(file "../libexec/rackup/remote.rkt")))
-  (define install-ns (module->namespace '(file "../libexec/rackup/install.rkt")))
-  (define runtime-ns (module->namespace '(file "../libexec/rackup/runtime.rkt")))
-
-  (define current-http-sendrecv-proc/private
-    (parameterize ([current-namespace remote-ns])
-      (eval 'current-http-sendrecv-proc)))
-  (define http-get-string/private
-    (parameterize ([current-namespace remote-ns])
-      (eval 'http-get-string)))
-  (define http-get-rktd/private
-    (parameterize ([current-namespace remote-ns])
-      (eval 'http-get-rktd)))
-  (define ensure-installer-cached/install-private
-    (parameterize ([current-namespace install-ns])
-      (eval 'ensure-installer-cached!)))
-  (define ensure-installer-cached/runtime-private
-    (parameterize ([current-namespace runtime-ns])
-      (eval 'ensure-installer-cached!)))
 
   (define tmp-root (string->path "/tmp"))
 
@@ -265,7 +248,7 @@
     "209")
    "plt-209-bin-i386-linux-gcc2.sh")
 
-  (define legacy-req-209 (resolve-install-request/runtime "209" #:arch "i386" #:platform "linux"))
+  (define legacy-req-209 (resolve-install-request "209" #:arch "i386" #:platform "linux"))
   (check-equal? (hash-ref legacy-req-209 'installer-url)
                 "http://download.plt-scheme.org/bundles/209/plt/plt-209-bin-i386-linux.sh")
   (check-equal? (hash-ref legacy-req-209 'installer-filename)
@@ -274,7 +257,7 @@
                 "f70696da6302a9ca22a3df1fc9c951689f07669643859768489a372c04aef5c9")
   (check-equal? (hash-ref legacy-req-209 'legacy-install-kind) 'shell-basic)
 
-  (define legacy-req-103p1 (resolve-install-request/runtime "103p1" #:arch "i386" #:platform "linux"))
+  (define legacy-req-103p1 (resolve-install-request "103p1" #:arch "i386" #:platform "linux"))
   (check-equal? (hash-ref legacy-req-103p1 'installer-url)
                 "http://download.plt-scheme.org/bundles/103p1/plt/plt-103p1-bin-i386-linux.tgz")
   (check-equal? (hash-ref legacy-req-103p1 'installer-filename)
@@ -283,13 +266,13 @@
                 "7090e2d7df07c17530e50cbc5fde67b51b39f77c162b7f20413242dca923a20a")
   (check-equal? (hash-ref legacy-req-103p1 'legacy-install-kind) 'tgz)
 
-  (define legacy-req-4.2.5 (resolve-install-request/runtime "4.2.5" #:arch "x86_64" #:platform "linux"))
+  (define legacy-req-4.2.5 (resolve-install-request "4.2.5" #:arch "x86_64" #:platform "linux"))
   (check-equal? (hash-ref legacy-req-4.2.5 'installer-url)
                 "http://download.plt-scheme.org/bundles/4.2.5/plt/plt-4.2.5-bin-x86_64-linux-f7.sh")
   (check-equal? (hash-ref legacy-req-4.2.5 'legacy-install-kind) 'shell-unixstyle)
 
   ;; macOS DMG installers for legacy PLT Scheme versions
-  (define legacy-req-4.2.5-mac (resolve-install-request/runtime "4.2.5" #:arch "i386" #:platform "macosx"))
+  (define legacy-req-4.2.5-mac (resolve-install-request "4.2.5" #:arch "i386" #:platform "macosx"))
   (check-equal? (hash-ref legacy-req-4.2.5-mac 'installer-url)
                 "http://download.plt-scheme.org/bundles/4.2.5/plt/plt-4.2.5-bin-i386-osx-mac.dmg")
   (check-equal? (hash-ref legacy-req-4.2.5-mac 'installer-filename)
@@ -298,14 +281,14 @@
   (check-equal? (hash-ref legacy-req-4.2.5-mac 'platform) "macosx")
 
   ;; macOS DMGs available for 350+, not for older versions
-  (define legacy-req-350-mac (resolve-install-request/runtime "350" #:arch "i386" #:platform "macosx"))
+  (define legacy-req-350-mac (resolve-install-request "350" #:arch "i386" #:platform "macosx"))
   (check-equal? (hash-ref legacy-req-350-mac 'legacy-install-kind) 'dmg)
   (check-exn #px"does not have macOS installers"
-             (lambda () (resolve-install-request/runtime "209" #:arch "i386" #:platform "macosx")))
+             (lambda () (resolve-install-request "209" #:arch "i386" #:platform "macosx")))
 
   ;; Spot-check a few more macOS entries resolve correctly
   (for ([ver (in-list '("4.0" "4.1" "4.2" "370" "372"))])
-    (define req (resolve-install-request/runtime ver #:arch "i386" #:platform "macosx"))
+    (define req (resolve-install-request ver #:arch "i386" #:platform "macosx"))
     (check-equal? (hash-ref req 'legacy-install-kind) 'dmg
                   (format "~a macOS should use dmg install kind" ver))
     (check-true (regexp-match? #rx"osx-mac\\.dmg$" (hash-ref req 'installer-filename))
@@ -318,30 +301,30 @@
     (check-false (string=? "" (string-trim (hash-ref artifact 'sha256 "")))))
 
   (let ([in (open-input-string "ignored")])
-    (parameterize ([current-http-sendrecv-proc/private
+    (parameterize ([current-http-sendrecv-proc
                     (make-keyword-procedure
                      (lambda (_kws _kw-args . _args)
                        (values "NOT HTTP" null in)))])
       (check-exn
        #px"could not parse HTTP status line while fetching http://example.invalid/bad"
        (lambda ()
-         (http-get-string/private "http://example.invalid/bad"))))
+         (http-get-string "http://example.invalid/bad"))))
     (check-true (port-closed? in)))
 
   (let ([in (open-input-string "#lang racket/base\n1\n")])
-    (parameterize ([current-http-sendrecv-proc/private
+    (parameterize ([current-http-sendrecv-proc
                     (make-keyword-procedure
                      (lambda (_kws _kw-args . _args)
                        (values "HTTP/1.1 200 OK" null in)))])
       (check-exn
        #px"failed to read \\.rktd response from http://example.invalid/table.rktd"
        (lambda ()
-         (http-get-rktd/private "http://example.invalid/table.rktd"))))
+         (http-get-rktd "http://example.invalid/table.rktd"))))
     (check-true (port-closed? in)))
 
   (let ([in (open-input-string "payload")]
         [dest-dir (make-temporary-file "rackup-download-dest-~a" 'directory tmp-root)])
-    (parameterize ([current-http-sendrecv-proc/private
+    (parameterize ([current-http-sendrecv-proc
                     (make-keyword-procedure
                      (lambda (_kws _kw-args . _args)
                        (values "HTTP/1.1 200 OK" null in)))])
@@ -356,22 +339,22 @@
      (check-exn
       #px"refusing to download installer over HTTP without a hardcoded SHA-256 checksum"
       (lambda ()
-        (ensure-installer-cached/install-private "http://download.plt-scheme.org/example.sh")))))
+        (install-ensure-installer-cached! "http://download.plt-scheme.org/example.sh")))))
 
   (with-temp-rackup-home
    (lambda (_tmp-home)
      (check-exn
       #px"refusing to download installer over HTTP without a hardcoded SHA-256 checksum"
       (lambda ()
-        (ensure-installer-cached/runtime-private "http://download.plt-scheme.org/example.sh")))))
+        (runtime-ensure-installer-cached! "http://download.plt-scheme.org/example.sh")))))
 
   (check-exn exn:fail?
-             (lambda () (resolve-install-request/runtime "053" #:arch "i386" #:platform "linux")))
+             (lambda () (resolve-install-request "053" #:arch "i386" #:platform "linux")))
   (check-exn
    #px"PLT Scheme v102|historical release range"
-   (lambda () (resolve-install-request/runtime "102" #:arch "i386" #:platform "linux")))
+   (lambda () (resolve-install-request "102" #:arch "i386" #:platform "linux")))
   (check-exn exn:fail?
-             (lambda () (resolve-install-request/runtime "203" #:arch "i386" #:platform "linux")))
+             (lambda () (resolve-install-request "203" #:arch "i386" #:platform "linux")))
 
   ;; Extension preference: select-installer-filename/by-ext with macOS extensions
   (define fake-table-macos
@@ -499,7 +482,7 @@
 
   ;; End-to-end: riscv64 is minimal-only -- requesting full falls back to minimal.
   (define riscv-req
-    (resolve-install-request/runtime "9.1" #:distribution 'full #:arch "riscv64" #:platform "linux"))
+    (resolve-install-request "9.1" #:distribution 'full #:arch "riscv64" #:platform "linux"))
   (check-equal? (hash-ref riscv-req 'distribution) 'minimal)
   (check-equal? (hash-ref riscv-req 'arch) "riscv64")
   (check-true (regexp-match? #rx"minimal" (hash-ref riscv-req 'installer-filename)))
@@ -507,7 +490,7 @@
   ;; Architectures that have full Linux installers in 9.1 should NOT fall back.
   (for ([arch (in-list '("x86_64" "aarch64" "i386" "arm"))])
     (define req
-      (resolve-install-request/runtime "9.1" #:distribution 'full #:arch arch #:platform "linux"))
+      (resolve-install-request "9.1" #:distribution 'full #:arch arch #:platform "linux"))
     (check-equal? (hash-ref req 'distribution) 'full
                   (format "~a: full installer should be found" arch))
     (check-equal? (hash-ref req 'arch) arch)
@@ -516,12 +499,12 @@
 
   ;; Explicitly requesting minimal on riscv64 works directly (no fallback needed).
   (define riscv-minimal-req
-    (resolve-install-request/runtime "9.1" #:distribution 'minimal #:arch "riscv64" #:platform "linux"))
+    (resolve-install-request "9.1" #:distribution 'minimal #:arch "riscv64" #:platform "linux"))
   (check-equal? (hash-ref riscv-minimal-req 'distribution) 'minimal)
   (check-true (regexp-match? #rx"minimal" (hash-ref riscv-minimal-req 'installer-filename)))
 
   ;; Stable resolves for riscv64 with full -> minimal fallback.
   (define riscv-stable-req
-    (resolve-install-request/runtime "stable" #:distribution 'full #:arch "riscv64" #:platform "linux"))
+    (resolve-install-request "stable" #:distribution 'full #:arch "riscv64" #:platform "linux"))
   (check-equal? (hash-ref riscv-stable-req 'distribution) 'minimal)
   (check-equal? (hash-ref riscv-stable-req 'arch) "riscv64"))

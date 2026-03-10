@@ -413,6 +413,20 @@ jobs:
           bin/rackup list
           bin/rackup doctor
           "$RACKUP_HOME/shims/racket" -e '(displayln "hello from rackup")'
+          # Smoke-test DrRacket through the shim to catch issues like #37.
+          "$RACKUP_HOME/shims/drracket" &
+          DR_PID=$!
+          sleep 10
+          if kill -0 "$DR_PID" 2>/dev/null; then
+            echo "DrRacket launched successfully through shim"
+            kill "$DR_PID" || true
+            wait "$DR_PID" 2>/dev/null || true
+          else
+            wait "$DR_PID" 2>/dev/null
+            DR_STATUS=$?
+            echo "DrRacket crashed or exited early (status $DR_STATUS)" >&2
+            exit 1
+          fi
           bin/rackup remove "$(bin/rackup list --ids | head -1)"
       - name: Legacy PLT Scheme DMG install (4.2.5, 4.0, 350)
         if: matrix.setup_racket_arch == 'x64'

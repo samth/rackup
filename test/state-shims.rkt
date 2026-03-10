@@ -12,6 +12,7 @@
          racket/string
          racket/system
          "../libexec/rackup/install.rkt"
+         "../libexec/rackup/legacy.rkt"
          "../libexec/rackup/main.rkt"
          "../libexec/rackup/paths.rkt"
          "../libexec/rackup/rktd-io.rkt"
@@ -20,7 +21,12 @@
          "../libexec/rackup/shims.rkt"
          "../libexec/rackup/state.rkt"
          "../libexec/rackup/util.rkt"
-         "../libexec/rackup/versioning.rkt")
+         "../libexec/rackup/versioning.rkt"
+         (only-in (submod "../libexec/rackup/install.rkt" for-testing)
+                  detect-bin-dir installed-toolchain-env-vars)
+         (only-in (submod "../libexec/rackup/runtime.rkt" for-testing)
+                  hidden-runtime-invocation-prefix)
+         (submod "../libexec/rackup/shell.rkt" for-testing))
 
 (define (with-temp-rackup-home proc)
   (define tmp (make-temporary-file "rackup-test~a" 'directory))
@@ -40,29 +46,6 @@
       (main))))
 
 (define-runtime-path rackup-bin "../bin/rackup")
-(define install-ns (module->namespace '(file "../libexec/rackup/install.rkt")))
-(define shell-ns (module->namespace '(file "../libexec/rackup/shell.rkt")))
-(define runtime-ns (module->namespace '(file "../libexec/rackup/runtime.rkt")))
-
-(define detect-bin-dir/private
-  (parameterize ([current-namespace install-ns])
-    (eval 'detect-bin-dir)))
-
-(define installed-toolchain-env-vars/private
-  (parameterize ([current-namespace install-ns])
-    (eval 'installed-toolchain-env-vars)))
-
-(define maybe-modernize-legacy-archsys!/private
-  (parameterize ([current-namespace install-ns])
-    (eval 'maybe-modernize-legacy-archsys!)))
-
-(define shell-helper-script/private
-  (parameterize ([current-namespace shell-ns])
-    (eval 'shell-helper-script)))
-
-(define hidden-runtime-invocation-prefix/private
-  (parameterize ([current-namespace runtime-ns])
-    (eval 'hidden-runtime-invocation-prefix)))
 
 
 
@@ -118,6 +101,85 @@
      (reshim!)
      (expect/shell (list (path->string (build-path (rackup-shims-dir) "racket")) "--version")
                    #:status 23 "")))
+
+  ;; Test that the shim resolves the bin symlink physically, so that
+  ;; wrapper scripts see a canonical path via $0.  Before the fix,
+  ;; TARGET went through the bin symlink; the fix uses cd -P to resolve it.
+  (with-temp-rackup-home
+   (lambda (_tmp)
+     (ensure-index!)
+     (define id "release-9.1-cs-x86_64-linux-full")
+     (define install-root (rackup-toolchain-install-dir id))
+     (define real-bin (build-path install-root "bin"))
+     (make-directory* real-bin)
+     ;; Create a script that prints the path it was invoked as ($0)
+     (write-string-file (build-path real-bin "racket")
+                        "#!/usr/bin/env bash\necho \"$0\"\n")
+     (file-or-directory-permissions (build-path real-bin "racket") #o755)
+     ;; Create a launcher script like macOS bin/drracket: resolves symlinks
+     ;; on the file but uses `pwd` (not `pwd -P`) for the directory.
+     ;; This mimics Racket's make-mred-launcher output.
+     (define app-dir (build-path install-root "DrRacket.app"))
+     (make-directory* app-dir)
+     (write-string-file (build-path app-dir "DrRacket")
+                        "#!/usr/bin/env bash\necho ok\n")
+     (file-or-directory-permissions (build-path app-dir "DrRacket") #o755)
+     (write-string-file
+      (build-path real-bin "drracket")
+      (string-append "#!/bin/sh\n"
+                     "# Mimics Racket's make-mred-launcher script.\n"
+                     "# Uses pwd (not pwd -P) to resolve the directory.\n"
+                     "saveD=`pwd`\n"
+                     "D=`dirname \"$0\"`\n"
+                     "cd \"$D\"\n"
+                     "D=`pwd`\n"
+                     "cd \"$saveD\"\n"
+                     "bindir=\"$D/..\"\n"
+                     "exec \"${bindir}/DrRacket.app/DrRacket\" ${1+\"$@\"}\n"))
+     (file-or-directory-permissions (build-path real-bin "drracket") #o755)
+     ;; bin is a symlink to install/bin — this is the normal rackup layout
+     (make-file-or-directory-link real-bin (rackup-toolchain-bin-link id))
+     (register-toolchain!
+      id
+      (hash 'id id
+            'kind 'release
+            'requested-spec "stable"
+            'resolved-version "9.1"
+            'variant 'cs
+            'distribution 'full
+            'arch "x86_64"
+            'platform "linux"
+            'executables '("racket" "drracket")
+            'installed-at "2026-03-10T00:00:00Z"))
+     (set-default-toolchain! id)
+     (reshim!)
+     ;; Test 1: racket shim invokes through the resolved path
+     (define-values (proc stdout stdin stderr)
+       (subprocess #f #f #f (build-path (rackup-shims-dir) "racket")))
+     (close-output-port stdin)
+     (subprocess-wait proc)
+     (define out (string-trim (port->string stdout)))
+     (close-input-port stdout)
+     (close-input-port stderr)
+     (check-true (string-contains? out "install/bin/racket")
+                 (format "expected resolved path through install/bin, got: ~a" out))
+     (check-false (regexp-match? #px"/toolchains/[^/]+/bin/racket$" out)
+                  (format "path should not end with unresolved bin symlink: ~a" out))
+     ;; Test 2: drracket launcher script resolves bindir correctly.
+     ;; The launcher uses `pwd` (not `pwd -P`), so if the shim doesn't
+     ;; resolve the bin symlink, the launcher computes a wrong bindir
+     ;; and fails to find DrRacket.app.
+     (define-values (proc2 stdout2 stdin2 stderr2)
+       (subprocess #f #f #f (build-path (rackup-shims-dir) "drracket")))
+     (close-output-port stdin2)
+     (subprocess-wait proc2)
+     (define out2 (string-trim (port->string stdout2)))
+     (define err2 (port->string stderr2))
+     (close-input-port stdout2)
+     (close-input-port stderr2)
+     (check-equal? (subprocess-status proc2) 0
+                   (format "drracket launcher should succeed, stderr: ~a" err2))
+     (check-equal? out2 "ok")))
 
   (with-temp-rackup-home (lambda (tmp)
                            (ensure-index!)
@@ -239,7 +301,7 @@
                              "if rackup_print_missing_loader_message \"$TARGET\"; then"))
                            (check-true
                             (string-contains? dispatcher-src "qemu-i386 via binfmt_misc"))
-                           (define helper-src (shell-helper-script/private "bash"))
+                           (define helper-src (shell-helper-script "bash"))
                            (check-true (string-contains? helper-src "_rackup_status"))
                            (check-true (string-contains? helper-src "return \"$_rackup_status\""))))
 
@@ -261,7 +323,7 @@
           })
      (file-or-directory-permissions mzscheme-exe #o755)
      (make-file-or-directory-link real-bin (rackup-toolchain-bin-link id))
-     (define env-vars (installed-toolchain-env-vars/private real-bin))
+     (define env-vars (installed-toolchain-env-vars real-bin))
      (check-equal? env-vars (list (cons "PLTHOME" (path->string plthome))))
      (write-string-file (rackup-toolchain-env-file id)
                         (string-append "#!/usr/bin/env bash\n"
@@ -399,7 +461,7 @@
       archsys
       "#!/bin/sh\nif [ `file /bin/ls | grep ELF | wc -l` = 1 ]; then\n  SYS=i386-linux\nelse\n  SYS=i386-linux-aout\nfi\n")
      (file-or-directory-permissions archsys #o755)
-     (maybe-modernize-legacy-archsys!/private real-bin)
+     (maybe-modernize-legacy-archsys! real-bin)
      (define patched (file->string archsys))
      (check-true (string-contains? patched "file -L /bin/ls 2>/dev/null | grep ELF | wc -l"))
      (check-false (string-contains? patched "file /bin/ls | grep ELF | wc -l"))))
@@ -744,7 +806,7 @@
   (with-temp-rackup-home
    (lambda (_tmp)
      (ensure-rackup-layout!)
-     (define prefix (hidden-runtime-invocation-prefix/private "/tmp/fake-racket"))
+     (define prefix (hidden-runtime-invocation-prefix "/tmp/fake-racket"))
      (check-equal? prefix
                    (list "/tmp/fake-racket"
                          "-U"
@@ -1020,7 +1082,7 @@
    (lambda (tmp)
      (define install-root (build-path tmp "plt-archive"))
      (make-directory* (build-path install-root "plt" "bin"))
-     (check-equal? (path->string (detect-bin-dir/private install-root))
+     (check-equal? (path->string (detect-bin-dir install-root))
                    (path->string (build-path install-root "plt" "bin")))))
 
   ;; `rackup help <cmd>` and `rackup <cmd> --help` produce the same output.

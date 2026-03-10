@@ -460,3 +460,7 @@
         (upgrade-hidden-runtime!)
         (precompile-rackup-sources!)])]
     [_ (rackup-error "usage: rackup runtime status|install|upgrade")]))
+
+(module+ for-testing
+  (provide hidden-runtime-invocation-prefix
+           ensure-installer-cached!))

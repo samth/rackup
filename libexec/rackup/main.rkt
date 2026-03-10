@@ -913,3 +913,11 @@
                                (eprintf "rackup: internal error: ~a\n" (exn-message e))
                                (exit 1))])
     (dispatch (vector->list (current-command-line-arguments)))))
+
+(module+ for-testing
+  (provide cmd-uninstall
+           validate-uninstall-home-path!
+           delete-rackup-home!/external
+           installed-toolchain-metas/safe
+           current-remove-shell-init-blocks-proc
+           current-uninstall-system*-proc))

@@ -799,3 +799,8 @@
            'installer-url
            (string-append base filename))]
     [_ (rackup-error "unsupported install kind: ~a" kind)]))
+
+(module+ for-testing
+  (provide current-http-sendrecv-proc
+           http-get-string
+           http-get-rktd))

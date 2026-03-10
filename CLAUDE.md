@@ -34,3 +34,7 @@ test/docker-test-fresh-install.sh \
 ```
 
 Run `test/docker-test-fresh-install.sh --help` for all options.
+
+## Code ownership
+
+We own the entire project. There is no public API. Feel free to change any module's exports, signatures, or internal structure as needed — no backwards-compatibility workarounds required.

@@ -995,3 +995,8 @@
                                 (hash-ref m 'resolved-version #f)
                                 (hash-ref m 'variant #f)
                                 (hash-ref m 'distribution #f))))))
+
+(module+ for-testing
+  (provide detect-bin-dir
+           installed-toolchain-env-vars
+           ensure-installer-cached!))
