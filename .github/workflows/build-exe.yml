@@ -42,8 +42,17 @@ jobs:
           racket --version
           echo "=== compiled-file-roots ==="
           racket -e '(current-compiled-file-roots)'
+          echo "=== PLTCOMPILEDROOTS env ==="
+          echo "PLTCOMPILEDROOTS=${PLTCOMPILEDROOTS:-<unset>}"
+          echo "=== which racket/raco ==="
+          which racket raco
           echo "=== raco-cross-lib checksum ==="
           raco pkg show raco-cross-lib
+          echo "=== Check for compiled/ in checkout ==="
+          find libexec -name compiled -type d 2>/dev/null || echo "(none)"
+          echo "=== Test: unset PLTCOMPILEDROOTS before cross ==="
+          unset PLTCOMPILEDROOTS
+          raco cross --target "${{ matrix.cross_target }}" exe -o /tmp/rackup-core-nopltroots libexec/rackup-core.rkt && echo "rackup-core (no PLTCOMPILEDROOTS): OK" || echo "rackup-core (no PLTCOMPILEDROOTS): FAIL"
           echo "=== Simple cross-compile test ==="
           echo '#lang racket/base' > /tmp/hello.rkt
           echo '(displayln "hello")' >> /tmp/hello.rkt
