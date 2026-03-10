@@ -292,7 +292,7 @@
   (define toolchain #f)
   (define exe
     (command-line #:program "rackup which"
-                  #:argv rest
+                  #:argv (reorder-args rest '("--toolchain"))
                   #:once-each
                   [("--toolchain") id "Use specific toolchain"
                    (set! toolchain (resolve-toolchain-or-die id))]
@@ -437,16 +437,15 @@
 
 ;; Reorder install args so flags precede the positional spec.
 ;; command-line stops flag processing at the first non-flag arg, so
-;; `rackup install stable --set-default` needs the flag moved before `stable`.
-(define install-flags-with-arg
-  '("--variant" "--distribution" "--snapshot-site" "--arch" "--installer-ext"))
-
-(define (reorder-install-args rest)
+;; command-line stops flag processing at the first positional arg, so
+;; `rackup install stable --set-default` fails.  Reorder to put flags first.
+;; flags-with-arg lists flags that consume the next token as their value.
+(define (reorder-args rest [flags-with-arg '()])
   (let loop ([flags '()] [positionals '()] [xs rest])
     (cond
       [(null? xs) (append (reverse flags) (reverse positionals))]
       [(string-prefix? (car xs) "-")
-       (if (and (member (car xs) install-flags-with-arg) (pair? (cdr xs)))
+       (if (and (member (car xs) flags-with-arg) (pair? (cdr xs)))
            (loop (list* (cadr xs) (car xs) flags) positionals (cddr xs))
            (loop (cons (car xs) flags) positionals (cdr xs)))]
       [else (loop flags (cons (car xs) positionals) (cdr xs))])))
@@ -457,7 +456,9 @@
   (define (flag! . args) (set! opts-rev (append (reverse args) opts-rev)))
   (define spec
     (command-line #:program "rackup install"
-                  #:argv (reorder-install-args rest)
+                  #:argv (reorder-args rest
+                                    '("--variant" "--distribution" "--snapshot-site"
+                                      "--arch" "--installer-ext"))
                   #:once-each
                   [("--variant") v "cs|bc - Override VM variant" (flag! "--variant" v)]
                   [("--distribution") d "full|minimal - Distribution type" (flag! "--distribution" d)]
@@ -594,20 +595,12 @@
   (newline)
   (displayln "Note: specific variant/distribution/arch compatibility is checked at install time."))
 
-(define (reorder-link-args rest)
-  (let loop ([flags '()] [positionals '()] [xs rest])
-    (cond
-      [(null? xs) (append (reverse flags) (reverse positionals))]
-      [(string-prefix? (car xs) "-")
-       (loop (cons (car xs) flags) positionals (cdr xs))]
-      [else (loop flags (cons (car xs) positionals) (cdr xs))])))
-
 (define (cmd-link rest)
   (define set-default? #f)
   (define force? #f)
   (define-values (name path)
     (command-line #:program "rackup link"
-                  #:argv (reorder-link-args rest)
+                  #:argv (reorder-args rest)
                   #:once-each
                   [("--set-default") "Set as default toolchain" (set! set-default? #t)]
                   [("--force") "Overwrite existing toolchain" (set! force? #t)]
