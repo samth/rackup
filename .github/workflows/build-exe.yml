@@ -11,7 +11,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Only cross-compilation targets for debugging
           - runs_on: ubuntu-latest
             artifact_name: arm32-linux
             setup_racket_arch: x64
@@ -42,56 +41,27 @@ jobs:
           racket --version
           echo "=== compiled-file-roots ==="
           racket -e '(current-compiled-file-roots)'
-          echo "=== PLTCOMPILEDROOTS env ==="
-          echo "PLTCOMPILEDROOTS=${PLTCOMPILEDROOTS:-<unset>}"
-          echo "=== which racket/raco ==="
-          which racket raco
-          echo "=== raco-cross-lib checksum ==="
-          raco pkg show raco-cross-lib
-          echo "=== Narrowing remote.rkt failure ==="
-          # Test net/http-client alone (remote.rkt's unique stdlib dep)
-          cat > /tmp/test-http.rkt <<'RKTEOF'
-          #lang racket/base
-          (require net/http-client)
-          (displayln "ok")
-          RKTEOF
-          raco cross --target "${{ matrix.cross_target }}" exe -o /tmp/test-http /tmp/test-http.rkt && echo "net/http-client: OK" || echo "net/http-client: FAIL"
-          # Test net/http-client + net/url together
-          cat > /tmp/test-http2.rkt <<'RKTEOF'
-          #lang racket/base
-          (require net/http-client net/url)
-          (displayln "ok")
-          RKTEOF
-          raco cross --target "${{ matrix.cross_target }}" exe -o /tmp/test-http2 /tmp/test-http2.rkt && echo "http+url: OK" || echo "http+url: FAIL"
-          # Test: remote.rkt's requires without legacy.rkt and legacy-plt-catalog.rkt
-          cat > libexec/test-remote-min.rkt <<'RKTEOF'
-          #lang racket/base
-          (require racket/file racket/list racket/match racket/path
-                   racket/port racket/string net/http-client net/url
-                   "rackup/rktd-io.rkt" "rackup/util.rkt" "rackup/versioning.rkt")
-          (displayln "ok")
-          RKTEOF
-          raco cross --target "${{ matrix.cross_target }}" exe -o /tmp/test-rmin libexec/test-remote-min.rkt && echo "remote-min: OK" || echo "remote-min: FAIL"
-          rm -f libexec/test-remote-min.rkt
-          # Test: remote.rkt's requires WITH legacy modules
-          cat > libexec/test-remote-full.rkt <<'RKTEOF'
-          #lang racket/base
-          (require racket/file racket/list racket/match racket/path
-                   racket/port racket/string net/http-client net/url
-                   "rackup/legacy-plt-catalog.rkt" "rackup/legacy.rkt"
-                   "rackup/rktd-io.rkt" "rackup/util.rkt" "rackup/versioning.rkt")
-          (displayln "ok")
-          RKTEOF
-          raco cross --target "${{ matrix.cross_target }}" exe -o /tmp/test-rfull libexec/test-remote-full.rkt && echo "remote-full: OK" || echo "remote-full: FAIL"
-          rm -f libexec/test-remote-full.rkt
-          # Test: actual remote.rkt
-          cat > libexec/test-remote.rkt <<'RKTEOF'
-          #lang racket/base
-          (require "rackup/remote.rkt")
-          (displayln "ok")
-          RKTEOF
-          raco cross --target "${{ matrix.cross_target }}" exe -o /tmp/test-remote libexec/test-remote.rkt && echo "remote.rkt: OK" || echo "remote.rkt: FAIL"
-          rm -f libexec/test-remote.rkt
+          echo "=== system config ==="
+          racket -e '(require setup/dirs) (displayln (find-config-dir))'
+          racket -e '(require setup/dirs) (with-input-from-file (build-path (find-config-dir) "config.rktd") (lambda () (displayln (read))))'
+          echo "=== cross workspace host config ==="
+          cat "$HOME/.local/share/racket/raco-cross/9.1/x86_64-linux-cs/etc/config.rktd" 2>/dev/null || echo "(no host config yet)"
+          echo "=== Test A: rackup-core as-is ==="
+          raco cross --target "${{ matrix.cross_target }}" exe -o /tmp/test-a libexec/rackup-core.rkt && echo "as-is: OK" || echo "as-is: FAIL"
+          echo "=== Patch: clear compiled-file-roots from system config ==="
+          racket -e '
+            (require setup/dirs)
+            (define cf (build-path (find-config-dir) "config.rktd"))
+            (define c (with-input-from-file cf read))
+            (define nc (hash-remove c (quote compiled-file-roots)))
+            (with-output-to-file cf #:exists (quote truncate/replace)
+              (lambda () (write nc) (newline)))'
+          echo "=== compiled-file-roots after patch ==="
+          racket -e '(current-compiled-file-roots)'
+          echo "=== Test B: rackup-core after clearing compiled-file-roots ==="
+          raco cross --target "${{ matrix.cross_target }}" exe -o /tmp/test-b libexec/rackup-core.rkt && echo "cleared-roots: OK" || echo "cleared-roots: FAIL"
+          echo "=== Test C: rackup-core with explicit PLTCOMPILEDROOTS ==="
+          PLTCOMPILEDROOTS="" raco cross --target "${{ matrix.cross_target }}" exe -o /tmp/test-c libexec/rackup-core.rkt && echo "explicit-pltroots: OK" || echo "explicit-pltroots: FAIL"
       - name: Build executable distribution
         shell: bash
         run: |
