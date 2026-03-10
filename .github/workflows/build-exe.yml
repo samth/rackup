@@ -48,49 +48,70 @@ jobs:
           which racket raco
           echo "=== raco-cross-lib checksum ==="
           raco pkg show raco-cross-lib
-          echo "=== Test: deep local project (5 modules) ==="
-          mkdir -p /tmp/deep-test/lib
-          cat > /tmp/deep-test/lib/a.rkt <<'RKTEOF'
+          echo "=== Binary search: which rackup module triggers the failure ==="
+          # Test A: require just paths.rkt (simplest module)
+          cat > /tmp/test-a.rkt <<'RKTEOF'
           #lang racket/base
-          (require racket/file racket/list)
-          (provide fn-a)
-          (define (fn-a) (list "a" (file->string (make-temporary-file))))
+          (require "libexec/rackup/paths.rkt")
+          (displayln "ok")
           RKTEOF
-          cat > /tmp/deep-test/lib/b.rkt <<'RKTEOF'
+          raco cross --target "${{ matrix.cross_target }}" exe -o /tmp/test-a /tmp/test-a.rkt && echo "paths.rkt: OK" || echo "paths.rkt: FAIL"
+          # Test B: require install.rkt (largest module ~800 lines)
+          cat > /tmp/test-b.rkt <<'RKTEOF'
           #lang racket/base
-          (require racket/date racket/string)
-          (provide fn-b)
-          (define (fn-b) (string-join (list (date->string (current-date))) ", "))
+          (require "libexec/rackup/install.rkt")
+          (displayln "ok")
           RKTEOF
-          cat > /tmp/deep-test/lib/c.rkt <<'RKTEOF'
+          raco cross --target "${{ matrix.cross_target }}" exe -o /tmp/test-b /tmp/test-b.rkt && echo "install.rkt: OK" || echo "install.rkt: FAIL"
+          # Test C: require util.rkt (has net/url)
+          cat > /tmp/test-c.rkt <<'RKTEOF'
           #lang racket/base
-          (require "a.rkt" "b.rkt" racket/runtime-path racket/port net/url)
-          (provide fn-c)
-          (define-runtime-path here ".")
-          (define (fn-c) (list (fn-a) (fn-b) here))
+          (require "libexec/rackup/util.rkt")
+          (displayln "ok")
           RKTEOF
-          cat > /tmp/deep-test/lib/d.rkt <<'RKTEOF'
+          raco cross --target "${{ matrix.cross_target }}" exe -o /tmp/test-c /tmp/test-c.rkt && echo "util.rkt: OK" || echo "util.rkt: FAIL"
+          # Test D: require first half of main.rkt's local requires
+          cat > /tmp/test-d.rkt <<'RKTEOF'
           #lang racket/base
-          (require racket/cmdline racket/file)
-          (provide fn-d)
-          (define (fn-d x) (format "d: ~a" x))
+          (require "libexec/rackup/install.rkt"
+                   "libexec/rackup/legacy-plt-catalog.rkt"
+                   "libexec/rackup/paths.rkt"
+                   "libexec/rackup/remote.rkt"
+                   "libexec/rackup/rktd-io.rkt")
+          (displayln "ok")
           RKTEOF
-          cat > /tmp/deep-test/main.rkt <<'RKTEOF'
+          raco cross --target "${{ matrix.cross_target }}" exe -o /tmp/test-d /tmp/test-d.rkt && echo "first-half: OK" || echo "first-half: FAIL"
+          # Test E: require second half
+          cat > /tmp/test-e.rkt <<'RKTEOF'
           #lang racket/base
-          (require "lib/c.rkt" "lib/d.rkt" racket/cmdline)
-          (command-line #:args () (displayln (fn-c)) (displayln (fn-d "test")))
+          (require "libexec/rackup/runtime.rkt"
+                   "libexec/rackup/shell.rkt"
+                   "libexec/rackup/shims.rkt"
+                   "libexec/rackup/state.rkt"
+                   "libexec/rackup/util.rkt"
+                   "libexec/rackup/versioning.rkt")
+          (displayln "ok")
           RKTEOF
-          raco cross --target "${{ matrix.cross_target }}" exe -o /tmp/deep-test/main-exe /tmp/deep-test/main.rkt && echo "deep-local: OK" || echo "deep-local: FAIL"
-          echo "=== Test: rackup source copied to /tmp ==="
-          cp -r libexec /tmp/rackup-src
-          raco cross --target "${{ matrix.cross_target }}" exe -o /tmp/rackup-core-tmp /tmp/rackup-src/rackup-core.rkt && echo "rackup-from-tmp: OK" || echo "rackup-from-tmp: FAIL"
-          echo "=== Test: rackup-core.rkt from checkout ==="
-          raco cross --target "${{ matrix.cross_target }}" exe -o /tmp/rackup-core-test libexec/rackup-core.rkt && echo "rackup-core: OK" || echo "rackup-core: FAIL"
-          echo "=== Check: .zo files after cross-compile ==="
-          find libexec -name "*.zo" -type f 2>/dev/null | head -20 || echo "(no .zo in libexec)"
-          WS="$HOME/.local/share/racket/raco-cross/9.1"
-          echo "=== zo-dir contents ==="
-          find "$WS" -path "*/build/zo" -type d 2>/dev/null | while read d; do echo "--- $d ---"; find "$d" -name "*.zo" -type f | head -10; done
+          raco cross --target "${{ matrix.cross_target }}" exe -o /tmp/test-e /tmp/test-e.rkt && echo "second-half: OK" || echo "second-half: FAIL"
+          # Test F: all local modules but no define-runtime-path
+          cat > /tmp/test-f.rkt <<'RKTEOF'
+          #lang racket/base
+          (require "libexec/rackup/install.rkt"
+                   "libexec/rackup/legacy-plt-catalog.rkt"
+                   "libexec/rackup/paths.rkt"
+                   "libexec/rackup/remote.rkt"
+                   "libexec/rackup/rktd-io.rkt"
+                   "libexec/rackup/runtime.rkt"
+                   "libexec/rackup/shell.rkt"
+                   "libexec/rackup/shims.rkt"
+                   "libexec/rackup/state.rkt"
+                   "libexec/rackup/util.rkt"
+                   "libexec/rackup/versioning.rkt")
+          (displayln "ok")
+          RKTEOF
+          raco cross --target "${{ matrix.cross_target }}" exe -o /tmp/test-f /tmp/test-f.rkt && echo "all-no-drp: OK" || echo "all-no-drp: FAIL"
+          # Test G: full rackup-core
+          raco cross --target "${{ matrix.cross_target }}" exe -o /tmp/test-g libexec/rackup-core.rkt && echo "rackup-core: OK" || echo "rackup-core: FAIL"
       - name: Build executable distribution
         shell: bash
         run: |
