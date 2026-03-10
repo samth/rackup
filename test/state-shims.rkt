@@ -1052,6 +1052,20 @@
   (check-equal? (capture-output (lambda () (run-main '("reshim" "--help" "--short-aliases"))))
                 (capture-output (lambda () (run-main '("reshim" "--help")))))
 
+  ;; `rackup available --all` shows PLT Scheme versions section
+  (let ([out (capture-output (lambda () (run-main '("available" "--all"))))])
+    (check-true (string-contains? out "PLT Scheme versions")
+                "available --all should include PLT Scheme section")
+    (check-true (string-contains? out "4.2.5")
+                "available --all should include legacy version 4.2.5")
+    (check-true (string-contains? out "053")
+                "available --all should include legacy version 053"))
+
+  ;; `rackup available` (default limit) does NOT show PLT Scheme versions
+  (let ([out (capture-output (lambda () (run-main '("available"))))])
+    (check-false (string-contains? out "PLT Scheme versions")
+                 "available without --all should not include PLT Scheme section"))
+
   ;; install accepts flags before or after the spec
   (with-temp-rackup-home
    (lambda (_tmp)

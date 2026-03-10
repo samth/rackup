@@ -10,6 +10,7 @@
          racket/string
          racket/system
          "install.rkt"
+         "legacy-plt-catalog.rkt"
          "paths.rkt"
          "remote.rkt"
          "rktd-io.rkt"
@@ -586,6 +587,11 @@
               (format "all ~a" (length shown))))
   (for ([v shown])
     (printf "  ~a\n" v))
+  (when (not limit)
+    (newline)
+    (printf "PLT Scheme versions (pre-5.0, ~a):\n" (length legacy-plt-version-tokens))
+    (for ([v (in-list legacy-plt-version-tokens)])
+      (printf "  ~a\n" v)))
   (newline)
   (displayln "Examples:")
   (displayln "  rackup install stable")
