@@ -11,24 +11,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Native builds on GHA runners
-          - runs_on: ubuntu-latest
-            artifact_name: x86_64-linux
-            setup_racket_arch: x64
-            cross_target: ""
-          - runs_on: ubuntu-24.04-arm
-            artifact_name: aarch64-linux
-            setup_racket_arch: arm64
-            cross_target: ""
-          - runs_on: macos-15-intel
-            artifact_name: x86_64-macosx
-            setup_racket_arch: x64
-            cross_target: ""
-          - runs_on: macos-14
-            artifact_name: aarch64-macosx
-            setup_racket_arch: arm64
-            cross_target: ""
-          # Cross-compiled builds for platforms without native GHA runners.
+          # Only cross-compilation targets for debugging
           - runs_on: ubuntu-latest
             artifact_name: arm32-linux
             setup_racket_arch: x64
