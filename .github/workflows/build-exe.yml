@@ -48,54 +48,27 @@ jobs:
           which racket raco
           echo "=== raco-cross-lib checksum ==="
           raco pkg show raco-cross-lib
-          echo "=== Binary search: which rackup module triggers the failure ==="
-          WD="$(pwd)"
-          # Test A: require just paths.rkt (simplest module)
-          cat > libexec/test-a.rkt <<'RKTEOF'
+          echo "=== Module-level binary search ==="
+          # Test intermediate modules that runtime.rkt depends on
+          for mod in rktd-io versioning legacy-plt-catalog legacy remote runtime; do
+            cat > libexec/test-mod.rkt <<RKTEOF
           #lang racket/base
-          (require "rackup/paths.rkt")
+          (require "rackup/${mod}.rkt")
           (displayln "ok")
           RKTEOF
-          raco cross --target "${{ matrix.cross_target }}" exe -o /tmp/test-a libexec/test-a.rkt && echo "paths.rkt: OK" || echo "paths.rkt: FAIL"
-          # Test B: require util.rkt (has net/url, HTTP downloading)
-          cat > libexec/test-b.rkt <<'RKTEOF'
+            raco cross --target "${{ matrix.cross_target }}" exe -o /tmp/test-mod libexec/test-mod.rkt && echo "${mod}: OK" || echo "${mod}: FAIL"
+            rm -f libexec/test-mod.rkt
+          done
+          # Test: combination of passing leaf modules to check size threshold
+          cat > libexec/test-combo.rkt <<'RKTEOF'
           #lang racket/base
-          (require "rackup/util.rkt")
+          (require "rackup/paths.rkt" "rackup/util.rkt" "rackup/shell.rkt"
+                   "rackup/state.rkt" "rackup/rktd-io.rkt" "rackup/versioning.rkt"
+                   "rackup/legacy-plt-catalog.rkt")
           (displayln "ok")
           RKTEOF
-          raco cross --target "${{ matrix.cross_target }}" exe -o /tmp/test-b libexec/test-b.rkt && echo "util.rkt: OK" || echo "util.rkt: FAIL"
-          # Test C: require shell.rkt
-          cat > libexec/test-c.rkt <<'RKTEOF'
-          #lang racket/base
-          (require "rackup/shell.rkt")
-          (displayln "ok")
-          RKTEOF
-          raco cross --target "${{ matrix.cross_target }}" exe -o /tmp/test-c libexec/test-c.rkt && echo "shell.rkt: OK" || echo "shell.rkt: FAIL"
-          # Test D: require state.rkt
-          cat > libexec/test-d.rkt <<'RKTEOF'
-          #lang racket/base
-          (require "rackup/state.rkt")
-          (displayln "ok")
-          RKTEOF
-          raco cross --target "${{ matrix.cross_target }}" exe -o /tmp/test-d libexec/test-d.rkt && echo "state.rkt: OK" || echo "state.rkt: FAIL"
-          # Test E: require install.rkt (largest)
-          cat > libexec/test-e.rkt <<'RKTEOF'
-          #lang racket/base
-          (require "rackup/install.rkt")
-          (displayln "ok")
-          RKTEOF
-          raco cross --target "${{ matrix.cross_target }}" exe -o /tmp/test-e libexec/test-e.rkt && echo "install.rkt: OK" || echo "install.rkt: FAIL"
-          # Test F: require runtime.rkt
-          cat > libexec/test-f.rkt <<'RKTEOF'
-          #lang racket/base
-          (require "rackup/runtime.rkt")
-          (displayln "ok")
-          RKTEOF
-          raco cross --target "${{ matrix.cross_target }}" exe -o /tmp/test-f libexec/test-f.rkt && echo "runtime.rkt: OK" || echo "runtime.rkt: FAIL"
-          # Clean up test files
-          rm -f libexec/test-*.rkt
-          # Test G: full rackup-core
-          raco cross --target "${{ matrix.cross_target }}" exe -o /tmp/test-g libexec/rackup-core.rkt && echo "rackup-core: OK" || echo "rackup-core: FAIL"
+          raco cross --target "${{ matrix.cross_target }}" exe -o /tmp/test-combo libexec/test-combo.rkt && echo "combo-leaves: OK" || echo "combo-leaves: FAIL"
+          rm -f libexec/test-combo.rkt
       - name: Build executable distribution
         shell: bash
         run: |
