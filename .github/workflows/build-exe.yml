@@ -48,27 +48,50 @@ jobs:
           which racket raco
           echo "=== raco-cross-lib checksum ==="
           raco pkg show raco-cross-lib
-          echo "=== Module-level binary search ==="
-          # Test intermediate modules that runtime.rkt depends on
-          for mod in rktd-io versioning legacy-plt-catalog legacy remote runtime; do
-            cat > libexec/test-mod.rkt <<RKTEOF
+          echo "=== Narrowing remote.rkt failure ==="
+          # Test net/http-client alone (remote.rkt's unique stdlib dep)
+          cat > /tmp/test-http.rkt <<'RKTEOF'
           #lang racket/base
-          (require "rackup/${mod}.rkt")
+          (require net/http-client)
           (displayln "ok")
           RKTEOF
-            raco cross --target "${{ matrix.cross_target }}" exe -o /tmp/test-mod libexec/test-mod.rkt && echo "${mod}: OK" || echo "${mod}: FAIL"
-            rm -f libexec/test-mod.rkt
-          done
-          # Test: combination of passing leaf modules to check size threshold
-          cat > libexec/test-combo.rkt <<'RKTEOF'
+          raco cross --target "${{ matrix.cross_target }}" exe -o /tmp/test-http /tmp/test-http.rkt && echo "net/http-client: OK" || echo "net/http-client: FAIL"
+          # Test net/http-client + net/url together
+          cat > /tmp/test-http2.rkt <<'RKTEOF'
           #lang racket/base
-          (require "rackup/paths.rkt" "rackup/util.rkt" "rackup/shell.rkt"
-                   "rackup/state.rkt" "rackup/rktd-io.rkt" "rackup/versioning.rkt"
-                   "rackup/legacy-plt-catalog.rkt")
+          (require net/http-client net/url)
           (displayln "ok")
           RKTEOF
-          raco cross --target "${{ matrix.cross_target }}" exe -o /tmp/test-combo libexec/test-combo.rkt && echo "combo-leaves: OK" || echo "combo-leaves: FAIL"
-          rm -f libexec/test-combo.rkt
+          raco cross --target "${{ matrix.cross_target }}" exe -o /tmp/test-http2 /tmp/test-http2.rkt && echo "http+url: OK" || echo "http+url: FAIL"
+          # Test: remote.rkt's requires without legacy.rkt and legacy-plt-catalog.rkt
+          cat > libexec/test-remote-min.rkt <<'RKTEOF'
+          #lang racket/base
+          (require racket/file racket/list racket/match racket/path
+                   racket/port racket/string net/http-client net/url
+                   "rackup/rktd-io.rkt" "rackup/util.rkt" "rackup/versioning.rkt")
+          (displayln "ok")
+          RKTEOF
+          raco cross --target "${{ matrix.cross_target }}" exe -o /tmp/test-rmin libexec/test-remote-min.rkt && echo "remote-min: OK" || echo "remote-min: FAIL"
+          rm -f libexec/test-remote-min.rkt
+          # Test: remote.rkt's requires WITH legacy modules
+          cat > libexec/test-remote-full.rkt <<'RKTEOF'
+          #lang racket/base
+          (require racket/file racket/list racket/match racket/path
+                   racket/port racket/string net/http-client net/url
+                   "rackup/legacy-plt-catalog.rkt" "rackup/legacy.rkt"
+                   "rackup/rktd-io.rkt" "rackup/util.rkt" "rackup/versioning.rkt")
+          (displayln "ok")
+          RKTEOF
+          raco cross --target "${{ matrix.cross_target }}" exe -o /tmp/test-rfull libexec/test-remote-full.rkt && echo "remote-full: OK" || echo "remote-full: FAIL"
+          rm -f libexec/test-remote-full.rkt
+          # Test: actual remote.rkt
+          cat > libexec/test-remote.rkt <<'RKTEOF'
+          #lang racket/base
+          (require "rackup/remote.rkt")
+          (displayln "ok")
+          RKTEOF
+          raco cross --target "${{ matrix.cross_target }}" exe -o /tmp/test-remote libexec/test-remote.rkt && echo "remote.rkt: OK" || echo "remote.rkt: FAIL"
+          rm -f libexec/test-remote.rkt
       - name: Build executable distribution
         shell: bash
         run: |
