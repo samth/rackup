@@ -48,8 +48,8 @@ jobs:
           cat "$HOME/.local/share/racket/raco-cross/9.1/x86_64-linux-cs/etc/config.rktd" 2>/dev/null || echo "(no host config yet)"
           echo "=== Test A: rackup-core as-is ==="
           raco cross --target "${{ matrix.cross_target }}" exe -o /tmp/test-a libexec/rackup-core.rkt && echo "as-is: OK" || echo "as-is: FAIL"
-          echo "=== Patch: clear compiled-file-roots from system config ==="
-          racket -e '
+          echo "=== Patch: clear compiled-file-roots from system config (with sudo) ==="
+          sudo racket -e '
             (require setup/dirs)
             (define cf (build-path (find-config-dir) "config.rktd"))
             (define c (with-input-from-file cf read))
@@ -58,10 +58,12 @@ jobs:
               (lambda () (write nc) (newline)))'
           echo "=== compiled-file-roots after patch ==="
           racket -e '(current-compiled-file-roots)'
+          echo "=== cross workspace host config after setup ==="
+          cat "$HOME/.local/share/racket/raco-cross/9.1/x86_64-linux-cs/etc/config.rktd" 2>/dev/null || echo "(not found)"
           echo "=== Test B: rackup-core after clearing compiled-file-roots ==="
           raco cross --target "${{ matrix.cross_target }}" exe -o /tmp/test-b libexec/rackup-core.rkt && echo "cleared-roots: OK" || echo "cleared-roots: FAIL"
-          echo "=== Test C: rackup-core with explicit PLTCOMPILEDROOTS ==="
-          PLTCOMPILEDROOTS="" raco cross --target "${{ matrix.cross_target }}" exe -o /tmp/test-c libexec/rackup-core.rkt && echo "explicit-pltroots: OK" || echo "explicit-pltroots: FAIL"
+          echo "=== Test C: rackup-core with PLTCOMPILEDROOTS=same ==="
+          PLTCOMPILEDROOTS="same" raco cross --target "${{ matrix.cross_target }}" exe -o /tmp/test-c libexec/rackup-core.rkt && echo "pltroots-same: OK" || echo "pltroots-same: FAIL"
       - name: Build executable distribution
         shell: bash
         run: |
