@@ -48,47 +48,49 @@ jobs:
           which racket raco
           echo "=== raco-cross-lib checksum ==="
           raco pkg show raco-cross-lib
-          echo "=== Test: define-runtime-path ==="
-          cat > /tmp/test-drp.rkt <<'RKTEOF'
+          echo "=== Test: deep local project (5 modules) ==="
+          mkdir -p /tmp/deep-test/lib
+          cat > /tmp/deep-test/lib/a.rkt <<'RKTEOF'
           #lang racket/base
-          (require racket/runtime-path)
+          (require racket/file racket/list)
+          (provide fn-a)
+          (define (fn-a) (list "a" (file->string (make-temporary-file))))
+          RKTEOF
+          cat > /tmp/deep-test/lib/b.rkt <<'RKTEOF'
+          #lang racket/base
+          (require racket/date racket/string)
+          (provide fn-b)
+          (define (fn-b) (string-join (list (date->string (current-date))) ", "))
+          RKTEOF
+          cat > /tmp/deep-test/lib/c.rkt <<'RKTEOF'
+          #lang racket/base
+          (require "a.rkt" "b.rkt" racket/runtime-path racket/port net/url)
+          (provide fn-c)
           (define-runtime-path here ".")
-          (displayln here)
+          (define (fn-c) (list (fn-a) (fn-b) here))
           RKTEOF
-          raco cross --target "${{ matrix.cross_target }}" exe -o /tmp/test-drp /tmp/test-drp.rkt && echo "define-runtime-path: OK" || echo "define-runtime-path: FAIL"
-          echo "=== Test: racket/cmdline ==="
-          cat > /tmp/test-cmdline.rkt <<'RKTEOF'
+          cat > /tmp/deep-test/lib/d.rkt <<'RKTEOF'
           #lang racket/base
-          (require racket/cmdline)
-          (command-line #:args () (displayln "ok"))
+          (require racket/cmdline racket/file)
+          (provide fn-d)
+          (define (fn-d x) (format "d: ~a" x))
           RKTEOF
-          raco cross --target "${{ matrix.cross_target }}" exe -o /tmp/test-cmdline /tmp/test-cmdline.rkt && echo "racket/cmdline: OK" || echo "racket/cmdline: FAIL"
-          echo "=== Test: racket/file ==="
-          cat > /tmp/test-file.rkt <<'RKTEOF'
+          cat > /tmp/deep-test/main.rkt <<'RKTEOF'
           #lang racket/base
-          (require racket/file)
-          (displayln "ok")
+          (require "lib/c.rkt" "lib/d.rkt" racket/cmdline)
+          (command-line #:args () (displayln (fn-c)) (displayln (fn-d "test")))
           RKTEOF
-          raco cross --target "${{ matrix.cross_target }}" exe -o /tmp/test-file /tmp/test-file.rkt && echo "racket/file: OK" || echo "racket/file: FAIL"
-          echo "=== Test: net/url ==="
-          cat > /tmp/test-net.rkt <<'RKTEOF'
-          #lang racket/base
-          (require net/url)
-          (displayln "ok")
-          RKTEOF
-          raco cross --target "${{ matrix.cross_target }}" exe -o /tmp/test-net /tmp/test-net.rkt && echo "net/url: OK" || echo "net/url: FAIL"
-          echo "=== Test: multi-require like rackup ==="
-          cat > /tmp/test-multi.rkt <<'RKTEOF'
-          #lang racket/base
-          (require racket/cmdline racket/file racket/list racket/date
-                   racket/runtime-path racket/port racket/string
-                   net/url)
-          (define-runtime-path here ".")
-          (command-line #:args () (displayln "ok"))
-          RKTEOF
-          raco cross --target "${{ matrix.cross_target }}" exe -o /tmp/test-multi /tmp/test-multi.rkt && echo "multi-require: OK" || echo "multi-require: FAIL"
-          echo "=== Test: rackup-core.rkt ==="
+          raco cross --target "${{ matrix.cross_target }}" exe -o /tmp/deep-test/main-exe /tmp/deep-test/main.rkt && echo "deep-local: OK" || echo "deep-local: FAIL"
+          echo "=== Test: rackup source copied to /tmp ==="
+          cp -r libexec /tmp/rackup-src
+          raco cross --target "${{ matrix.cross_target }}" exe -o /tmp/rackup-core-tmp /tmp/rackup-src/rackup-core.rkt && echo "rackup-from-tmp: OK" || echo "rackup-from-tmp: FAIL"
+          echo "=== Test: rackup-core.rkt from checkout ==="
           raco cross --target "${{ matrix.cross_target }}" exe -o /tmp/rackup-core-test libexec/rackup-core.rkt && echo "rackup-core: OK" || echo "rackup-core: FAIL"
+          echo "=== Check: .zo files after cross-compile ==="
+          find libexec -name "*.zo" -type f 2>/dev/null | head -20 || echo "(no .zo in libexec)"
+          WS="$HOME/.local/share/racket/raco-cross/9.1"
+          echo "=== zo-dir contents ==="
+          find "$WS" -path "*/build/zo" -type d 2>/dev/null | while read d; do echo "--- $d ---"; find "$d" -name "*.zo" -type f | head -10; done
       - name: Build executable distribution
         shell: bash
         run: |
