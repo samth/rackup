@@ -50,11 +50,7 @@ jobs:
       - name: Install raco cross (cross-compilation only)
         if: matrix.cross_target != ''
         shell: bash
-        run: |
-          # Pin to b6051cc6 — ccc5b8ed broke cross-compilation raco exe
-          raco pkg install --auto \
-            "https://github.com/racket/raco-cross.git?path=raco-cross-lib#b6051cc6" \
-            "https://github.com/racket/raco-cross.git?path=raco-cross#b6051cc6"
+        run: raco pkg install --auto raco-cross
       - name: Build executable distribution
         shell: bash
         run: |
