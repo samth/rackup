@@ -594,12 +594,20 @@
   (newline)
   (displayln "Note: specific variant/distribution/arch compatibility is checked at install time."))
 
+(define (reorder-link-args rest)
+  (let loop ([flags '()] [positionals '()] [xs rest])
+    (cond
+      [(null? xs) (append (reverse flags) (reverse positionals))]
+      [(string-prefix? (car xs) "-")
+       (loop (cons (car xs) flags) positionals (cdr xs))]
+      [else (loop flags (cons (car xs) positionals) (cdr xs))])))
+
 (define (cmd-link rest)
   (define set-default? #f)
   (define force? #f)
   (define-values (name path)
     (command-line #:program "rackup link"
-                  #:argv rest
+                  #:argv (reorder-link-args rest)
                   #:once-each
                   [("--set-default") "Set as default toolchain" (set! set-default? #t)]
                   [("--force") "Overwrite existing toolchain" (set! force? #t)]
