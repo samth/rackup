@@ -48,25 +48,46 @@ jobs:
           which racket raco
           echo "=== raco-cross-lib checksum ==="
           raco pkg show raco-cross-lib
-          echo "=== Check for compiled/ in checkout ==="
-          find libexec -name compiled -type d 2>/dev/null || echo "(none)"
-          echo "=== Test: unset PLTCOMPILEDROOTS before cross ==="
-          unset PLTCOMPILEDROOTS
-          raco cross --target "${{ matrix.cross_target }}" exe -o /tmp/rackup-core-nopltroots libexec/rackup-core.rkt && echo "rackup-core (no PLTCOMPILEDROOTS): OK" || echo "rackup-core (no PLTCOMPILEDROOTS): FAIL"
-          echo "=== Simple cross-compile test ==="
-          echo '#lang racket/base' > /tmp/hello.rkt
-          echo '(displayln "hello")' >> /tmp/hello.rkt
-          raco cross --target "${{ matrix.cross_target }}" exe -o /tmp/hello-cross /tmp/hello.rkt && echo "Simple: OK" || echo "Simple: FAIL"
-          echo "=== Two-module cross-compile test ==="
-          mkdir -p /tmp/cross-test
-          echo '#lang racket/base' > /tmp/cross-test/helper.rkt
-          echo '(provide greet)' >> /tmp/cross-test/helper.rkt
-          echo '(define (greet x) (format "hi ~a" x))' >> /tmp/cross-test/helper.rkt
-          echo '#lang racket/base' > /tmp/cross-test/main.rkt
-          echo '(require "helper.rkt")' >> /tmp/cross-test/main.rkt
-          echo '(displayln (greet "world"))' >> /tmp/cross-test/main.rkt
-          raco cross --target "${{ matrix.cross_target }}" exe -o /tmp/cross-test/main /tmp/cross-test/main.rkt && echo "Two-module: OK" || echo "Two-module: FAIL"
-          echo "=== Cross-compile rackup-core.rkt ==="
+          echo "=== Test: define-runtime-path ==="
+          cat > /tmp/test-drp.rkt <<'RKTEOF'
+          #lang racket/base
+          (require racket/runtime-path)
+          (define-runtime-path here ".")
+          (displayln here)
+          RKTEOF
+          raco cross --target "${{ matrix.cross_target }}" exe -o /tmp/test-drp /tmp/test-drp.rkt && echo "define-runtime-path: OK" || echo "define-runtime-path: FAIL"
+          echo "=== Test: racket/cmdline ==="
+          cat > /tmp/test-cmdline.rkt <<'RKTEOF'
+          #lang racket/base
+          (require racket/cmdline)
+          (command-line #:args () (displayln "ok"))
+          RKTEOF
+          raco cross --target "${{ matrix.cross_target }}" exe -o /tmp/test-cmdline /tmp/test-cmdline.rkt && echo "racket/cmdline: OK" || echo "racket/cmdline: FAIL"
+          echo "=== Test: racket/file ==="
+          cat > /tmp/test-file.rkt <<'RKTEOF'
+          #lang racket/base
+          (require racket/file)
+          (displayln "ok")
+          RKTEOF
+          raco cross --target "${{ matrix.cross_target }}" exe -o /tmp/test-file /tmp/test-file.rkt && echo "racket/file: OK" || echo "racket/file: FAIL"
+          echo "=== Test: net/url ==="
+          cat > /tmp/test-net.rkt <<'RKTEOF'
+          #lang racket/base
+          (require net/url)
+          (displayln "ok")
+          RKTEOF
+          raco cross --target "${{ matrix.cross_target }}" exe -o /tmp/test-net /tmp/test-net.rkt && echo "net/url: OK" || echo "net/url: FAIL"
+          echo "=== Test: multi-require like rackup ==="
+          cat > /tmp/test-multi.rkt <<'RKTEOF'
+          #lang racket/base
+          (require racket/cmdline racket/file racket/list racket/date
+                   racket/runtime-path racket/port racket/string
+                   net/url)
+          (define-runtime-path here ".")
+          (command-line #:args () (displayln "ok"))
+          RKTEOF
+          raco cross --target "${{ matrix.cross_target }}" exe -o /tmp/test-multi /tmp/test-multi.rkt && echo "multi-require: OK" || echo "multi-require: FAIL"
+          echo "=== Test: rackup-core.rkt ==="
           raco cross --target "${{ matrix.cross_target }}" exe -o /tmp/rackup-core-test libexec/rackup-core.rkt && echo "rackup-core: OK" || echo "rackup-core: FAIL"
       - name: Build executable distribution
         shell: bash
