@@ -51,6 +51,31 @@ jobs:
         if: matrix.cross_target != ''
         shell: bash
         run: raco pkg install --auto raco-cross
+      - name: Debug cross environment (cross-compilation only)
+        if: matrix.cross_target != ''
+        shell: bash
+        run: |
+          echo "=== Racket version ==="
+          racket --version
+          echo "=== compiled-file-roots ==="
+          racket -e '(current-compiled-file-roots)'
+          echo "=== raco-cross-lib checksum ==="
+          raco pkg show raco-cross-lib
+          echo "=== Simple cross-compile test ==="
+          echo '#lang racket/base' > /tmp/hello.rkt
+          echo '(displayln "hello")' >> /tmp/hello.rkt
+          raco cross --target "${{ matrix.cross_target }}" exe -o /tmp/hello-cross /tmp/hello.rkt && echo "Simple: OK" || echo "Simple: FAIL"
+          echo "=== Two-module cross-compile test ==="
+          mkdir -p /tmp/cross-test
+          echo '#lang racket/base' > /tmp/cross-test/helper.rkt
+          echo '(provide greet)' >> /tmp/cross-test/helper.rkt
+          echo '(define (greet x) (format "hi ~a" x))' >> /tmp/cross-test/helper.rkt
+          echo '#lang racket/base' > /tmp/cross-test/main.rkt
+          echo '(require "helper.rkt")' >> /tmp/cross-test/main.rkt
+          echo '(displayln (greet "world"))' >> /tmp/cross-test/main.rkt
+          raco cross --target "${{ matrix.cross_target }}" exe -o /tmp/cross-test/main /tmp/cross-test/main.rkt && echo "Two-module: OK" || echo "Two-module: FAIL"
+          echo "=== Cross-compile rackup-core.rkt ==="
+          raco cross --target "${{ matrix.cross_target }}" exe -o /tmp/rackup-core-test libexec/rackup-core.rkt && echo "rackup-core: OK" || echo "rackup-core: FAIL"
       - name: Build executable distribution
         shell: bash
         run: |
