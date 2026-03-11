@@ -15,28 +15,16 @@ jobs:
           - runs_on: ubuntu-latest
             artifact_name: x86_64-linux
             setup_racket_arch: x64
-            cross_target: ""
           - runs_on: ubuntu-24.04-arm
             artifact_name: aarch64-linux
             setup_racket_arch: arm64
-            cross_target: ""
           - runs_on: macos-15-intel
             artifact_name: x86_64-macosx
             setup_racket_arch: x64
-            cross_target: ""
           - runs_on: macos-14
             artifact_name: aarch64-macosx
             setup_racket_arch: arm64
-            cross_target: ""
-          # Cross-compiled builds for platforms without native GHA runners.
-          - runs_on: ubuntu-latest
-            artifact_name: arm32-linux
-            setup_racket_arch: x64
-            cross_target: arm32-linux
-          - runs_on: ubuntu-latest
-            artifact_name: i386-linux
-            setup_racket_arch: x64
-            cross_target: i386-linux
+          # Other platforms use source distribution (no exe build needed)
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -47,24 +35,13 @@ jobs:
           distribution: full
           variant: CS
           version: stable
-      - name: Install raco cross (cross-compilation only)
-        if: matrix.cross_target != ''
-        shell: bash
-        run: raco pkg install --auto raco-cross
       - name: Build executable distribution
         shell: bash
         run: |
           mkdir -p dist
-          if [ -n "${{ matrix.cross_target }}" ]; then
-            scripts/build-dist.sh \
-              --cross "${{ matrix.cross_target }}" \
-              --output "dist/rackup-${{ matrix.artifact_name }}.tar.gz"
-          else
-            scripts/build-dist.sh \
-              --output "dist/rackup-${{ matrix.artifact_name }}.tar.gz"
-          fi
-      - name: Smoke test (native builds only)
-        if: matrix.cross_target == ''
+          scripts/build-dist.sh \
+            --output "dist/rackup-${{ matrix.artifact_name }}.tar.gz"
+      - name: Smoke test
         shell: bash
         run: |
           mkdir -p /tmp/rackup-exe-test
