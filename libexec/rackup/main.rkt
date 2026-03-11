@@ -9,6 +9,9 @@
          racket/runtime-path
          racket/string
          racket/system
+         (for-syntax racket/base
+                     racket/file
+                     racket/string)
          "install.rkt"
          "legacy-plt-catalog.rkt"
          "paths.rkt"
@@ -23,6 +26,16 @@
 
 (provide main
          cmd-version)
+
+(define-syntax (bake-version stx)
+  (define here (let-values ([(dir _n _d) (split-path (syntax-source stx))]) dir))
+  (define version-file (build-path here ".." ".." "build-version.txt"))
+  (if (file-exists? version-file)
+      (let ([lines (file->lines version-file)])
+        #`(quote #,(string-trim (car lines))))
+      #'#f))
+
+(define baked-version (bake-version))
 
 (define-runtime-path rackup-repo-dir "../..")
 
@@ -847,26 +860,30 @@
                 #:argv rest
                 #:args ()
                 (void))
-  (define (git-output . args)
-    (with-handlers ([exn:fail? (lambda (_) #f)])
-      (define out (open-output-string))
-      (define git (find-executable-path "git"))
-      (and git
-           (parameterize ([current-output-port out]
-                          [current-error-port (open-output-string)])
-             (apply system* git args))
-           (let ([s (string-trim (get-output-string out))])
-             (and (not (string-blank? s)) s)))))
-  (define dir (path->string rackup-repo-dir))
-  (define commit (git-output "-C" dir "rev-parse" "--short" "HEAD"))
-  (define date (git-output "-C" dir "log" "-1" "--format=%ci" "HEAD"))
   (cond
-    [commit
-     (if date
-         (printf "rackup ~a (~a)\n" commit date)
-         (printf "rackup ~a\n" commit))]
+    [baked-version
+     (displayln baked-version)]
     [else
-     (displayln "rackup (unknown version)")]))
+     (define (git-output . args)
+       (with-handlers ([exn:fail? (lambda (_) #f)])
+         (define out (open-output-string))
+         (define git (find-executable-path "git"))
+         (and git
+              (parameterize ([current-output-port out]
+                             [current-error-port (open-output-string)])
+                (apply system* git args))
+              (let ([s (string-trim (get-output-string out))])
+                (and (not (string-blank? s)) s)))))
+     (define dir (path->string rackup-repo-dir))
+     (define commit (git-output "-C" dir "rev-parse" "--short" "HEAD"))
+     (define date (git-output "-C" dir "log" "-1" "--format=%ci" "HEAD"))
+     (cond
+       [commit
+        (if date
+            (printf "rackup ~a (~a)\n" commit date)
+            (printf "rackup ~a\n" commit))]
+       [else
+        (displayln "rackup (unknown version)")])]))
 
 (define (cmd-doctor rest)
   (command-line #:program "rackup doctor"
