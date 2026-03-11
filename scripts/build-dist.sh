@@ -92,16 +92,19 @@ mkdir -p "$BUILD_DIR" "$DIST_DIR" "$STAGE_DIR"
 
 echo "Building rackup binary distribution..."
 
-# Step 1: Compile with raco exe
+# Step 1: Demodularize and compile with raco exe
 if [ -n "$CROSS_TARGET" ]; then
   echo "Cross-compiling for target: $CROSS_TARGET"
+  "$RACO" cross --target "$CROSS_TARGET" make \
+    "$ROOT_DIR/libexec/rackup-demod.rkt"
   "$RACO" cross --target "$CROSS_TARGET" exe \
     -o "$BUILD_DIR/rackup-core" \
-    "$ROOT_DIR/libexec/rackup-core.rkt"
+    "$ROOT_DIR/libexec/rackup-demod.rkt"
 else
   echo "Native compilation..."
+  "$RACO" make "$ROOT_DIR/libexec/rackup-demod.rkt"
   "$RACO" exe -o "$BUILD_DIR/rackup-core" \
-    "$ROOT_DIR/libexec/rackup-core.rkt"
+    "$ROOT_DIR/libexec/rackup-demod.rkt"
 fi
 
 # Step 2: Create distributable with raco distribute
