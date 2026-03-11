@@ -118,6 +118,10 @@ if [ -n "$CROSS_TARGET" ]; then
 fi
 
 # Step 2: Demodularize and compile with raco exe
+# The demodularizer flattens net/platform-ssl into the main module, which
+# loses its define-runtime-module-path-index references to osx-ssl.rkt and
+# win32-ssl.rkt. Add ++lib to ensure raco exe includes them for platforms
+# that need them (macOS uses osx-ssl for native TLS).
 if [ -n "$CROSS_TARGET" ]; then
   echo "Cross-compiling for target: $CROSS_TARGET"
   # Pre-compile for the target to produce .zo files. Without this,
@@ -128,11 +132,15 @@ if [ -n "$CROSS_TARGET" ]; then
     "$ROOT_DIR/libexec/rackup-demod.rkt"
   "$RACO" cross --target "$CROSS_TARGET" exe \
     -o "$BUILD_DIR/rackup-core" \
+    ++lib net/osx-ssl \
+    ++lib net/win32-ssl \
     "$ROOT_DIR/libexec/rackup-demod.rkt"
 else
   echo "Native compilation..."
   "$RACO" make "$ROOT_DIR/libexec/rackup-demod.rkt"
   "$RACO" exe -o "$BUILD_DIR/rackup-core" \
+    ++lib net/osx-ssl \
+    ++lib net/win32-ssl \
     "$ROOT_DIR/libexec/rackup-demod.rkt"
 fi
 
