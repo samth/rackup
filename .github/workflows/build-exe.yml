@@ -29,17 +29,14 @@ jobs:
             setup_racket_arch: arm64
             cross_target: ""
           # Cross-compiled builds for platforms without native GHA runners.
-          # Disabled: raco cross exe fails with "fasl-read: incompatible
-          # fasl-object machine-type" in the setup-racket CI environment.
-          # See https://github.com/samth/rackup/issues/TBD
-          # - runs_on: ubuntu-latest
-          #   artifact_name: arm32-linux
-          #   setup_racket_arch: x64
-          #   cross_target: arm32-linux
-          # - runs_on: ubuntu-latest
-          #   artifact_name: i386-linux
-          #   setup_racket_arch: x64
-          #   cross_target: i386-linux
+          - runs_on: ubuntu-latest
+            artifact_name: arm32-linux
+            setup_racket_arch: x64
+            cross_target: arm32-linux
+          - runs_on: ubuntu-latest
+            artifact_name: i386-linux
+            setup_racket_arch: x64
+            cross_target: i386-linux
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4

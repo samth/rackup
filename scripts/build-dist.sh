@@ -95,6 +95,12 @@ echo "Building rackup binary distribution..."
 # Step 1: Compile with raco exe
 if [ -n "$CROSS_TARGET" ]; then
   echo "Cross-compiling for target: $CROSS_TARGET"
+  # Pre-compile for the target to produce .zo files. Without this,
+  # raco exe falls back to compiling from source with the cross target,
+  # which hits a Racket expander bug (fasl-read incompatible machine-type)
+  # for modules with define-syntaxes + module*.
+  "$RACO" cross --target "$CROSS_TARGET" make \
+    "$ROOT_DIR/libexec/rackup-core.rkt"
   "$RACO" cross --target "$CROSS_TARGET" exe \
     -o "$BUILD_DIR/rackup-core" \
     "$ROOT_DIR/libexec/rackup-core.rkt"
