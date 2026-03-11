@@ -303,7 +303,22 @@
                             (string-contains? dispatcher-src "qemu-i386 via binfmt_misc"))
                            (define helper-src (shell-helper-script "bash"))
                            (check-true (string-contains? helper-src "_rackup_status"))
-                           (check-true (string-contains? helper-src "return \"$_rackup_status\""))))
+                           (check-true (string-contains? helper-src "return \"$_rackup_status\""))
+
+                           ;; User-scope addon bin executables
+                           ;; resolve-executable-path falls back to addon bin
+                           (define addon-bin (build-path (rackup-addon-dir id) "bin"))
+                           (make-directory* addon-bin)
+                           (define fake-exe (build-path addon-bin "resyntax"))
+                           (display-to-file "#!/bin/sh\necho ok\n" fake-exe)
+                           (file-or-directory-permissions fake-exe #o755)
+                           (check-equal? (path->string (resolve-executable-path "resyntax"))
+                                         (path->string fake-exe))
+                           ;; reshim picks up addon-bin executables
+                           (reshim!)
+                           (check-true (link-exists? (build-path (rackup-shims-dir) "resyntax")))
+                           ;; dispatcher source includes addon fallback
+                           (check-true (string-contains? dispatcher-src "ADDON_TARGET"))))
 
   (with-temp-rackup-home
    (lambda (tmp)

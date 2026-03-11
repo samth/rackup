@@ -57,26 +57,31 @@ BIN_DIR="$HOME_DIR/toolchains/$ACTIVE/bin"
 BIN_REAL="$(cd -P "$BIN_DIR" 2>/dev/null && pwd)" || BIN_REAL="$BIN_DIR"
 TARGET="$BIN_REAL/$SHIM_NAME"
 ENV_FILE="$HOME_DIR/toolchains/$ACTIVE/env.sh"
-if [[ ! -x "$TARGET" ]]; then
-  echo "rackup: executable '$SHIM_NAME' not found in toolchain '$ACTIVE'" >&2
-  if [[ -n "${RACKUP_TOOLCHAIN:-}" ]]; then
-    if [[ -n "$DEFAULT_ID" ]]; then
-      echo "rackup: active toolchain came from RACKUP_TOOLCHAIN and overrides default toolchain '$DEFAULT_ID'." >&2
-    else
-      echo "rackup: active toolchain came from RACKUP_TOOLCHAIN." >&2
-    fi
-    echo "Clear it with: rackup switch --unset" >&2
-    echo "Or unset it manually with: unset RACKUP_TOOLCHAIN" >&2
-  fi
-  echo "Try: rackup which $SHIM_NAME --toolchain $ACTIVE" >&2
-  exit 127
-fi
 if [[ -f "$ENV_FILE" ]]; then
   # shellcheck disable=SC1090
   . "$ENV_FILE"
 fi
 if [[ -z "${PLTADDONDIR:-}" ]]; then
   export PLTADDONDIR="$HOME_DIR/addons/$ACTIVE"
+fi
+if [[ ! -x "$TARGET" ]]; then
+  ADDON_TARGET="$PLTADDONDIR/bin/$SHIM_NAME"
+  if [[ -x "$ADDON_TARGET" ]]; then
+    TARGET="$ADDON_TARGET"
+  else
+    echo "rackup: executable '$SHIM_NAME' not found in toolchain '$ACTIVE'" >&2
+    if [[ -n "${RACKUP_TOOLCHAIN:-}" ]]; then
+      if [[ -n "$DEFAULT_ID" ]]; then
+        echo "rackup: active toolchain came from RACKUP_TOOLCHAIN and overrides default toolchain '$DEFAULT_ID'." >&2
+      else
+        echo "rackup: active toolchain came from RACKUP_TOOLCHAIN." >&2
+      fi
+      echo "Clear it with: rackup switch --unset" >&2
+      echo "Or unset it manually with: unset RACKUP_TOOLCHAIN" >&2
+    fi
+    echo "Try: rackup which $SHIM_NAME --toolchain $ACTIVE" >&2
+    exit 127
+  fi
 fi
 
 rackup_is_elf32() {
@@ -261,7 +266,10 @@ EOF
   (unless id
     (rackup-error "no active/default toolchain configured"))
   (define p (build-path (rackup-toolchain-bin-link id) exe))
-  (if (file-exists? p) p #f))
+  (if (file-exists? p)
+      p
+      (let ([addon-p (build-path (rackup-addon-dir id) "bin" exe)])
+        (if (file-exists? addon-p) addon-p #f))))
 
 (define (rackup-managed-shim? p)
   (and (link-exists? p)
@@ -269,13 +277,24 @@ EOF
          (or (equal? target (simplify-path (rackup-shim-dispatcher) #t))
              (equal? target (simplify-path (rackup-bin-entry) #t))))))
 
+(define (addon-bin-executables id)
+  (define addon-bin (build-path (rackup-addon-dir id) "bin"))
+  (if (directory-exists? addon-bin)
+      (for/list ([p (in-list (directory-list addon-bin #:build? #t))]
+                 #:when (and (file-exists? p)
+                             (member 'execute (file-or-directory-permissions p))))
+        (path-basename-string p))
+      null))
+
 (define (all-installed-executables)
   (define ids (installed-toolchain-ids))
   (sort (remove-duplicates (append* (for/list ([id ids])
                                       (define m (read-toolchain-meta id))
-                                      (if (and (hash? m) (list? (hash-ref m 'executables #f)))
-                                          (hash-ref m 'executables)
-                                          null))))
+                                      (append
+                                       (if (and (hash? m) (list? (hash-ref m 'executables #f)))
+                                           (hash-ref m 'executables)
+                                           null)
+                                       (addon-bin-executables id)))))
         string<?))
 
 ;; Short aliases: r -> racket, dr -> drracket.
