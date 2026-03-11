@@ -251,7 +251,7 @@
                            (define list-out (capture-output (lambda () (run-main '("list")))))
                            (check-true
                             (string-contains? list-out
-                                              "[default,active] release-8.18-cs-x86_64-linux-full"))
+                                              "[default,active,stable] release-8.18-cs-x86_64-linux-full"))
                            (check-false (string-contains? list-out "\n* "))
                            (check-false (string-contains? list-out "\n    tags: "))
                            (define old-env-id (getenv "RACKUP_TOOLCHAIN"))
@@ -278,7 +278,7 @@
                               (check-true
                                (string-contains?
                                 stale-list-out
-                                "[default] release-8.18-cs-x86_64-linux-full")))
+                                "[default,stable] release-8.18-cs-x86_64-linux-full")))
                             (lambda ()
                               (if old-env-id
                                   (putenv "RACKUP_TOOLCHAIN" old-env-id)
@@ -593,9 +593,9 @@
      (check-true (string-contains? activation "export PLTCOLLECTS="))
      (check-true (string-contains? activation (format "export PLTADDONDIR='~a'" (path->string addon-dir))))
      (expect (run-main (list "switch" "devsrc")) activation)
-     @expect[(run-main '("prompt"))]{racket-local-9.98-local
+     @expect[(run-main '("prompt"))]{devsrc
 }
-     @expect[(run-main '("prompt" "--short"))]{racket-local-9.98-local
+     @expect[(run-main '("prompt" "--short"))]{devsrc
 }
      @expect[(run-main '("prompt" "--long"))]{[rk:local-devsrc]
 }
@@ -1577,7 +1577,7 @@
      (define list-out (capture-output (lambda () (run-main '("list")))))
      (check-true (string-contains? list-out "release-9.0-cs-x86_64-linux-full"))
      (check-true (string-contains? list-out "release-9.1-cs-x86_64-linux-full"))
-     (check-true (string-contains? list-out "[default,active]"))
+     (check-true (string-contains? list-out "[default,active,stable]"))
 
      ;; Reshim and verify shim dispatches to 9.1 (the new default)
      (reshim!)

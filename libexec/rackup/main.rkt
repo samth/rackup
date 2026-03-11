@@ -216,28 +216,30 @@
           (define m (cdr (assoc id all-meta)))
           (define is-default? (equal? id default-id))
           (define is-active? (equal? id active-id))
+          (define is-stable? (equal? (hash-ref m 'requested-spec #f) "stable"))
           (define tags
             (filter values
-                    (list (and is-default? "default") (and is-active? "active"))))
+                    (list (and is-default? "default")
+                          (and is-active? "active")
+                          (and is-stable? "stable"))))
           (define tag-str
             (if (null? tags)
                 ""
                 (string-append
-                 (ansi (if is-active? "32" "36")
+                 (ansi (cond [is-active? "32"] [is-stable? "35"] [else "36"])
                        (format "[~a]" (string-join tags ",")))
                  " ")))
           (define meta-str
-            (ansi "90" (format "(~a, ~a, ~a)"
-                               (hash-ref m 'resolved-version "?")
-                               (hash-ref m 'variant "?")
-                               (hash-ref m 'distribution "?"))))
+            (format " (~a, ~a, ~a)"
+                    (hash-ref m 'resolved-version "?")
+                    (hash-ref m 'variant "?")
+                    (hash-ref m 'distribution "?")))
           (define names (toolchain-short-names id idx #:all-meta all-meta))
           (define names-str
             (if (null? names)
                 ""
-                (format "\n  aka ~a"
-                        (ansi "90" (string-join (sort names string<?) ", ")))))
-          (printf "~a~a  ~a~a\n" tag-str id meta-str names-str)))))
+                (format "\n  aka ~a" (string-join (sort names string<?) ", "))))
+          (printf "~a~a ~a~a\n" tag-str id meta-str names-str)))))
 
 (define (default-id->line)
   (define id (get-default-toolchain))
@@ -301,7 +303,7 @@
   (match args
     ['()
      (cond
-       [id (printf "~a\t~a\n" id (ansi "90" (format "(~a)" src)))]
+       [id (printf "~a\t(~a)\n" id src)]
        [else (displayln "none")])]
     [(list "id")
      (if id
@@ -514,22 +516,18 @@
   (define meta (and id (read-toolchain-meta id)))
   (define kind (and (hash? meta) (hash-ref meta 'kind #f)))
   (define version (and (hash? meta) (hash-ref meta 'resolved-version #f)))
-  (define suffix
-    (match kind
-      ['release (or version id)]
-      ['stable (or version id)]
-      ['pre-release (format "pre-~a" (or version id))]
-      ['snapshot (format "snapshot-~a" (or version id))]
-      ['local
-       (cond
-         [(and (string? version)
-               (not (string-blank? version))
-               (not (equal? version "local")))
-          (format "local-~a" version)]
-         [(and (string? id) (string-prefix? id "local-")) (format "local-~a" (substring id 6))]
-         [else (or id "local")])]
-      [_ (or id "")]))
-  (if (string-blank? suffix) "" (format "racket-~a" suffix)))
+  (define spec (and (hash? meta) (hash-ref meta 'requested-spec #f)))
+  (match kind
+    ['local (or spec id "local")]
+    [_
+     (define suffix
+       (match kind
+         ['release (or version id)]
+         ['stable (or version id)]
+         ['pre-release (format "pre-~a" (or version id))]
+         ['snapshot (format "snapshot-~a" (or version id))]
+         [_ (or id "")]))
+     (if (string-blank? suffix) "" (format "racket-~a" suffix))]))
 
 (define (cmd-prompt rest)
   (define mode 'short)
@@ -589,7 +587,7 @@
   (with-handlers ([exn:fail? (lambda (e)
                                (printf "  ~a -> ~a\n" label (ansi "33" (format "unavailable (~a)" (exn-message e)))))])
     (define req (resolve-install-request spec))
-    (printf "  ~a -> ~a\n" (ansi "1" label) (ansi "90" (fmt-req-summary req)))))
+    (printf "  ~a -> ~a\n" (ansi "1" label) (fmt-req-summary req))))
 
 (define (cmd-available rest)
   (define limit (parse-available-options rest))
