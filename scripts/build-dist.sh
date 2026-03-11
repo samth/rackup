@@ -106,7 +106,7 @@ if [ -n "$COMMIT" ]; then
   echo "Baked version: $(cat "$VERSION_FILE")"
 fi
 
-# Step 1: Compile with raco exe
+# Step 1: Demodularize and compile with raco exe
 if [ -n "$CROSS_TARGET" ]; then
   echo "Cross-compiling for target: $CROSS_TARGET"
   # Pre-compile for the target to produce .zo files. Without this,
@@ -114,13 +114,15 @@ if [ -n "$CROSS_TARGET" ]; then
   # which hits a Racket expander bug (fasl-read incompatible machine-type)
   # for modules with define-syntaxes + module*.
   "$RACO" cross --target "$CROSS_TARGET" make \
-    "$ROOT_DIR/libexec/rackup-core.rkt"
+    "$ROOT_DIR/libexec/rackup-demod.rkt"
   "$RACO" cross --target "$CROSS_TARGET" exe \
     -o "$BUILD_DIR/rackup-core" \
-    "$ROOT_DIR/libexec/rackup-core.rkt"
+    "$ROOT_DIR/libexec/rackup-demod.rkt"
 else
+  echo "Native compilation..."
+  "$RACO" make "$ROOT_DIR/libexec/rackup-demod.rkt"
   "$RACO" exe -o "$BUILD_DIR/rackup-core" \
-    "$ROOT_DIR/libexec/rackup-core.rkt"
+    "$ROOT_DIR/libexec/rackup-demod.rkt"
 fi
 
 # Step 2: Create distributable with raco distribute
