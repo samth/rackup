@@ -82,6 +82,7 @@ ROOT_DIR=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 TMPDIR_BUILD="$(mktemp -d "${TMPDIR:-/tmp}/rackup-build-dist.XXXXXX")"
 cleanup() {
   rm -rf "$TMPDIR_BUILD"
+  rm -f "$ROOT_DIR/build-version.txt"
 }
 trap cleanup EXIT
 
@@ -91,6 +92,19 @@ STAGE_DIR="$TMPDIR_BUILD/rackup"
 mkdir -p "$BUILD_DIR" "$DIST_DIR" "$STAGE_DIR"
 
 echo "Building rackup binary distribution..."
+
+# Step 0: Bake version info into the build
+VERSION_FILE="$ROOT_DIR/build-version.txt"
+COMMIT="$(git -C "$ROOT_DIR" rev-parse --short HEAD 2>/dev/null || true)"
+DATE="$(git -C "$ROOT_DIR" log -1 --format=%ci HEAD 2>/dev/null || true)"
+if [ -n "$COMMIT" ]; then
+  if [ -n "$DATE" ]; then
+    printf 'rackup %s (%s)\n' "$COMMIT" "$DATE" > "$VERSION_FILE"
+  else
+    printf 'rackup %s\n' "$COMMIT" > "$VERSION_FILE"
+  fi
+  echo "Baked version: $(cat "$VERSION_FILE")"
+fi
 
 # Step 1: Demodularize and compile with raco exe
 if [ -n "$CROSS_TARGET" ]; then

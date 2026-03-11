@@ -11,6 +11,9 @@ node_modules/
 package.json
 package-lock.json
 
+# Build artifacts
+build-version.txt
+
 # Misc
 .DS_Store
 *~
