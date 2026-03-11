@@ -86,9 +86,9 @@ COMMIT="$(git -C "$ROOT_DIR" rev-parse --short HEAD 2>/dev/null || true)"
 DATE="$(git -C "$ROOT_DIR" log -1 --format=%ci HEAD 2>/dev/null || true)"
 if [ -n "$COMMIT" ]; then
   if [ -n "$DATE" ]; then
-    printf 'rackup %s (%s)\n' "$COMMIT" "$DATE" > "$VERSION_FILE"
+    printf 'rackup %s (%s)\n' "$COMMIT" "$DATE" >"$VERSION_FILE"
   else
-    printf 'rackup %s\n' "$COMMIT" > "$VERSION_FILE"
+    printf 'rackup %s\n' "$COMMIT" >"$VERSION_FILE"
   fi
   echo "Baked version: $(cat "$VERSION_FILE")"
 fi
