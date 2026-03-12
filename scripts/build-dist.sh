@@ -3,8 +3,11 @@ set -eu
 
 # Build a prebuilt binary distribution of rackup using raco exe + raco distribute.
 #
-# Usage:
+# Native build (on the target platform):
 #   scripts/build-dist.sh --output dist/rackup-x86_64-linux.tar.gz
+#
+# Cross-compile (from any platform with raco cross installed):
+#   scripts/build-dist.sh --cross i386-linux --output dist/rackup-i386-linux.tar.gz
 #
 # The output tarball contains:
 #   rackup/
@@ -13,26 +16,36 @@ set -eu
 #     lib/...             (shared libraries from raco distribute)
 #     libexec/rackup-bootstrap.sh (shell helpers for prompt/arch detection)
 
+CROSS_TARGET=""
 OUTPUT=""
 RACKET="${RACKET:-racket}"
 RACO="${RACO:-raco}"
 
 usage() {
   cat <<'USAGE'
-Usage: build-dist.sh --output FILE
+Usage: build-dist.sh [--cross TARGET] --output FILE
 
 Options:
+  --cross TARGET   Cross-compile for TARGET using raco cross --target.
+                   TARGET is a raco cross platform name, e.g. i386-linux, arm32-linux.
   --output FILE    Output tarball path (e.g. dist/rackup-x86_64-linux.tar.gz).
   --racket EXE     Path to racket executable (default: racket).
   --raco EXE       Path to raco executable (default: raco).
 
-Example:
+Native build example:
   scripts/build-dist.sh --output dist/rackup-x86_64-linux.tar.gz
+
+Cross-compile example:
+  scripts/build-dist.sh --cross i386-linux --output dist/rackup-i386-linux.tar.gz
 USAGE
 }
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
+    --cross)
+      CROSS_TARGET="$2"
+      shift 2
+      ;;
     --output)
       OUTPUT="$2"
       shift 2
@@ -94,11 +107,30 @@ if [ -n "$COMMIT" ]; then
 fi
 
 # Step 1: Compile with raco exe
-"$RACO" exe -o "$BUILD_DIR/rackup-core" \
-  "$ROOT_DIR/libexec/rackup-core.rkt"
+if [ -n "$CROSS_TARGET" ]; then
+  echo "Cross-compiling for target: $CROSS_TARGET"
+  # Pre-compile for the target to produce .zo files. Without this,
+  # raco exe falls back to compiling from source with the cross target,
+  # which hits a Racket expander bug (fasl-read incompatible machine-type)
+  # for modules with define-syntaxes + module*.
+  "$RACO" cross --target "$CROSS_TARGET" make \
+    "$ROOT_DIR/libexec/rackup-core.rkt"
+  "$RACO" cross --target "$CROSS_TARGET" exe \
+    -o "$BUILD_DIR/rackup-core" \
+    "$ROOT_DIR/libexec/rackup-core.rkt"
+else
+  "$RACO" exe -o "$BUILD_DIR/rackup-core" \
+    "$ROOT_DIR/libexec/rackup-core.rkt"
+fi
 
 # Step 2: Create distributable with raco distribute
-"$RACO" distribute "$DIST_DIR" "$BUILD_DIR/rackup-core"
+if [ -n "$CROSS_TARGET" ]; then
+  "$RACO" cross --target "$CROSS_TARGET" distribute \
+    "$DIST_DIR" \
+    "$BUILD_DIR/rackup-core"
+else
+  "$RACO" distribute "$DIST_DIR" "$BUILD_DIR/rackup-core"
+fi
 
 # Step 3: Assemble the final distribution layout
 #   rackup/
