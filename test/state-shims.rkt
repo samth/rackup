@@ -614,6 +614,10 @@
 }
      @expect[(run-main '("prompt" "--long"))]{[rk:local-devsrc]
 }
+     @expect/shell[(list (path->string rackup-bin) "prompt" "--short")]{devsrc
+}
+     @expect/shell[(list (path->string rackup-bin) "prompt")]{devsrc
+}
      (void (putenv "RACKUP_TOOLCHAIN" linked-id))
      (define deactivation (emit-shell-deactivation))
      (check-true (string-contains? deactivation "unset PLTHOME"))

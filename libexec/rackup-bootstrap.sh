@@ -102,11 +102,9 @@ rackup_prompt_short_shell() {
       suffix="snapshot-${version:-$active}"
       ;;
     local)
-      if [ -n "${version:-}" ] && [ "$version" != "local" ]; then
-        suffix="local-$version"
-      else
-        suffix="local-${active#local-}"
-      fi
+      spec="$(rackup_rktd_string_field_shell requested-spec "$meta_file")"
+      printf '%s\n' "${spec:-${active#local-}}"
+      return
       ;;
     *)
       case "$active" in
