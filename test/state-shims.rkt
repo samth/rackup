@@ -626,6 +626,56 @@
      (expect (run-main '("switch" "--unset")) deactivation)
      (void (putenv "RACKUP_TOOLCHAIN" ""))))
 
+  ;; Test: linking a real source tree and running raco through the shim
+  ;; should produce no "tool registered twice" warnings.
+  ;; This test requires that the Racket running the tests is a source build;
+  ;; if not, it is silently skipped.
+  (let ()
+    (define real-racket
+      (simplify-path (resolve-path (find-system-path 'exec-file)) #t))
+    (define real-bin-dir (let-values ([(d _ __) (split-path real-racket)]) d))
+    (define plthome (and (path? real-bin-dir)
+                         (let-values ([(d _ __) (split-path (simplify-path real-bin-dir))])
+                           (and d (simplify-path d)))))
+    (define source-root (and plthome
+                             (let-values ([(d _ __) (split-path plthome)])
+                               (and d (simplify-path d)))))
+    (define pkgs-dir (and source-root (build-path source-root "pkgs")))
+    (when (and source-root (directory-exists? (or pkgs-dir "")))
+      (with-temp-rackup-home
+       (lambda (_tmp)
+         (ensure-index!)
+         (define linked-id
+           (link-toolchain! "realsrc" (path->string source-root) '("--set-default")))
+         (reshim!)
+         (define raco-shim (build-path (rackup-shims-dir) "raco"))
+         (define old-pltaddon (getenv "PLTADDONDIR"))
+         (define old-pltcollects (getenv "PLTCOLLECTS"))
+         (define old-plthome (getenv "PLTHOME"))
+         (define old-toolchain (getenv "RACKUP_TOOLCHAIN"))
+         (dynamic-wind
+           (lambda ()
+             (putenv "PLTADDONDIR" "")
+             (putenv "PLTCOLLECTS" "")
+             (putenv "PLTHOME" "")
+             (putenv "RACKUP_TOOLCHAIN" ""))
+           (lambda ()
+             (define-values (proc stdout stdin stderr)
+               (subprocess #f #f #f raco-shim "pkg" "show" "NOTAPACKAGE"))
+             (close-output-port stdin)
+             (subprocess-wait proc)
+             (define err-str (port->string stderr))
+             (close-input-port stdout)
+             (close-input-port stderr)
+             (check-false (regexp-match? #rx"warning:" err-str)
+                          (format "raco through shim produced warnings:\n~a" err-str)))
+           (lambda ()
+             (if old-pltaddon (putenv "PLTADDONDIR" old-pltaddon) (putenv "PLTADDONDIR" ""))
+             (if old-pltcollects (putenv "PLTCOLLECTS" old-pltcollects) (putenv "PLTCOLLECTS" ""))
+             (if old-plthome (putenv "PLTHOME" old-plthome) (putenv "PLTHOME" ""))
+             (if old-toolchain (putenv "RACKUP_TOOLCHAIN" old-toolchain)
+                 (putenv "RACKUP_TOOLCHAIN" ""))))))))
+
   (with-temp-rackup-home
    (lambda (tmp)
      (ensure-index!)
