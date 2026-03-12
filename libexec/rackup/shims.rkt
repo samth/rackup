@@ -339,7 +339,67 @@ EOF
   (when (file-exists? (rackup-shim-aliases-file))
     (delete-file (rackup-shim-aliases-file))))
 
+(define (write-env-file! id env-vars)
+  (define p (rackup-toolchain-env-file id))
+  (define body
+    (string-append "#!/usr/bin/env bash\n"
+                   "# rackup managed toolchain environment\n"
+                   (apply string-append
+                          (for/list ([kv (in-list env-vars)])
+                            (format "export ~a=~a\n" (car kv) (sh-single-quote (cdr kv)))))))
+  (write-string-file p body)
+  (file-or-directory-permissions p #o644))
+
+(define (delete-env-file! id)
+  (define p (rackup-toolchain-env-file id))
+  (when (file-exists? p)
+    (delete-file p)))
+
+(define (detect-collects-dir plthome)
+  (define in-place (build-path (string->path plthome) "collects"))
+  (define prefix (build-path (string->path plthome) "share" "racket" "collects"))
+  (cond
+    [(directory-exists? in-place) (path->string* in-place)]
+    [(directory-exists? prefix) (path->string* prefix)]
+    [else #f]))
+
+(define (compute-local-env-vars meta)
+  (define plthome (hash-ref meta 'plthome #f))
+  (define source-root (hash-ref meta 'source-root #f))
+  (define plthome-env (or source-root plthome))
+  (define collects-dir (and plthome (detect-collects-dir plthome)))
+  (define old-env-vars (hash-ref meta 'env-vars '()))
+  (define old-addon-dir
+    (for/or ([kv (in-list old-env-vars)])
+      (and (equal? (car kv) "PLTADDONDIR") (cadr kv))))
+  (define effective-addon-dir
+    (or old-addon-dir
+        (and source-root
+             (path->string* (build-path (string->path source-root) "add-on")))))
+  (append (if plthome-env (list (cons "PLTHOME" plthome-env)) null)
+          (if collects-dir (list (cons "PLTCOLLECTS" collects-dir)) null)
+          (if (and (string? effective-addon-dir) (not (string-blank? effective-addon-dir)))
+              (list (cons "PLTADDONDIR" effective-addon-dir))
+              null)))
+
+(define (regenerate-env-files!)
+  (for ([id (in-list (installed-toolchain-ids))])
+    (define meta (read-toolchain-meta id))
+    (when (hash? meta)
+      (define kind (hash-ref meta 'kind #f))
+      ;; Only regenerate env files for local (linked) toolchains, where
+      ;; the env vars are derived from the source layout and the
+      ;; computation may have changed.  Installed (release/snapshot)
+      ;; toolchains have env vars computed once at install time and
+      ;; stored in the meta; they don't need regeneration.
+      (when (eq? kind 'local)
+        (define env-vars (compute-local-env-vars meta))
+        (if (pair? env-vars)
+            (write-env-file! id env-vars)
+            (delete-env-file! id))))))
+
 (define/state-locked (reshim!)
+  (regenerate-env-files!)
   (ensure-shim-dispatcher!)
   (ensure-core-rackup-shim!)
   (define shims-dir (rackup-shims-dir))
