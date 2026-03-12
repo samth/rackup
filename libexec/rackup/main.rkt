@@ -30,10 +30,11 @@
 (define-syntax (bake-version stx)
   (define here (let-values ([(dir _n _d) (split-path (syntax-source stx))]) dir))
   (define version-file (build-path here ".." ".." "build-version.txt"))
-  (if (file-exists? version-file)
-      (let ([lines (file->lines version-file)])
-        #`(quote #,(string-trim (car lines))))
-      #'#f))
+  (with-handlers ([exn:fail? (lambda (_) #'#f)])
+    (let ([lines (file->lines version-file)])
+      (if (null? lines)
+          #'#f
+          #`(quote #,(string-trim (car lines)))))))
 
 (define baked-version (bake-version))
 
@@ -518,7 +519,10 @@
   (define version (and (hash? meta) (hash-ref meta 'resolved-version #f)))
   (define spec (and (hash? meta) (hash-ref meta 'requested-spec #f)))
   (match kind
-    ['local (or spec id "local")]
+    ['local (or spec
+                (and id (string-prefix? id "local-") (substring id 6))
+                id
+                "local")]
     [_
      (define suffix
        (match kind

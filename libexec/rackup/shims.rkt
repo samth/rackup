@@ -282,23 +282,24 @@ EOF
          (or (equal? target (simplify-path (rackup-shim-dispatcher) #t))
              (equal? target (simplify-path (rackup-bin-entry) #t))))))
 
-;; Find an executable in the addon dir, checking both $PLTADDONDIR/bin/ and
-;; $PLTADDONDIR/<installation-name>/bin/ (Racket nests user-scope packages
-;; under the installation name within the addon dir).
+;; Return the list of bin directories under addon-dir to search for
+;; user-scope executables: $PLTADDONDIR/bin/ and $PLTADDONDIR/*/bin/
+;; (Racket nests user-scope packages under the installation name).
+(define (addon-bin-dirs addon-dir)
+  (cons (build-path addon-dir "bin")
+        (if (directory-exists? addon-dir)
+            (for/list ([sub (in-list (directory-list addon-dir #:build? #t))]
+                       #:when (directory-exists? sub))
+              (build-path sub "bin"))
+            null)))
+
 (define (find-addon-bin-exe addon-dir exe)
-  (define direct (build-path addon-dir "bin" exe))
-  (cond
-    [(file-exists? direct) direct]
-    [(directory-exists? addon-dir)
-     (for/or ([sub (in-list (directory-list addon-dir #:build? #t))]
-              #:when (directory-exists? sub))
-       (define candidate (build-path sub "bin" exe))
-       (and (file-exists? candidate) candidate))]
-    [else #f]))
+  (for/or ([bin-dir (in-list (addon-bin-dirs addon-dir))])
+    (define candidate (build-path bin-dir exe))
+    (and (file-exists? candidate) candidate)))
 
 (define (addon-bin-executables id)
   (define addon-dir (rackup-addon-dir id))
-  ;; Collect executables from $addon-dir/bin/ and $addon-dir/*/bin/
   (define (bin-dir-executables bin-dir)
     (if (directory-exists? bin-dir)
         (for/list ([p (in-list (directory-list bin-dir #:build? #t))]
@@ -306,15 +307,9 @@ EOF
                                (member 'execute (file-or-directory-permissions p))))
           (path-basename-string p))
         null))
-  (define direct (bin-dir-executables (build-path addon-dir "bin")))
-  (define nested
-    (if (directory-exists? addon-dir)
-        (append*
-         (for/list ([sub (in-list (directory-list addon-dir #:build? #t))]
-                    #:when (directory-exists? sub))
-           (bin-dir-executables (build-path sub "bin"))))
-        null))
-  (remove-duplicates (append direct nested)))
+  (remove-duplicates
+   (append* (for/list ([bin-dir (in-list (addon-bin-dirs addon-dir))])
+              (bin-dir-executables bin-dir)))))
 
 (define (all-installed-executables)
   (define ids (installed-toolchain-ids))
