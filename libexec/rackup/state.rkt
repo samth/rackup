@@ -7,6 +7,7 @@
          racket/string
          "paths.rkt"
          "rktd-io.rkt"
+         "state-lock.rkt"
          "util.rkt")
 
 (provide load-index
@@ -71,7 +72,7 @@
 (define (get-default-toolchain [idx (load-index)])
   (or (read-string-file (rackup-default-file) #f) (hash-ref idx 'default-toolchain #f)))
 
-(define (set-default-toolchain! id)
+(define/state-locked (set-default-toolchain! id)
   (ensure-index!)
   (define idx (load-index))
   (unless (toolchain-exists? id idx)
@@ -79,7 +80,7 @@
   (write-string-file (rackup-default-file) id)
   (save-index! (hash-set idx 'default-toolchain id)))
 
-(define (clear-default-toolchain!)
+(define/state-locked (clear-default-toolchain!)
   (when (file-exists? (rackup-default-file))
     (delete-file (rackup-default-file)))
   (when (file-exists? (rackup-index-file))
@@ -119,7 +120,7 @@
                      executables)])
     (values k (hash-ref meta k #f))))
 
-(define (register-toolchain! id meta)
+(define/state-locked (register-toolchain! id meta)
   (ensure-index!)
   (write-toolchain-meta! id meta)
   (define idx (load-index))
@@ -128,7 +129,7 @@
   (when (not (get-default-toolchain))
     (set-default-toolchain! id)))
 
-(define (unregister-toolchain! id)
+(define/state-locked (unregister-toolchain! id)
   (ensure-index!)
   (define idx (load-index))
   (define new-installed (hash-remove (installed-toolchains idx) id))

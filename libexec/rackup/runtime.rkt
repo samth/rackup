@@ -220,7 +220,9 @@
   (define v* (or variant (hash-ref req 'variant)))
   (hash-set (hash-set req 'resolved-version version) 'variant v*))
 
-(define (adopt-hidden-runtime! [quiet? #f])
+(define-file-lock with-runtime-lock define/runtime-locked (rackup-runtime-lock-dir) "hidden runtime")
+
+(define/runtime-locked (adopt-hidden-runtime! [quiet? #f])
   (define racket-exe (hidden-runtime-racket-path))
   (unless racket-exe
     (rackup-error "no hidden runtime to adopt"))
@@ -313,59 +315,53 @@
         (unless (string-blank? details)
           (eprintf "~a\n" details))))))
 
-(define-file-lock with-runtime-lock (rackup-runtime-lock-dir) "hidden runtime")
 
-(define (install-hidden-runtime! [quiet? #f])
+(define/runtime-locked (install-hidden-runtime! [quiet? #f])
   (ensure-rackup-layout!)
-  (cond
-    [(hidden-runtime-present?) (adopt-hidden-runtime! quiet?)]
-    [else
-     (with-runtime-lock
-      (lambda ()
-        (if (hidden-runtime-present?)
-            (adopt-hidden-runtime! quiet?)
-            (let* ([req (hidden-runtime-request)]
-                   [id (runtime-id-for-request req)]
-                   [version-dir (rackup-runtime-version-dir id)]
-                   [install-root (rackup-runtime-install-dir id)]
-                   [bin-link (rackup-runtime-bin-link id)]
-                   [installer-url (hash-ref req 'installer-url)]
-                   [installer-file
-                    (ensure-installer-cached! installer-url
-                                              #:sha256 (hash-ref req 'installer-sha256 #f))]
-                   [installer-ext (installer-extension installer-file)])
-              (if (and (directory-exists? version-dir) (file-exists? (build-path bin-link "racket")))
-                  (begin
-                    (replace-link! (rackup-runtime-current-link) version-dir)
-                    (adopt-hidden-runtime! quiet?))
-                  (with-handlers ([exn:fail? (lambda (e)
-                                               (when (directory-exists? version-dir)
-                                                 (delete-directory/files version-dir))
-                                               (raise e))])
-                    (make-directory* version-dir)
-                    (cond
-                      [(equal? installer-ext "sh")
-                       (run-linux-installer! installer-file install-root)]
-                      [(equal? installer-ext "tgz")
-                       (run-tgz-installer! installer-file install-root)]
-                      [(equal? installer-ext "dmg")
-                       (run-macos-dmg-installer! installer-file install-root)]
-                      [else
-                       (rackup-error "unsupported hidden runtime installer format: ~a"
-                                     (or installer-ext "unknown"))])
-                    (define real-bin (detect-bin-dir install-root))
-                    (replace-link! bin-link real-bin)
-                    (write-runtime-meta! id
-                                         req
-                                         real-bin
-                                         #:installer-url installer-url
-                                         #:installer-filename (hash-ref req 'installer-filename #f))
-                    (replace-link! (rackup-runtime-current-link) version-dir)
-                    (unless quiet?
-                      (displayln (format "Installed hidden runtime: ~a" id)))
-                    id))))))]))
+  (if (hidden-runtime-present?)
+      (adopt-hidden-runtime! quiet?)
+      (let* ([req (hidden-runtime-request)]
+             [id (runtime-id-for-request req)]
+             [version-dir (rackup-runtime-version-dir id)]
+             [install-root (rackup-runtime-install-dir id)]
+             [bin-link (rackup-runtime-bin-link id)]
+             [installer-url (hash-ref req 'installer-url)]
+             [installer-file
+              (ensure-installer-cached! installer-url
+                                        #:sha256 (hash-ref req 'installer-sha256 #f))]
+             [installer-ext (installer-extension installer-file)])
+        (if (and (directory-exists? version-dir) (file-exists? (build-path bin-link "racket")))
+            (begin
+              (replace-link! (rackup-runtime-current-link) version-dir)
+              (adopt-hidden-runtime! quiet?))
+            (with-handlers ([exn:fail? (lambda (e)
+                                         (when (directory-exists? version-dir)
+                                           (delete-directory/files version-dir))
+                                         (raise e))])
+              (make-directory* version-dir)
+              (cond
+                [(equal? installer-ext "sh")
+                 (run-linux-installer! installer-file install-root)]
+                [(equal? installer-ext "tgz")
+                 (run-tgz-installer! installer-file install-root)]
+                [(equal? installer-ext "dmg")
+                 (run-macos-dmg-installer! installer-file install-root)]
+                [else
+                 (rackup-error "unsupported hidden runtime installer format: ~a"
+                               (or installer-ext "unknown"))])
+              (define real-bin (detect-bin-dir install-root))
+              (replace-link! bin-link real-bin)
+              (write-runtime-meta! id
+                                   req
+                                   real-bin
+                                   #:installer-url installer-url
+                                   #:installer-filename (hash-ref req 'installer-filename #f))
+              (replace-link! (rackup-runtime-current-link) version-dir)
+              (unless quiet?
+                (displayln (format "Installed hidden runtime: ~a" id)))
+              id)))))
 
-(define (upgrade-hidden-runtime!)
+(define/runtime-locked (upgrade-hidden-runtime!)
   (ensure-rackup-layout!)
   (unless (hidden-runtime-present?)
     (install-hidden-runtime!))
@@ -438,7 +434,7 @@
         (displayln "Running as prebuilt executable; no hidden runtime needed.")
         (displayln "Use 'rackup self-upgrade' to update the executable.")]
        [else
-        (install-hidden-runtime!)
+        (with-runtime-lock (install-hidden-runtime!))
         (precompile-rackup-sources!)])]
     ["upgrade"
      (cond
@@ -446,7 +442,7 @@
         (displayln "Running as prebuilt executable; no hidden runtime to upgrade.")
         (displayln "Use 'rackup self-upgrade' to update the executable.")]
        [else
-        (upgrade-hidden-runtime!)
+        (with-runtime-lock (upgrade-hidden-runtime!))
         (precompile-rackup-sources!)])]
     [_ (rackup-error "usage: rackup runtime status|install|upgrade")]))
 

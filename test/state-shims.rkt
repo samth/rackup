@@ -20,6 +20,7 @@
          "../libexec/rackup/shell.rkt"
          "../libexec/rackup/shims.rkt"
          "../libexec/rackup/state.rkt"
+         "../libexec/rackup/state-lock.rkt"
          "../libexec/rackup/util.rkt"
          "../libexec/rackup/versioning.rkt"
          (only-in (submod "../libexec/rackup/install.rkt" for-testing)
@@ -53,7 +54,7 @@
   (with-temp-rackup-home
    (lambda (_tmp)
      (ensure-index!)
-     (reshim!)
+     (with-state-lock (reshim!))
      (define shims-dir (rackup-shims-dir))
      (for ([exe '("racket" "raco")])
        (define shim (build-path shims-dir exe))
@@ -85,20 +86,21 @@
                         "#!/usr/bin/env bash\nexit 23\n")
      (file-or-directory-permissions (build-path real-bin "racket") #o755)
      (make-file-or-directory-link real-bin (rackup-toolchain-bin-link id))
-     (register-toolchain!
-      id
-      (hash 'id id
-            'kind 'release
-            'requested-spec "stable"
-            'resolved-version "8.18"
-            'variant 'cs
-            'distribution 'full
-            'arch "x86_64"
-            'platform "linux"
-            'executables '("racket")
-            'installed-at "2026-02-28T00:00:00Z"))
-     (set-default-toolchain! id)
-     (reshim!)
+     (with-state-lock
+       (register-toolchain!
+        id
+        (hash 'id id
+              'kind 'release
+              'requested-spec "stable"
+              'resolved-version "8.18"
+              'variant 'cs
+              'distribution 'full
+              'arch "x86_64"
+              'platform "linux"
+              'executables '("racket")
+              'installed-at "2026-02-28T00:00:00Z"))
+       (set-default-toolchain! id)
+       (reshim!))
      (expect/shell (list (path->string (build-path (rackup-shims-dir) "racket")) "--version")
                    #:status 23 "")))
 
@@ -139,20 +141,21 @@
      (file-or-directory-permissions (build-path real-bin "drracket") #o755)
      ;; bin is a symlink to install/bin — this is the normal rackup layout
      (make-file-or-directory-link real-bin (rackup-toolchain-bin-link id))
-     (register-toolchain!
-      id
-      (hash 'id id
-            'kind 'release
-            'requested-spec "stable"
-            'resolved-version "9.1"
-            'variant 'cs
-            'distribution 'full
-            'arch "x86_64"
-            'platform "linux"
-            'executables '("racket" "drracket")
-            'installed-at "2026-03-10T00:00:00Z"))
-     (set-default-toolchain! id)
-     (reshim!)
+     (with-state-lock
+       (register-toolchain!
+        id
+        (hash 'id id
+              'kind 'release
+              'requested-spec "stable"
+              'resolved-version "9.1"
+              'variant 'cs
+              'distribution 'full
+              'arch "x86_64"
+              'platform "linux"
+              'executables '("racket" "drracket")
+              'installed-at "2026-03-10T00:00:00Z"))
+       (set-default-toolchain! id)
+       (reshim!))
      ;; Test 1: racket shim invokes through the resolved path
      (define-values (proc stdout stdin stderr)
        (subprocess #f #f #f (build-path (rackup-shims-dir) "racket")))
@@ -231,7 +234,7 @@
                                    '("racket")
                                    'installed-at
                                    "2026-02-26T00:00:00Z"))
-                           (register-toolchain! id meta)
+                           (with-state-lock (register-toolchain! id meta))
                            (check-equal? (get-default-toolchain) id)
                            (check-equal? (find-local-toolchain "release-8.18") id)
                            @expect[(run-main '("prompt"))]{racket-8.18
@@ -284,7 +287,7 @@
                                   (putenv "RACKUP_TOOLCHAIN" old-env-id)
                                   (putenv "RACKUP_TOOLCHAIN" ""))))
 
-                           (reshim!)
+                           (with-state-lock (reshim!))
                            (check-true (link-exists? (build-path (rackup-shims-dir) "racket")))
                            (check-true (link-exists? (build-path (rackup-shims-dir) "rackup")))
                            (define dispatcher-src (file->string (rackup-shim-dispatcher)))
@@ -317,7 +320,7 @@
                            (check-equal? (path->string (resolve-executable-path "resyntax"))
                                          (path->string fake-exe))
                            ;; reshim picks up addon-bin executables
-                           (reshim!)
+                           (with-state-lock (reshim!))
                            (check-true (link-exists? (build-path (rackup-shims-dir) "resyntax")))
                            ;; dispatcher source includes addon fallback
                            (check-true (string-contains? dispatcher-src "ADDON_TARGET"))))
@@ -384,8 +387,9 @@
              '("mzscheme")
              'installed-at
              "2026-02-27T00:00:00Z"))
-     (register-toolchain! id meta)
-     (reshim!)
+     (with-state-lock
+       (register-toolchain! id meta)
+       (reshim!))
      (define mzscheme-out
        (capture-output
         (lambda () (system* (build-path (rackup-shims-dir) "mzscheme")))))
@@ -422,23 +426,24 @@
                         (format "#!/usr/bin/env bash\nexport PLTHOME='~a'\n"
                                 (path->string plthome)))
      (make-file-or-directory-link real-bin (rackup-toolchain-bin-link id))
-     (register-toolchain!
-      id
-      (hash 'id id
-            'kind 'release
-            'requested-spec "103p1"
-            'resolved-version "103p1"
-            'variant 'bc
-            'distribution 'full
-            'arch "i386"
-            'platform "linux"
-            'install-root (path->string install-root)
-            'bin-link (path->string (rackup-toolchain-bin-link id))
-            'real-bin-dir (path->string real-bin)
-            'executables '("racket")
-            'installed-at "2026-02-28T00:00:00Z"))
-     (set-default-toolchain! id)
-     (reshim!)
+     (with-state-lock
+       (register-toolchain!
+        id
+        (hash 'id id
+              'kind 'release
+              'requested-spec "103p1"
+              'resolved-version "103p1"
+              'variant 'bc
+              'distribution 'full
+              'arch "i386"
+              'platform "linux"
+              'install-root (path->string install-root)
+              'bin-link (path->string (rackup-toolchain-bin-link id))
+              'real-bin-dir (path->string real-bin)
+              'executables '("racket")
+              'installed-at "2026-02-28T00:00:00Z"))
+       (set-default-toolchain! id)
+       (reshim!))
      (define old-binfmt-dir (getenv "RACKUP_TEST_BINFMT_MISC_DIR"))
      (define old-host-machine (getenv "RACKUP_TEST_HOST_MACHINE"))
      (define old-assume-loader (getenv "RACKUP_TEST_ASSUME_I386_LOADER"))
@@ -647,7 +652,7 @@
          (ensure-index!)
          (define linked-id
            (link-toolchain! "realsrc" (path->string source-root) '("--set-default")))
-         (reshim!)
+         (with-state-lock (reshim!))
          (define raco-shim (build-path (rackup-shims-dir) "raco"))
          (define old-pltaddon (getenv "PLTADDONDIR"))
          (define old-pltcollects (getenv "PLTCOLLECTS"))
@@ -1255,7 +1260,7 @@
              '("racket")
              'installed-at
              "2026-02-26T00:00:00Z"))
-     (register-toolchain! id meta)
+     (with-state-lock (register-toolchain! id meta))
      (expect (run-main '("current" "id")) (format "~a\n" id))
      @expect[(run-main '("current" "source"))]{default
 }
@@ -1310,43 +1315,44 @@
      (write-string-file racket-exe "#!/usr/bin/env bash\necho test\n")
      (file-or-directory-permissions racket-exe #o755)
      (make-file-or-directory-link real-bin (rackup-toolchain-bin-link id))
-     (register-toolchain!
-      id
-      (hash 'id
-            id
-            'kind
-            'release
-            'requested-spec
-            "stable"
-            'resolved-version
-            "8.18"
-            'variant
-            'cs
-            'distribution
-            'full
-            'arch
-            "x86_64"
-            'platform
-            "linux"
-            'snapshot-site
-            #f
-            'snapshot-stamp
-            #f
-            'installer-url
-            "https://example.invalid/racket.sh"
-            'installer-filename
-            "racket.sh"
-            'install-root
-            (path->string install-root)
-            'bin-link
-            (path->string (rackup-toolchain-bin-link id))
-            'real-bin-dir
-            (path->string real-bin)
-            'executables
-            '("racket")
-            'installed-at
-            "2026-02-26T00:00:00Z"))
-     (reshim!)
+     (with-state-lock
+       (register-toolchain!
+        id
+        (hash 'id
+              id
+              'kind
+              'release
+              'requested-spec
+              "stable"
+              'resolved-version
+              "8.18"
+              'variant
+              'cs
+              'distribution
+              'full
+              'arch
+              "x86_64"
+              'platform
+              "linux"
+              'snapshot-site
+              #f
+              'snapshot-stamp
+              #f
+              'installer-url
+              "https://example.invalid/racket.sh"
+              'installer-filename
+              "racket.sh"
+              'install-root
+              (path->string install-root)
+              'bin-link
+              (path->string (rackup-toolchain-bin-link id))
+              'real-bin-dir
+              (path->string real-bin)
+              'executables
+              '("racket")
+              'installed-at
+              "2026-02-26T00:00:00Z"))
+       (reshim!))
      (define old-env-id (getenv "RACKUP_TOOLCHAIN"))
      (dynamic-wind
       (lambda () (putenv "RACKUP_TOOLCHAIN" "release-103-bc-i386-linux-full"))
@@ -1491,17 +1497,18 @@
        (write-string-file racket-exe "#!/usr/bin/env bash\necho test\n")
        (file-or-directory-permissions racket-exe #o755)
        (make-file-or-directory-link real-bin (rackup-toolchain-bin-link id))
-       (register-toolchain! id
-                            (hash 'id id
-                                  'kind 'release
-                                  'requested-spec version
-                                  'resolved-version version
-                                  'variant variant
-                                  'distribution distribution
-                                  'arch "x86_64"
-                                  'platform "linux"
-                                  'executables '("racket")
-                                  'installed-at "2026-02-26T00:00:00Z")))
+       (with-state-lock
+         (register-toolchain! id
+                              (hash 'id id
+                                    'kind 'release
+                                    'requested-spec version
+                                    'resolved-version version
+                                    'variant variant
+                                    'distribution distribution
+                                    'arch "x86_64"
+                                    'platform "linux"
+                                    'executables '("racket")
+                                    'installed-at "2026-02-26T00:00:00Z"))))
 
      (define id-full "release-9.0-cs-x86_64-linux-full")
      (define id-minimal "release-9.0-cs-x86_64-linux-minimal")
@@ -1576,11 +1583,12 @@
      (write-string-file racket-exe "#!/usr/bin/env bash\necho test\n")
      (file-or-directory-permissions racket-exe #o755)
      (make-file-or-directory-link real-bin (rackup-toolchain-bin-link id))
-     (register-toolchain! id
-                          (hash 'id id 'kind 'release 'requested-spec "9.0"
-                                'resolved-version "9.0" 'variant 'cs 'distribution 'full
-                                'arch "x86_64" 'platform "linux"
-                                'executables '("racket") 'installed-at "2026-02-26T00:00:00Z"))
+     (with-state-lock
+       (register-toolchain! id
+                            (hash 'id id 'kind 'release 'requested-spec "9.0"
+                                  'resolved-version "9.0" 'variant 'cs 'distribution 'full
+                                  'arch "x86_64" 'platform "linux"
+                                  'executables '("racket") 'installed-at "2026-02-26T00:00:00Z")))
 
      ;; Poison all sanitized Racket env vars
      (define saved-vars
@@ -1616,24 +1624,25 @@
                           (format "#!/usr/bin/env bash\nprintf '~a'\n" version))
        (file-or-directory-permissions racket-exe #o755)
        (make-file-or-directory-link real-bin (rackup-toolchain-bin-link id))
-       (register-toolchain! id
-                            (hash 'id id
-                                  'kind 'release
-                                  'requested-spec spec
-                                  'resolved-version version
-                                  'variant 'cs
-                                  'distribution 'full
-                                  'arch "x86_64"
-                                  'platform "linux"
-                                  'snapshot-site #f
-                                  'snapshot-stamp #f
-                                  'installer-url (format "https://example.invalid/racket-~a.sh" version)
-                                  'installer-filename (format "racket-~a-x86_64-linux-cs.sh" version)
-                                  'install-root (path->string install-root)
-                                  'bin-link (path->string (rackup-toolchain-bin-link id))
-                                  'real-bin-dir (path->string real-bin)
-                                  'executables '("racket")
-                                  'installed-at "2026-01-15T00:00:00Z")))
+       (with-state-lock
+         (register-toolchain! id
+                              (hash 'id id
+                                    'kind 'release
+                                    'requested-spec spec
+                                    'resolved-version version
+                                    'variant 'cs
+                                    'distribution 'full
+                                    'arch "x86_64"
+                                    'platform "linux"
+                                    'snapshot-site #f
+                                    'snapshot-stamp #f
+                                    'installer-url (format "https://example.invalid/racket-~a.sh" version)
+                                    'installer-filename (format "racket-~a-x86_64-linux-cs.sh" version)
+                                    'install-root (path->string install-root)
+                                    'bin-link (path->string (rackup-toolchain-bin-link id))
+                                    'real-bin-dir (path->string real-bin)
+                                    'executables '("racket")
+                                    'installed-at "2026-01-15T00:00:00Z"))))
 
      ;; Step 1: Install 9.0 as the initial toolchain (simulating prior state)
      (define id-90 "release-9.0-cs-x86_64-linux-full")
@@ -1658,7 +1667,7 @@
      (check-equal? (get-default-toolchain) id-90)
 
      ;; Switch default to 9.1
-     (set-default-toolchain! id-91)
+     (with-state-lock (set-default-toolchain! id-91))
      (check-equal? (get-default-toolchain) id-91)
 
      ;; Verify both toolchains have valid metadata
@@ -1672,7 +1681,7 @@
      (check-true (string-contains? list-out "[default,active,stable]"))
 
      ;; Reshim and verify shim dispatches to 9.1 (the new default)
-     (reshim!)
+     (with-state-lock (reshim!))
      (define shim-out
        (capture-output
         (lambda () (system* (build-path (rackup-shims-dir) "racket")))))
@@ -1716,11 +1725,12 @@
      (write-string-file (build-path real-bin "racket") "#!/usr/bin/env bash\nexit 0\n")
      (file-or-directory-permissions (build-path real-bin "racket") #o755)
      (make-file-or-directory-link real-bin (rackup-toolchain-bin-link id))
-     (register-toolchain! id
-                          (hash 'id id 'kind 'release 'requested-spec "9.0"
-                                'resolved-version "9.0" 'variant 'cs 'distribution 'full
-                                'arch "x86_64" 'platform "linux"
-                                'executables '("racket") 'installed-at "2026-01-15T00:00:00Z"))
+     (with-state-lock
+       (register-toolchain! id
+                            (hash 'id id 'kind 'release 'requested-spec "9.0"
+                                  'resolved-version "9.0" 'variant 'cs 'distribution 'full
+                                  'arch "x86_64" 'platform "linux"
+                                  'executables '("racket") 'installed-at "2026-01-15T00:00:00Z")))
      ;; Re-run ensure-index! (simulating what happens after self-upgrade)
      (define idx3 (ensure-index!))
      (check-true (toolchain-exists? id idx3))
@@ -1738,18 +1748,19 @@
      (write-string-file (build-path real-bin "racket") "#!/usr/bin/env bash\necho 9.0\n")
      (file-or-directory-permissions (build-path real-bin "racket") #o755)
      (make-file-or-directory-link real-bin (rackup-toolchain-bin-link id-90))
-     (register-toolchain! id-90
-                          (hash 'id id-90 'kind 'release 'requested-spec "stable"
-                                'resolved-version "9.0" 'variant 'cs 'distribution 'full
-                                'arch "x86_64" 'platform "linux"
-                                'snapshot-site #f 'snapshot-stamp #f
-                                'installer-url "https://example.invalid/racket-9.0.sh"
-                                'installer-filename "racket-9.0-x86_64-linux-cs.sh"
-                                'install-root (path->string install-root)
-                                'bin-link (path->string (rackup-toolchain-bin-link id-90))
-                                'real-bin-dir (path->string real-bin)
-                                'executables '("racket")
-                                'installed-at "2026-01-15T00:00:00Z"))
+     (with-state-lock
+       (register-toolchain! id-90
+                            (hash 'id id-90 'kind 'release 'requested-spec "stable"
+                                  'resolved-version "9.0" 'variant 'cs 'distribution 'full
+                                  'arch "x86_64" 'platform "linux"
+                                  'snapshot-site #f 'snapshot-stamp #f
+                                  'installer-url "https://example.invalid/racket-9.0.sh"
+                                  'installer-filename "racket-9.0-x86_64-linux-cs.sh"
+                                  'install-root (path->string install-root)
+                                  'bin-link (path->string (rackup-toolchain-bin-link id-90))
+                                  'real-bin-dir (path->string real-bin)
+                                  'executables '("racket")
+                                  'installed-at "2026-01-15T00:00:00Z")))
 
      ;; Fake the self-upgrade: a script that just touches a marker file
      ;; but doesn't modify state (simulating install.sh --prefix preserving state)
@@ -1800,24 +1811,25 @@
                           (format "#!/usr/bin/env bash\nprintf '~a (~a)'\n" version site))
        (file-or-directory-permissions racket-exe #o755)
        (make-file-or-directory-link real-bin (rackup-toolchain-bin-link id))
-       (register-toolchain! id
-                            (hash 'id id
-                                  'kind 'snapshot
-                                  'requested-spec (format "snapshot:~a" site)
-                                  'resolved-version version
-                                  'variant 'cs
-                                  'distribution 'full
-                                  'arch "x86_64"
-                                  'platform "linux"
-                                  'snapshot-site site
-                                  'snapshot-stamp stamp
-                                  'installer-url (format "https://~a.example/snapshots/~a/racket.sh" site stamp)
-                                  'installer-filename (format "racket-~a-x86_64-linux-cs.sh" version)
-                                  'install-root (path->string install-root)
-                                  'bin-link (path->string (rackup-toolchain-bin-link id))
-                                  'real-bin-dir (path->string real-bin)
-                                  'executables '("racket")
-                                  'installed-at "2026-03-01T00:00:00Z"))
+       (with-state-lock
+         (register-toolchain! id
+                              (hash 'id id
+                                    'kind 'snapshot
+                                    'requested-spec (format "snapshot:~a" site)
+                                    'resolved-version version
+                                    'variant 'cs
+                                    'distribution 'full
+                                    'arch "x86_64"
+                                    'platform "linux"
+                                    'snapshot-site site
+                                    'snapshot-stamp stamp
+                                    'installer-url (format "https://~a.example/snapshots/~a/racket.sh" site stamp)
+                                    'installer-filename (format "racket-~a-x86_64-linux-cs.sh" version)
+                                    'install-root (path->string install-root)
+                                    'bin-link (path->string (rackup-toolchain-bin-link id))
+                                    'real-bin-dir (path->string real-bin)
+                                    'executables '("racket")
+                                    'installed-at "2026-03-01T00:00:00Z")))
        id)
 
      ;; Register a Utah snapshot
@@ -1849,16 +1861,18 @@
      (check-equal? (hash-ref nw-meta 'resolved-version) "9.1.0.6")
 
      ;; Set Utah as default, verify shim resolves to it
-     (set-default-toolchain! utah-id)
-     (reshim!)
+     (with-state-lock
+       (set-default-toolchain! utah-id)
+       (reshim!))
      (define shim-out
        (capture-output
         (lambda () (system* (build-path (rackup-shims-dir) "racket")))))
      (check-true (string-contains? shim-out "9.1.0.7 (utah)"))
 
      ;; Switch to Northwestern, verify
-     (set-default-toolchain! nw-id)
-     (reshim!)
+     (with-state-lock
+       (set-default-toolchain! nw-id)
+       (reshim!))
      (define shim-out2
        (capture-output
         (lambda () (system* (build-path (rackup-shims-dir) "racket")))))
@@ -1893,24 +1907,25 @@
                           (format "#!/usr/bin/env bash\nprintf '~a'\n" version))
        (file-or-directory-permissions (build-path real-bin "racket") #o755)
        (make-file-or-directory-link real-bin (rackup-toolchain-bin-link id))
-       (register-toolchain! id
-                            (hash 'id id
-                                  'kind 'snapshot
-                                  'requested-spec "snapshot:utah"
-                                  'resolved-version version
-                                  'variant 'cs
-                                  'distribution 'full
-                                  'arch "x86_64"
-                                  'platform "linux"
-                                  'snapshot-site 'utah
-                                  'snapshot-stamp stamp
-                                  'installer-url (format "https://utah.example/snapshots/~a/racket.sh" stamp)
-                                  'installer-filename (format "racket-~a-x86_64-linux-cs.sh" version)
-                                  'install-root (path->string install-root)
-                                  'bin-link (path->string (rackup-toolchain-bin-link id))
-                                  'real-bin-dir (path->string real-bin)
-                                  'executables '("racket")
-                                  'installed-at "2026-03-01T00:00:00Z"))
+       (with-state-lock
+         (register-toolchain! id
+                              (hash 'id id
+                                    'kind 'snapshot
+                                    'requested-spec "snapshot:utah"
+                                    'resolved-version version
+                                    'variant 'cs
+                                    'distribution 'full
+                                    'arch "x86_64"
+                                    'platform "linux"
+                                    'snapshot-site 'utah
+                                    'snapshot-stamp stamp
+                                    'installer-url (format "https://utah.example/snapshots/~a/racket.sh" stamp)
+                                    'installer-filename (format "racket-~a-x86_64-linux-cs.sh" version)
+                                    'install-root (path->string install-root)
+                                    'bin-link (path->string (rackup-toolchain-bin-link id))
+                                    'real-bin-dir (path->string real-bin)
+                                    'executables '("racket")
+                                    'installed-at "2026-03-01T00:00:00Z")))
        id)
 
      ;; Install old snapshot
@@ -1925,8 +1940,9 @@
      (check-equal? (length (installed-toolchain-ids)) 2)
 
      ;; Switch to new snapshot
-     (set-default-toolchain! new-id)
-     (reshim!)
+     (with-state-lock
+       (set-default-toolchain! new-id)
+       (reshim!))
      (define shim-out
        (capture-output
         (lambda () (system* (build-path (rackup-shims-dir) "racket")))))
@@ -1954,12 +1970,13 @@
                         "#!/usr/bin/env bash\nprintf 'PLTCOMPILEDROOTS=%s\\n' \"${PLTCOMPILEDROOTS:-}\"\n")
      (file-or-directory-permissions print-env #o755)
      (make-file-or-directory-link real-bin (rackup-toolchain-bin-link id))
-     (register-toolchain! id
-                          (hash 'id id 'kind 'release 'requested-spec "9.0"
-                                'resolved-version "9.0" 'variant 'cs 'distribution 'full
-                                'arch "x86_64" 'platform "linux"
-                                'executables '("racket" "print-compiled-roots")
-                                'installed-at "2026-02-26T00:00:00Z"))
+     (with-state-lock
+       (register-toolchain! id
+                            (hash 'id id 'kind 'release 'requested-spec "9.0"
+                                  'resolved-version "9.0" 'variant 'cs 'distribution 'full
+                                  'arch "x86_64" 'platform "linux"
+                                  'executables '("racket" "print-compiled-roots")
+                                  'installed-at "2026-02-26T00:00:00Z")))
 
      (define old-cr (getenv "PLTCOMPILEDROOTS"))
      (dynamic-wind

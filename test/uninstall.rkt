@@ -10,6 +10,7 @@
          "../libexec/rackup/paths.rkt"
          "../libexec/rackup/rktd-io.rkt"
          "../libexec/rackup/state.rkt"
+         "../libexec/rackup/state-lock.rkt"
          (submod "../libexec/rackup/main.rkt" for-testing))
 
 (define-runtime-path repo-root "..")
@@ -103,19 +104,20 @@
      (ensure-index!)
      (define id "local-dev")
      (define source-path "/tmp/external-racket-tree")
-     (register-toolchain!
-      id
-      (hash 'id id
-            'kind 'local
-            'requested-spec "dev"
-            'resolved-version "local"
-            'variant 'cs
-            'distribution 'in-place
-            'arch "x86_64"
-            'platform "linux"
-            'source-path source-path
-            'executables '("racket")
-            'installed-at "2026-02-28T00:00:00Z"))
+     (with-state-lock
+      (register-toolchain!
+       id
+       (hash 'id id
+             'kind 'local
+             'requested-spec "dev"
+             'resolved-version "local"
+             'variant 'cs
+             'distribution 'in-place
+             'arch "x86_64"
+             'platform "linux"
+             'source-path source-path
+             'executables '("racket")
+             'installed-at "2026-02-28T00:00:00Z")))
      (let-values ([(out err)
                    (parameterize ([current-remove-shell-init-blocks-proc (lambda () null)]
                                   [current-uninstall-system*-proc (lambda _args #t)])
@@ -127,28 +129,29 @@
   (with-temp-rackup-home
    (lambda (_tmp-home)
      (ensure-index!)
-     (register-toolchain!
-      "release-good"
-      (hash 'id "release-good"
-            'kind 'release
-            'resolved-version "9.1"
-            'variant 'cs
-            'distribution 'full
-            'arch "x86_64"
-            'platform "linux"
-            'executables '("racket")
-            'installed-at "2026-02-28T00:00:00Z"))
-     (register-toolchain!
-      "release-bad"
-      (hash 'id "release-bad"
-            'kind 'release
-            'resolved-version "8.18"
-            'variant 'cs
-            'distribution 'full
-            'arch "x86_64"
-            'platform "linux"
-            'executables '("racket")
-            'installed-at "2026-02-28T00:00:00Z"))
+     (with-state-lock
+      (register-toolchain!
+       "release-good"
+       (hash 'id "release-good"
+             'kind 'release
+             'resolved-version "9.1"
+             'variant 'cs
+             'distribution 'full
+             'arch "x86_64"
+             'platform "linux"
+             'executables '("racket")
+             'installed-at "2026-02-28T00:00:00Z"))
+      (register-toolchain!
+       "release-bad"
+       (hash 'id "release-bad"
+             'kind 'release
+             'resolved-version "8.18"
+             'variant 'cs
+             'distribution 'full
+             'arch "x86_64"
+             'platform "linux"
+             'executables '("racket")
+             'installed-at "2026-02-28T00:00:00Z")))
      (write-string-file (rackup-toolchain-meta-file "release-bad") "not-rktd")
      (define metas (installed-toolchain-metas/safe))
      (check-equal? (length metas) 1)

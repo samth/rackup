@@ -8,6 +8,7 @@
          racket/string
          "paths.rkt"
          "state.rkt"
+         "state-lock.rkt"
          "rktd-io.rkt"
          "util.rkt")
 
@@ -331,14 +332,14 @@ EOF
 (define (shim-aliases-installed?)
   (file-exists? (rackup-shim-aliases-file)))
 
-(define (install-shim-aliases!)
+(define/state-locked (install-shim-aliases!)
   (write-string-file (rackup-shim-aliases-file) ""))
 
-(define (remove-shim-aliases!)
+(define/state-locked (remove-shim-aliases!)
   (when (file-exists? (rackup-shim-aliases-file))
     (delete-file (rackup-shim-aliases-file))))
 
-(define (reshim!)
+(define/state-locked (reshim!)
   (ensure-shim-dispatcher!)
   (ensure-core-rackup-shim!)
   (define shims-dir (rackup-shims-dir))

@@ -9,13 +9,13 @@
          racket/string
          racket/system
          "legacy.rkt"
-         "lock.rkt"
          "paths.rkt"
          "remote.rkt"
          "rktd-io.rkt"
          "runtime.rkt"
          "shims.rkt"
          "state.rkt"
+         "state-lock.rkt"
          "util.rkt"
          "versioning.rkt")
 
@@ -29,15 +29,12 @@
          doctor-report
          commit-state-change!)
 
-(define-file-lock with-state-lock (rackup-state-lock-dir) "rackup state")
-
-;; Acquire the state lock, run thunk (which should mutate index/default/etc.),
-;; then reshim to keep shims consistent with the new state.
-(define (commit-state-change! thunk)
+;; Acquire the state lock, run body, then reshim to keep shims
+;; consistent with the new state.
+(define-syntax-rule (commit-state-change! body ...)
   (with-state-lock
-   (lambda ()
-     (thunk)
-     (reshim!))))
+   body ...
+   (reshim!)))
 
 (define current-install-verbosity (make-parameter 'normal))
 
@@ -826,10 +823,9 @@
        (define executables (enumerate-toolchain-executables (rackup-toolchain-bin-link id)))
        (define meta (local-toolchain-meta id name layout real-bin-dir executables env-vars version* variant*))
        (commit-state-change!
-        (lambda ()
-          (register-toolchain! id meta)
-          (when (hash-ref parsed-opts 'set-default? #f)
-            (set-default-toolchain! id))))
+        (register-toolchain! id meta)
+        (when (hash-ref parsed-opts 'set-default? #f)
+          (set-default-toolchain! id)))
        (displayln (format "Linked ~a => ~a" id (hash-ref layout 'input-path)))
        id)]))
 
@@ -903,9 +899,8 @@
       [(directory-exists? tc-dir)
        (install-ok "Already installed: ~a" id)
        (commit-state-change!
-        (lambda ()
-          (when explicit-default?
-            (set-default-toolchain! id))))
+        (when explicit-default?
+          (set-default-toolchain! id)))
        (report-default-change! default-before (get-default-toolchain) id explicit-default?)
        id]
       [else
@@ -947,10 +942,9 @@
          (define executables (enumerate-toolchain-executables real-bin-dir))
          (define meta (toolchain-meta request id real-bin-dir executables env-vars))
          (commit-state-change!
-          (lambda ()
-            (register-toolchain! id meta)
-            (when explicit-default?
-              (set-default-toolchain! id))))
+          (register-toolchain! id meta)
+          (when explicit-default?
+            (set-default-toolchain! id)))
          (install-ok "Installed ~a" id)
          (report-default-change! default-before (get-default-toolchain) id explicit-default?)
          id)])))
@@ -966,8 +960,7 @@
   (when (directory-exists? addon)
     (delete-directory/files addon))
   (commit-state-change!
-   (lambda ()
-     (unregister-toolchain! id)))
+   (unregister-toolchain! id))
   (displayln (format "Removed ~a" id)))
 
 (define (doctor-report)

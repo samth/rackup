@@ -21,6 +21,7 @@
          "shell.rkt"
          "shims.rkt"
          "state.rkt"
+         "state-lock.rkt"
          "util.rkt"
          "versioning.rkt")
 
@@ -137,7 +138,7 @@
   (when (directory-exists? addon)
     (delete-directory/files addon))
   (with-handlers ([exn:fail? (lambda (_) (void))])
-    (reshim!))
+    (with-state-lock (reshim!)))
   (displayln (format "Removed orphan/partial toolchain directory ~a" id)))
 
 (define (yes?/default-yes s)
@@ -251,8 +252,7 @@
 (define (set-default-from-spec! spec)
   (define id (resolve-toolchain-or-offer-install spec))
   (commit-state-change!
-   (lambda ()
-     (set-default-toolchain! id)))
+   (set-default-toolchain! id))
   (displayln (format "Default toolchain: ~a" id)))
 
 (define (cmd-default rest)
@@ -267,7 +267,7 @@
                   args))
   (cond
     [unset?
-     (commit-state-change! (lambda () (clear-default-toolchain!)))
+     (commit-state-change! (clear-default-toolchain!))
      (displayln "Cleared default toolchain.")]
     [else
      (match args
@@ -281,7 +281,7 @@
        [(list "set" spec)
         (set-default-from-spec! spec)]
        [(list "clear")
-        (commit-state-change! (lambda () (clear-default-toolchain!)))
+        (commit-state-change! (clear-default-toolchain!))
         (displayln "Cleared default toolchain.")]
        [(list spec)
         (set-default-from-spec! spec)]
@@ -381,7 +381,7 @@
                 #:args ()
                 (void))
   (define rc (init-shell! shell-name))
-  (reshim!)
+  (with-state-lock (reshim!))
   (printf "Initialized shell integration in ~a\n" (path->string rc)))
 
 (define (split-on-double-dash xs)
@@ -463,9 +463,8 @@
                 (void))
   (ensure-index!)
   (commit-state-change!
-   (lambda ()
-     (when aliases? (install-shim-aliases!))
-     (when no-aliases? (remove-shim-aliases!))))
+   (when aliases? (install-shim-aliases!))
+   (when no-aliases? (remove-shim-aliases!)))
   (displayln "Reshim complete."))
 
 ;; Reorder install args so flags precede the positional spec.
@@ -512,8 +511,8 @@
                   spec))
   (void (install-toolchain! spec (reverse opts-rev)))
   (when short-aliases?
-    (install-shim-aliases!)
-    (reshim!)))
+    (commit-state-change!
+     (install-shim-aliases!))))
 
 (define (prompt-short-label id)
   (define meta (and id (read-toolchain-meta id)))
