@@ -584,9 +584,8 @@
      ;; PLTHOME should be the checkout root, not the racket/ subdirectory
      (check-true (regexp-match? (regexp (regexp-quote (format "PLTHOME=~a" (path->string src-root))))
                                 shim-out))
-     (check-true (regexp-match? (regexp (regexp-quote (format "PLTCOLLECTS=~a:~a"
-                                                              (path->string collects-dir)
-                                                              (path->string pkgs-dir))))
+     (check-true (regexp-match? (regexp (regexp-quote (format "PLTCOLLECTS=~a"
+                                                              (path->string collects-dir))))
                                 shim-out))
      (check-true (regexp-match?
                   (regexp (regexp-quote (format "PLTADDONDIR=~a"
@@ -688,9 +687,8 @@
         (lambda () (system* (build-path (rackup-shims-dir) "racket")))))
      (check-true (regexp-match? (regexp (regexp-quote (format "PLTHOME=~a" (path->string plthome))))
                                 shim-out))
-     (check-true (regexp-match? (regexp (regexp-quote (format "PLTCOLLECTS=~a:~a"
-                                                              (path->string collects-dir)
-                                                              (path->string pkgs-dir))))
+     (check-true (regexp-match? (regexp (regexp-quote (format "PLTCOLLECTS=~a"
+                                                              (path->string collects-dir))))
                                 shim-out))
      (check-true (regexp-match? (regexp (regexp-quote (format "PLTADDONDIR=~a"
                                                               (path->string addon-dir))))

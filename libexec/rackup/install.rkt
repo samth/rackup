@@ -558,10 +558,11 @@
   ;; matching the plt-bin convention.  For installed-prefix layouts
   ;; (no source-root), use the racket installation directory.
   (define plthome-env (or source-root (hash-ref layout 'plthome)))
-  (define collects-path
-    (if pkgs-dir
-        (path-join/colon (list collects-dir pkgs-dir))
-        (path-join/colon (list collects-dir))))
+  ;; Only include the collects dir in PLTCOLLECTS.  Packages in pkgs/ are
+  ;; discovered through links.rktd and do not need to be on the collection
+  ;; search path; including them causes "tool registered twice" warnings from
+  ;; raco because tools get found through both links and PLTCOLLECTS.
+  (define collects-path (path-join/colon (list collects-dir)))
   ;; For source checkouts, default PLTADDONDIR to <checkout>/add-on
   ;; (matching the plt-bin convention).
   (define effective-addon-dir
