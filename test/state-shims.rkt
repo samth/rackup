@@ -1420,6 +1420,30 @@
             (putenv "RACKUP_SELF_UPGRADE_INSTALL_SH" old-override)
             (putenv "RACKUP_SELF_UPGRADE_INSTALL_SH" ""))))))
 
+  ;; self-upgrade prints completion message when SHA changes (i.e. actual update)
+  (with-temp-rackup-home
+   (lambda (tmp)
+     (ensure-index!)
+     (define fake-installer (build-path tmp "fake-install-update.sh"))
+     (define sha-file (build-path tmp ".installed-sha256"))
+     (write-string-file sha-file "old-sha")
+     (write-string-file
+      fake-installer
+      (format
+       "#!/bin/sh\nset -eu\nprintf 'new-sha' > ~s\nexit 0\n"
+       (path->string sha-file)))
+     (file-or-directory-permissions fake-installer #o755)
+     (define old-override (getenv "RACKUP_SELF_UPGRADE_INSTALL_SH"))
+     (dynamic-wind
+      (lambda () (putenv "RACKUP_SELF_UPGRADE_INSTALL_SH" (path->string fake-installer)))
+      (lambda ()
+        (expect (run-main '("self-upgrade"))
+                "Checking for updates...\nrackup code upgrade complete.\n"))
+      (lambda ()
+        (if old-override
+            (putenv "RACKUP_SELF_UPGRADE_INSTALL_SH" old-override)
+            (putenv "RACKUP_SELF_UPGRADE_INSTALL_SH" ""))))))
+
   ;; self-upgrade --exe forwards to install.sh
   (with-temp-rackup-home
    (lambda (tmp)

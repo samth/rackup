@@ -828,6 +828,9 @@
   (unless (file-exists? script-path)
     (rackup-error "self-upgrade installer script not found: ~a" source))
   (define home-str (path->string (rackup-home)))
+  (define sha-file (build-path (rackup-home) ".installed-sha256"))
+  (define sha-before
+    (and (file-exists? sha-file) (file->string sha-file)))
   (displayln "Checking for updates...")
   (define args
     (append (list "-y")
@@ -848,7 +851,11 @@
     (with-handlers ([exn:fail? (lambda (_) (void))])
       (delete-file script-path)))
   (unless ok?
-    (rackup-error "self-upgrade failed")))
+    (rackup-error "self-upgrade failed"))
+  (define sha-after
+    (and (file-exists? sha-file) (file->string sha-file)))
+  (when (not (equal? sha-before sha-after))
+    (displayln "rackup code upgrade complete.")))
 
 (define (cmd-version rest)
   (command-line #:program "rackup version"
