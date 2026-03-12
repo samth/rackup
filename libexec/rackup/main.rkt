@@ -828,9 +828,7 @@
   (unless (file-exists? script-path)
     (rackup-error "self-upgrade installer script not found: ~a" source))
   (define home-str (path->string (rackup-home)))
-  (printf "Upgrading rackup code in ~a\n" home-str)
-  (when (url-like? source)
-    (printf "Using installer script: ~a\n" source))
+  (displayln "Checking for updates...")
   (define args
     (append (list "-y")
             (if (hash-ref opts 'with-init? #f)
@@ -850,8 +848,7 @@
     (with-handlers ([exn:fail? (lambda (_) (void))])
       (delete-file script-path)))
   (unless ok?
-    (rackup-error "self-upgrade failed"))
-  (displayln "rackup code upgrade complete."))
+    (rackup-error "self-upgrade failed")))
 
 (define (cmd-version rest)
   (command-line #:program "rackup version"

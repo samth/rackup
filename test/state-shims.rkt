@@ -1405,8 +1405,7 @@
       (lambda () (putenv "RACKUP_SELF_UPGRADE_INSTALL_SH" (path->string fake-installer)))
       (lambda ()
         (expect (run-main '("self-upgrade"))
-                (format "Upgrading rackup code in ~a\nrackup code upgrade complete.\n"
-                        (path->string (rackup-home))))
+                "Checking for updates...\n")
         (let ([args-lines
                (call-with-input-file args-log
                  (lambda (in) (filter (lambda (s) (not (string=? s ""))) (port->lines in))))])
