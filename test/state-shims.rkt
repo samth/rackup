@@ -306,10 +306,12 @@
                            (check-true (string-contains? helper-src "return \"$_rackup_status\""))
 
                            ;; User-scope addon bin executables
-                           ;; resolve-executable-path falls back to addon bin
-                           (define addon-bin (build-path (rackup-addon-dir id) "bin"))
-                           (make-directory* addon-bin)
-                           (define fake-exe (build-path addon-bin "resyntax"))
+                           ;; Racket nests user-scope packages under the installation
+                           ;; name inside $PLTADDONDIR, e.g. $PLTADDONDIR/9.1/bin/resyntax.
+                           (define addon-inst-bin
+                             (build-path (rackup-addon-dir id) "9.1" "bin"))
+                           (make-directory* addon-inst-bin)
+                           (define fake-exe (build-path addon-inst-bin "resyntax"))
                            (display-to-file "#!/bin/sh\necho ok\n" fake-exe)
                            (file-or-directory-permissions fake-exe #o755)
                            (check-equal? (path->string (resolve-executable-path "resyntax"))

@@ -65,8 +65,14 @@ if [[ -z "${PLTADDONDIR:-}" ]]; then
   export PLTADDONDIR="$HOME_DIR/addons/$ACTIVE"
 fi
 if [[ ! -x "$TARGET" ]]; then
-  ADDON_TARGET="$PLTADDONDIR/bin/$SHIM_NAME"
-  if [[ -x "$ADDON_TARGET" ]]; then
+  ADDON_TARGET=""
+  for _candidate in "$PLTADDONDIR"/bin/"$SHIM_NAME" "$PLTADDONDIR"/*/bin/"$SHIM_NAME"; do
+    if [[ -x "$_candidate" ]]; then
+      ADDON_TARGET="$_candidate"
+      break
+    fi
+  done
+  if [[ -n "$ADDON_TARGET" ]]; then
     TARGET="$ADDON_TARGET"
   else
     echo "rackup: executable '$SHIM_NAME' not found in toolchain '$ACTIVE'" >&2
@@ -268,8 +274,7 @@ EOF
   (define p (build-path (rackup-toolchain-bin-link id) exe))
   (if (file-exists? p)
       p
-      (let ([addon-p (build-path (rackup-addon-dir id) "bin" exe)])
-        (if (file-exists? addon-p) addon-p #f))))
+      (find-addon-bin-exe (rackup-addon-dir id) exe)))
 
 (define (rackup-managed-shim? p)
   (and (link-exists? p)
@@ -277,14 +282,39 @@ EOF
          (or (equal? target (simplify-path (rackup-shim-dispatcher) #t))
              (equal? target (simplify-path (rackup-bin-entry) #t))))))
 
+;; Find an executable in the addon dir, checking both $PLTADDONDIR/bin/ and
+;; $PLTADDONDIR/<installation-name>/bin/ (Racket nests user-scope packages
+;; under the installation name within the addon dir).
+(define (find-addon-bin-exe addon-dir exe)
+  (define direct (build-path addon-dir "bin" exe))
+  (cond
+    [(file-exists? direct) direct]
+    [(directory-exists? addon-dir)
+     (for/or ([sub (in-list (directory-list addon-dir #:build? #t))]
+              #:when (directory-exists? sub))
+       (define candidate (build-path sub "bin" exe))
+       (and (file-exists? candidate) candidate))]
+    [else #f]))
+
 (define (addon-bin-executables id)
-  (define addon-bin (build-path (rackup-addon-dir id) "bin"))
-  (if (directory-exists? addon-bin)
-      (for/list ([p (in-list (directory-list addon-bin #:build? #t))]
-                 #:when (and (file-exists? p)
-                             (member 'execute (file-or-directory-permissions p))))
-        (path-basename-string p))
-      null))
+  (define addon-dir (rackup-addon-dir id))
+  ;; Collect executables from $addon-dir/bin/ and $addon-dir/*/bin/
+  (define (bin-dir-executables bin-dir)
+    (if (directory-exists? bin-dir)
+        (for/list ([p (in-list (directory-list bin-dir #:build? #t))]
+                   #:when (and (file-exists? p)
+                               (member 'execute (file-or-directory-permissions p))))
+          (path-basename-string p))
+        null))
+  (define direct (bin-dir-executables (build-path addon-dir "bin")))
+  (define nested
+    (if (directory-exists? addon-dir)
+        (append*
+         (for/list ([sub (in-list (directory-list addon-dir #:build? #t))]
+                    #:when (directory-exists? sub))
+           (bin-dir-executables (build-path sub "bin"))))
+        null))
+  (remove-duplicates (append direct nested)))
 
 (define (all-installed-executables)
   (define ids (installed-toolchain-ids))
