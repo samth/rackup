@@ -39,7 +39,7 @@
 
 (define baked-version (bake-version))
 
-(define-runtime-path rackup-repo-dir "../..")
+(define-runtime-path rackup-repo-anchor "../../.gitignore")
 
 (define (usage-line cmd desc)
   (printf "  ~a~a~a\n" cmd (make-string (max 2 (- 22 (string-length cmd))) #\space) desc))
@@ -881,7 +881,7 @@
                 (apply system* git args))
               (let ([s (string-trim (get-output-string out))])
                 (and (not (string-blank? s)) s)))))
-     (define dir (path->string rackup-repo-dir))
+     (define dir (path->string (let-values ([(d _n _d) (split-path rackup-repo-anchor)]) d)))
      (define commit (git-output "-C" dir "rev-parse" "--short" "HEAD"))
      (define date (git-output "-C" dir "log" "-1" "--format=%ci" "HEAD"))
      (cond
