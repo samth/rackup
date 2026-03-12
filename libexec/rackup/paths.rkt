@@ -20,6 +20,7 @@
          rackup-runtime-versions-dir
          rackup-runtime-current-link
          rackup-runtime-lock-dir
+         rackup-state-lock-dir
          rackup-runtime-version-dir
          rackup-runtime-install-dir
          rackup-runtime-meta-file
@@ -80,6 +81,8 @@
   (build-path (rackup-runtime-dir) "current"))
 (define (rackup-runtime-lock-dir)
   (build-path (rackup-runtime-dir) ".lock"))
+(define (rackup-state-lock-dir)
+  (build-path (rackup-state-dir) ".lock"))
 
 (define (rackup-runtime-version-dir id)
   (build-path (rackup-runtime-versions-dir) id))

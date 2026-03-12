@@ -9,6 +9,7 @@
          racket/string
          racket/system
          "legacy.rkt"
+         "lock.rkt"
          "paths.rkt"
          "remote.rkt"
          "rktd-io.rkt"
@@ -25,7 +26,18 @@
          run-tgz-installer!
          run-macos-dmg-installer!
          enumerate-toolchain-executables
-         doctor-report)
+         doctor-report
+         commit-state-change!)
+
+(define-file-lock with-state-lock (rackup-state-lock-dir) "rackup state")
+
+;; Acquire the state lock, run thunk (which should mutate index/default/etc.),
+;; then reshim to keep shims consistent with the new state.
+(define (commit-state-change! thunk)
+  (with-state-lock
+   (lambda ()
+     (thunk)
+     (reshim!))))
 
 (define current-install-verbosity (make-parameter 'normal))
 
@@ -813,10 +825,11 @@
        (ensure-toolchain-addon-dir! id)
        (define executables (enumerate-toolchain-executables (rackup-toolchain-bin-link id)))
        (define meta (local-toolchain-meta id name layout real-bin-dir executables env-vars version* variant*))
-       (register-toolchain! id meta)
-       (when (hash-ref parsed-opts 'set-default? #f)
-         (set-default-toolchain! id))
-       (reshim!)
+       (commit-state-change!
+        (lambda ()
+          (register-toolchain! id meta)
+          (when (hash-ref parsed-opts 'set-default? #f)
+            (set-default-toolchain! id))))
        (displayln (format "Linked ~a => ~a" id (hash-ref layout 'input-path)))
        id)]))
 
@@ -889,9 +902,10 @@
     (cond
       [(directory-exists? tc-dir)
        (install-ok "Already installed: ~a" id)
-       (when explicit-default?
-         (set-default-toolchain! id))
-       (reshim!)
+       (commit-state-change!
+        (lambda ()
+          (when explicit-default?
+            (set-default-toolchain! id))))
        (report-default-change! default-before (get-default-toolchain) id explicit-default?)
        id]
       [else
@@ -932,10 +946,11 @@
          (ensure-toolchain-addon-dir! id)
          (define executables (enumerate-toolchain-executables real-bin-dir))
          (define meta (toolchain-meta request id real-bin-dir executables env-vars))
-         (register-toolchain! id meta)
-         (when explicit-default?
-           (set-default-toolchain! id))
-         (reshim!)
+         (commit-state-change!
+          (lambda ()
+            (register-toolchain! id meta)
+            (when explicit-default?
+              (set-default-toolchain! id))))
          (install-ok "Installed ~a" id)
          (report-default-change! default-before (get-default-toolchain) id explicit-default?)
          id)])))
@@ -950,8 +965,9 @@
     (delete-directory/files tc-dir))
   (when (directory-exists? addon)
     (delete-directory/files addon))
-  (unregister-toolchain! id)
-  (reshim!)
+  (commit-state-change!
+   (lambda ()
+     (unregister-toolchain! id)))
   (displayln (format "Removed ~a" id)))
 
 (define (doctor-report)

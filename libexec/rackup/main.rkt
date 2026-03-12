@@ -250,8 +250,9 @@
 
 (define (set-default-from-spec! spec)
   (define id (resolve-toolchain-or-offer-install spec))
-  (set-default-toolchain! id)
-  (reshim!)
+  (commit-state-change!
+   (lambda ()
+     (set-default-toolchain! id)))
   (displayln (format "Default toolchain: ~a" id)))
 
 (define (cmd-default rest)
@@ -266,7 +267,7 @@
                   args))
   (cond
     [unset?
-     (clear-default-toolchain!)
+     (commit-state-change! (lambda () (clear-default-toolchain!)))
      (displayln "Cleared default toolchain.")]
     [else
      (match args
@@ -280,7 +281,7 @@
        [(list "set" spec)
         (set-default-from-spec! spec)]
        [(list "clear")
-        (clear-default-toolchain!)
+        (commit-state-change! (lambda () (clear-default-toolchain!)))
         (displayln "Cleared default toolchain.")]
        [(list spec)
         (set-default-from-spec! spec)]
@@ -461,9 +462,10 @@
                 #:args ()
                 (void))
   (ensure-index!)
-  (when aliases? (install-shim-aliases!))
-  (when no-aliases? (remove-shim-aliases!))
-  (reshim!)
+  (commit-state-change!
+   (lambda ()
+     (when aliases? (install-shim-aliases!))
+     (when no-aliases? (remove-shim-aliases!))))
   (displayln "Reshim complete."))
 
 ;; Reorder install args so flags precede the positional spec.

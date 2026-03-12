@@ -8,6 +8,7 @@
          racket/port
          racket/string
          racket/system
+         "lock.rkt"
          "paths.rkt"
          "remote.rkt"
          "rktd-io.rkt"
@@ -312,19 +313,7 @@
         (unless (string-blank? details)
           (eprintf "~a\n" details))))))
 
-(define (with-runtime-lock thunk)
-  (ensure-rackup-layout!)
-  (define lock-dir (rackup-runtime-lock-dir))
-  (when (file-exists? lock-dir)
-    (rackup-error "hidden runtime lock path exists and is not a directory: ~a"
-                  (path->string* lock-dir)))
-  (when (directory-exists? lock-dir)
-    (rackup-error "hidden runtime is locked: ~a" (path->string* lock-dir)))
-  (dynamic-wind (lambda () (make-directory lock-dir))
-                thunk
-                (lambda ()
-                  (when (directory-exists? lock-dir)
-                    (delete-directory lock-dir)))))
+(define-file-lock with-runtime-lock (rackup-runtime-lock-dir) "hidden runtime")
 
 (define (install-hidden-runtime! [quiet? #f])
   (ensure-rackup-layout!)
