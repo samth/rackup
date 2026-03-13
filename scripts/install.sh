@@ -15,6 +15,7 @@ EXPECTED_SRC_SHA256="@@RACKUP_SRC_SHA256@@"
 FORCE_SOURCE="${RACKUP_FORCE_SOURCE:-0}"
 FORCE_EXE="${RACKUP_FORCE_EXE:-0}"
 PAGES_BASE_URL="${RACKUP_PAGES_BASE_URL:-}"
+ALLOW_UNSAFE_PREFIX=0
 
 is_tty_stdout() {
   [ -t 1 ]
@@ -55,13 +56,15 @@ usage() {
 rackup bootstrap installer
 
 Usage:
-  install.sh [-y] [--no-init] [--prefix DIR] [--repo owner/name] [--ref REF] [--archive-url URL] [--shell bash|zsh] [--from-local PATH] [--source | --exe]
+  install.sh [-y] [--no-init] [--prefix DIR] [--allow-unsafe-prefix] [--repo owner/name] [--ref REF] [--archive-url URL] [--shell bash|zsh] [--from-local PATH] [--source | --exe]
 
 Behavior:
   - Prompts before editing shell config by default.
   - With -y, accepts defaults (including shell init).
   - With --no-init, skips shell init changes even with -y.
   - Installs files under ~/.rackup unless --prefix or RACKUP_HOME is set.
+  - --prefix DIR must be an absolute, dedicated install directory.
+  - --allow-unsafe-prefix overrides prefix safety checks.
   - By default, tries to download a prebuilt binary for the current platform.
   - Falls back to source distribution + hidden runtime if no binary is available.
   - Use --source to skip the prebuilt binary and install from source directly.
@@ -87,6 +90,10 @@ while [ "$#" -gt 0 ]; do
     --prefix)
       PREFIX="$2"
       shift 2
+      ;;
+    --allow-unsafe-prefix)
+      ALLOW_UNSAFE_PREFIX=1
+      shift
       ;;
     --repo)
       REPO="$2"
@@ -145,6 +152,61 @@ if [ "$FORCE_EXE" -eq 1 ] && [ -n "$FROM_LOCAL" ]; then
   warn "Error: --exe and --from-local are mutually exclusive."
   exit 2
 fi
+
+string_has_control_chars() {
+  value="$1"
+  printf '%s' "$value" |
+    od -An -t u1 2>/dev/null |
+    awk '
+      {
+        for (i = 1; i <= NF; i++) {
+          if ($i < 32 || $i == 127) {
+            found = 1
+          }
+        }
+      }
+      END {
+        exit(found ? 0 : 1)
+      }'
+}
+
+validate_safe_prefix() {
+  prefix="$1"
+  reason=""
+  pwd_real="$(pwd -P 2>/dev/null || pwd)"
+
+  if string_has_control_chars "$prefix"; then
+    reason="contains control characters"
+  elif [ -z "$prefix" ]; then
+    reason="is empty"
+  elif [ "${prefix#/}" = "$prefix" ]; then
+    reason="is not absolute"
+  elif [ "$prefix" = "/" ]; then
+    reason="is /"
+  elif [ -n "${HOME:-}" ] && [ "$prefix" = "$HOME" ]; then
+    reason="equals your home directory"
+  elif [ "$prefix" = "$pwd_real" ]; then
+    reason="equals the current directory"
+  else
+    case "$prefix" in
+      /Applications | /bin | /boot | /dev | /etc | /home | /lib | /lib64 | /opt | /private | /proc | /root | /sbin | /srv | /sys | /tmp | /usr | /usr/bin | /usr/local | /usr/local/bin | /usr/local/lib | /var | /var/tmp)
+        reason="is a shared system directory"
+        ;;
+    esac
+  fi
+
+  if [ -n "$reason" ]; then
+    if [ "$ALLOW_UNSAFE_PREFIX" -eq 1 ]; then
+      warn "Warning: proceeding with unsafe install prefix $prefix ($reason)"
+    else
+      warn "Error: refusing unsafe install prefix $prefix ($reason)"
+      warn "Use --allow-unsafe-prefix to override this check."
+      exit 2
+    fi
+  fi
+}
+
+validate_safe_prefix "$PREFIX"
 
 TMPDIR_INSTALL="$(mktemp -d "${TMPDIR:-/tmp}/rackup-install.XXXXXX")"
 cleanup() {
@@ -420,6 +482,11 @@ if [ "$INSTALLED_PREBUILT" -eq 0 ]; then
     else
       ARCHIVE_URL="https://github.com/${REPO}/archive/refs/heads/${REF}.tar.gz"
     fi
+    if [ "$EXPECTED_SRC_SHA256" = "@@RACKUP_SRC_SHA256@@" ]; then
+      warn "Error: this checked-in install.sh template does not have a baked source checksum."
+      warn "Build the published installer first, or use --from-local for a local source install."
+      exit 1
+    fi
     info "Downloading rackup sources from ${ARCHIVE_URL}"
     if command -v curl >/dev/null 2>&1; then
       curl -fsSL "$ARCHIVE_URL" -o "$TMPDIR_INSTALL/rackup.tar.gz"
@@ -429,10 +496,8 @@ if [ "$INSTALLED_PREBUILT" -eq 0 ]; then
       warn "Error: need curl or wget to download rackup sources."
       exit 1
     fi
-    if [ "$EXPECTED_SRC_SHA256" != "@@RACKUP_SRC_SHA256@@" ]; then
-      info "Verifying source download (SHA-256)..."
-      verify_sha256 "$TMPDIR_INSTALL/rackup.tar.gz" "$EXPECTED_SRC_SHA256" "rackup-src.tar.gz"
-    fi
+    info "Verifying source download (SHA-256)..."
+    verify_sha256 "$TMPDIR_INSTALL/rackup.tar.gz" "$EXPECTED_SRC_SHA256" "rackup-src.tar.gz"
     mkdir -p "$TMPDIR_INSTALL/src"
     # Use -m so future mtimes in the archive do not produce noisy warnings on skewed clocks.
     tar -xzmf "$TMPDIR_INSTALL/rackup.tar.gz" -C "$TMPDIR_INSTALL/src"

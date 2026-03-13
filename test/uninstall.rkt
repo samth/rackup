@@ -35,12 +35,19 @@
              (lambda () (validate-uninstall-home-path! (string->path "/"))))
   (check-exn #px"unsafe rackup home target equal to your home directory"
              (lambda () (validate-uninstall-home-path! (find-system-path 'home-dir))))
+  (check-exn #px"control characters"
+             (lambda () (validate-uninstall-home-path! (string->path "/tmp/rackup\n/etc"))))
   (let ([env (environment-variables-copy (current-environment-variables))]
         [env-home (build-path repo-root "tmp-uninstall-home-guard")])
     (environment-variables-set! env #"HOME" (string->bytes/utf-8 (path->string env-home)))
     (parameterize ([current-environment-variables env])
       (check-exn #px"unsafe rackup home target equal to your home directory"
                  (lambda () (validate-uninstall-home-path! env-home)))))
+  (let ([env (environment-variables-copy (current-environment-variables))])
+    (environment-variables-set! env #"RACKUP_HOME" #"/tmp/rackup\n/etc")
+    (parameterize ([current-environment-variables env])
+      (check-exn #px"control characters"
+                 (lambda () (rackup-home)))))
   (parameterize ([current-directory repo-root])
     (check-exn #px"unsafe rackup home target equal to the current directory"
                (lambda () (validate-uninstall-home-path! (string->path ".")))))
@@ -90,6 +97,30 @@
    (lambda (tmp-home)
      (ensure-index!)
      (make-directory* tmp-home)
+     (define request-dir (make-temporary-file "rackup-uninstall-request-~a" 'directory tmp-root))
+     (dynamic-wind
+      void
+      (lambda ()
+        (parameterize ([current-remove-shell-init-blocks-proc
+                        (lambda () (list (build-path tmp-home "dummy.rc")))]
+                       [current-uninstall-system*-proc
+                        (lambda _args
+                          (error 'test "unexpected direct deletion in request-dir mode"))])
+          (cmd-uninstall (list "--yes"
+                               "--uninstall-request-dir"
+                               (path->string request-dir))))
+        (define report-path (build-path request-dir "removed-rcs.txt"))
+        (check-true (file-exists? report-path))
+        (define report-text (file->string report-path))
+        (check-true (string-contains? report-text "dummy.rc"))
+        (check-false (string-contains? report-text (path->string tmp-home)))))
+      (lambda ()
+        (delete-directory/files request-dir #:must-exist? #f)))))
+
+  (with-temp-rackup-home
+   (lambda (tmp-home)
+     (ensure-index!)
+     (make-directory* tmp-home)
      (define uninstall-out
        (capture-output
         (lambda ()
@@ -98,6 +129,23 @@
             (check-exn #px"failed to delete rackup home synchronously"
                        (lambda () (cmd-uninstall '("--yes"))))))))
      (check-false (string-contains? uninstall-out "rackup uninstalled."))))
+
+  (with-temp-rackup-home
+   (lambda (tmp-home)
+     (ensure-index!)
+     (make-directory* tmp-home)
+     (define poison-path (build-path tmp-root "rackup-uninstall-poison.txt"))
+     (when (file-exists? poison-path)
+       (delete-file poison-path))
+     (define env (environment-variables-copy (current-environment-variables)))
+     (environment-variables-set! env
+                                 #"RACKUP_UNINSTALL_REQUEST_FILE"
+                                 (string->bytes/utf-8 (path->string poison-path)))
+     (parameterize ([current-environment-variables env]
+                    [current-remove-shell-init-blocks-proc (lambda () null)]
+                    [current-uninstall-system*-proc (lambda _args #t)])
+       (cmd-uninstall '("--yes")))
+     (check-false (file-exists? poison-path))))
 
   (with-temp-rackup-home
    (lambda (_tmp-home)
@@ -155,4 +203,4 @@
      (write-string-file (rackup-toolchain-meta-file "release-bad") "not-rktd")
      (define metas (installed-toolchain-metas/safe))
      (check-equal? (length metas) 1)
-     (check-true (hash? (car metas))))))
+     (check-true (hash? (car metas)))))

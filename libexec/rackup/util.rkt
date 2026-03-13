@@ -3,6 +3,8 @@
 (require racket/date
          racket/file
          racket/format
+         racket/list
+         racket/match
          racket/path
          racket/string
          racket/system)
@@ -11,6 +13,11 @@
          ensure-directory*
          path->string*
          string-blank?
+         string-has-control-char?
+         ensure-string-without-control-chars!
+         ensure-path-without-control-chars!
+         valid-toolchain-id?
+         ensure-valid-toolchain-id!
          executable-file?
          resolve-command-path
          system*/check
@@ -20,6 +27,8 @@
          path-basename-string
          http-url?
          require-checksummed-http-installer!
+         file-sha256
+         verify-file-sha256!
          sh-single-quote
          color-enabled?
          ansi
@@ -41,6 +50,30 @@
 
 (define (string-blank? s)
   (string=? "" (string-trim s)))
+
+(define (string-has-control-char? s)
+  (and (string? s)
+       (for/or ([ch (in-string s)])
+         (or (char<? ch #\space) (char=? ch #\u007f)))))
+
+(define (ensure-string-without-control-chars! s what)
+  (when (string-has-control-char? s)
+    (rackup-error "refusing unsafe ~a with control characters: ~v" what s))
+  s)
+
+(define (ensure-path-without-control-chars! p what)
+  (ensure-string-without-control-chars! (path->string* p) what)
+  p)
+
+(define toolchain-id-rx #px"^[A-Za-z0-9._-]+$")
+
+(define (valid-toolchain-id? s)
+  (and (string? s) (regexp-match? toolchain-id-rx s)))
+
+(define (ensure-valid-toolchain-id! s [what "toolchain id"])
+  (unless (valid-toolchain-id? s)
+    (rackup-error "invalid ~a: ~v" what s))
+  s)
 
 (define (executable-file? p)
   (and (file-exists? p)
@@ -127,6 +160,32 @@
     (rackup-error
      "refusing to download installer over HTTP without a hardcoded SHA-256 checksum: ~a"
      installer-url)))
+
+(define (sha256-exe)
+  (cond
+    [(find-executable-path "sha256sum") => (lambda (p) (cons 'sha256sum p))]
+    [(find-executable-path "shasum") => (lambda (p) (cons 'shasum p))]
+    [(find-executable-path "openssl") => (lambda (p) (cons 'openssl p))]
+    [else #f]))
+
+(define (file-sha256 p)
+  (match (sha256-exe)
+    [(cons 'sha256sum exe)
+     (car (string-split (capture-program-output exe p)))]
+    [(cons 'shasum exe)
+     (car (string-split (capture-program-output exe "-a" "256" p)))]
+    [(cons 'openssl exe)
+     (last (string-split (capture-program-output exe "dgst" "-sha256" p)))]
+    [_ (rackup-error "could not find sha256sum, shasum, or openssl to verify downloads")]))
+
+(define (verify-file-sha256! file-path expected-sha256 [label #f])
+  (when expected-sha256
+    (define actual-sha256 (file-sha256 file-path))
+    (unless (equal? (string-downcase actual-sha256) (string-downcase expected-sha256))
+      (rackup-error "SHA-256 mismatch for ~a\nexpected: ~a\n  actual: ~a"
+                    (or label (path->string* file-path))
+                    expected-sha256
+                    actual-sha256))))
 
 (define (sh-single-quote s)
   (define str (format "~a" s))

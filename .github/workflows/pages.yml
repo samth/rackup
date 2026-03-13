@@ -20,8 +20,6 @@ on:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
   group: github-pages
@@ -36,9 +34,9 @@ jobs:
       - build-exe
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
       - name: Setup Racket
-        uses: Bogdanp/setup-racket@v1.14
+        uses: Bogdanp/setup-racket@fda0f4d167468421766cea8a36140bd2c3c3450d
         with:
           architecture: x64
           distribution: full
@@ -48,7 +46,7 @@ jobs:
         run: |
           raco pkg install --auto plt-web
       - name: Download all exe artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           pattern: rackup-exe-*
           path: /tmp/exe-artifacts
@@ -77,7 +75,7 @@ jobs:
             -C _site .
           sha256sum pages-site.tar.gz > pages-site.tar.gz.sha256
       - name: Upload built site bundle
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: pages-site-bundle
           path: |
@@ -89,9 +87,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
       - name: Download built site bundle
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: pages-site-bundle
           path: dist
@@ -115,9 +113,9 @@ jobs:
       - bootstrap-curl-smoke
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/configure-pages@v5
+      - uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b
       - name: Download built site bundle
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: pages-site-bundle
           path: dist
@@ -128,7 +126,7 @@ jobs:
           mkdir site
           tar -xzf pages-site.tar.gz -C site
       - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa
         with:
           path: dist/site
 
@@ -136,9 +134,12 @@ jobs:
     needs:
       - package-pages-artifact
     runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e
