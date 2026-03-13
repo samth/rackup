@@ -437,7 +437,7 @@ if [[ "$MODE" == "bootstrap" || "$MODE" == "bootstrap-curl" ]]; then
   # RACKUP_TEST_ALLOW_SELF_UPGRADE_INSTALL_SH → allow local override in tests
   # RACKUP_FROM_LOCAL               → install.sh installs from the local tree
   RACKUP_TEST_ALLOW_SELF_UPGRADE_INSTALL_SH=1 \
-  RACKUP_SELF_UPGRADE_INSTALL_SH="$RUN_SRC/scripts/install.sh" \
+    RACKUP_SELF_UPGRADE_INSTALL_SH="$RUN_SRC/scripts/install.sh" \
     RACKUP_FROM_LOCAL="$RUN_SRC" \
     run_rackup self-upgrade
   # After self-upgrade, basic commands should still work.

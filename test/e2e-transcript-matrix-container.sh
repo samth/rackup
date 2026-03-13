@@ -191,8 +191,8 @@ note "Runtime and self-upgrade"
 "$RACKUP_BIN" runtime status
 "$RACKUP_BIN" runtime upgrade || true
 RACKUP_TEST_ALLOW_SELF_UPGRADE_INSTALL_SH=1 \
-RACKUP_SELF_UPGRADE_INSTALL_SH="$RUN_SRC/scripts/install.sh" \
-"$RACKUP_BIN" self-upgrade
+  RACKUP_SELF_UPGRADE_INSTALL_SH="$RUN_SRC/scripts/install.sh" \
+  "$RACKUP_BIN" self-upgrade
 
 if [[ "$UNINSTALL_AT_END" == "1" ]]; then
   note "Uninstall"
