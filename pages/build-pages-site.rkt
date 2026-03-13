@@ -29,6 +29,15 @@
                       args))
     (error 'build-pages-site "command failed: ~a" prog)))
 
+(define (write-install-artifacts! out-dir install-content install-sha256)
+  (for ([name '("install.sh" "install")])
+    (define p (build-path out-dir name))
+    (call-with-output-file p (lambda (out) (display install-content out)) #:exists 'truncate/replace)
+    (file-or-directory-permissions p #o755))
+  (call-with-output-file (build-path out-dir "install.sh.sha256")
+    (lambda (out) (fprintf out "~a  install.sh\n" install-sha256))
+    #:exists 'truncate/replace))
+
 (dynamic-wind
  void
  (lambda ()
@@ -62,13 +71,7 @@
                      src-sha256))
    (define install-sha256
      (bytes->hex-string (sha256-bytes (open-input-string install-content))))
-   (for ([name '("install.sh" "install")])
-     (define p (build-path out-dir name))
-     (call-with-output-file p (lambda (out) (display install-content out)) #:exists 'truncate/replace)
-     (file-or-directory-permissions p #o755))
-   (call-with-output-file (build-path out-dir "install.sh.sha256")
-     (lambda (out) (fprintf out "~a  install.sh\n" install-sha256))
-     #:exists 'truncate/replace)
+   (write-install-artifacts! out-dir install-content install-sha256)
 
    ;; Generate HTML; Racket computes the install.sh checksum itself
    (make-directory* plt-web-stage)
@@ -88,6 +91,9 @@
      (cond
        [(directory-exists? entry) (copy-directory/files entry dest)]
        [else (copy-file entry dest #t)]))
+   ;; Keep the generated installer authoritative even if the site build
+   ;; materializes an install.sh path in the output tree.
+   (write-install-artifacts! out-dir install-content install-sha256)
 
    ;; Generate docs page from Scribble source (scribble/manual → HTML)
    (run (find-executable-path "scribble")
@@ -99,6 +105,10 @@
 
    ;; Create .nojekyll marker
    (call-with-output-file (build-path out-dir ".nojekyll") void #:exists 'truncate/replace)
+
+   (when (regexp-match? #px"@@RACKUP_SRC_SHA256@@"
+                        (file->string (build-path out-dir "install.sh")))
+     (error 'build-pages-site "generated install.sh still contains an unsubstituted source checksum token"))
 
    (printf "Built GitHub Pages site in ~a\n" out-dir))
  (lambda () (delete-directory/files tmp-stage #:must-exist? #f)))

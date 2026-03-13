@@ -37,6 +37,7 @@ jobs:
           test -f /tmp/rackup-pages-site/index.html
           test -f /tmp/rackup-pages-site/install.sh
           test -f /tmp/rackup-pages-site/rackup-src.tar.gz
+          ! grep -Fq '@@RACKUP_SRC_SHA256@@' /tmp/rackup-pages-site/install.sh
           grep -Fq 'btn.innerHTML' /tmp/rackup-pages-site/index.html
           grep -Fq 'sha256sum -c' /tmp/rackup-pages-site/index.html
           # Every user-facing command from `rackup help` must appear on the webpage.
