@@ -109,7 +109,7 @@ jobs:
             docker_platform: linux/386
             expect_mode: exe
             toolchain_spec: "stable"
-            toolchain_flags: "--distribution minimal --variant bc"
+            toolchain_flags: "--distribution minimal"
             install_flags: ""
           # macOS exe targets
           - name: x86_64-macosx
