@@ -22,8 +22,24 @@ export TMPDIR="${TMPDIR:-/tmp}"
 export PATH="/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin"
 RUN_SRC="${TMPDIR}/rackup-src"
 PKG_SRC_ROOT="${TMPDIR}/rackup-e2e-pkgs"
+PAGES_DIR=""
+PAGES_DIR_OWNED=0
+PAGES_SERVER_PID=""
 
 mkdir -p "$HOME" "$PKG_SRC_ROOT"
+
+cleanup() {
+  if [[ -n "${PAGES_SERVER_PID:-}" ]]; then
+    kill "$PAGES_SERVER_PID" >/dev/null 2>&1 || true
+    wait "$PAGES_SERVER_PID" 2>/dev/null || true
+  fi
+  if [[ "${PAGES_DIR_OWNED:-0}" -eq 1 && -n "${PAGES_DIR:-}" ]]; then
+    rm -rf "$PAGES_DIR"
+  fi
+  rm -rf "$RUN_SRC" "$PKG_SRC_ROOT"
+  rm -rf "$HOME/.rackup-bootstrap" "$HOME/.rackup-bootstrap-curl" "$HOME/.rackup-direct"
+}
+trap cleanup EXIT
 
 fail() {
   echo "E2E failure: $*" >&2
@@ -121,19 +137,13 @@ elif [[ "$MODE" == "bootstrap-curl" ]]; then
     PAGES_DIR="$RACKUP_E2E_PREBUILT_PAGES_DIR"
   else
     PAGES_DIR="$TMPDIR/rackup-pages-site"
+    PAGES_DIR_OWNED=1
     rm -rf "$PAGES_DIR"
     racket -y "$RUN_SRC/pages/build-pages-site.rkt" "$PAGES_DIR"
   fi
   PAGES_PORT="${RACKUP_E2E_PAGES_PORT:-18765}"
   python3 -m http.server --bind 127.0.0.1 "$PAGES_PORT" --directory "$PAGES_DIR" >/tmp/rackup-e2e-pages.log 2>&1 &
   PAGES_SERVER_PID=$!
-  cleanup_pages_server() {
-    if [[ -n "${PAGES_SERVER_PID:-}" ]]; then
-      kill "$PAGES_SERVER_PID" >/dev/null 2>&1 || true
-      wait "$PAGES_SERVER_PID" 2>/dev/null || true
-    fi
-  }
-  trap cleanup_pages_server EXIT
   BOOT_URL="http://127.0.0.1:${PAGES_PORT}/install.sh"
   ARCHIVE_URL="http://127.0.0.1:${PAGES_PORT}/rackup-src.tar.gz"
   for _ in $(seq 1 30); do
@@ -424,7 +434,9 @@ if [[ "$MODE" == "bootstrap" || "$MODE" == "bootstrap-curl" ]]; then
   # Self-upgrade using the local install.sh and local source tree so the test
   # is hermetic (no network fetch for the source tarball / binary).
   # RACKUP_SELF_UPGRADE_INSTALL_SH  → use the repo's install.sh directly
+  # RACKUP_TEST_ALLOW_SELF_UPGRADE_INSTALL_SH → allow local override in tests
   # RACKUP_FROM_LOCAL               → install.sh installs from the local tree
+  RACKUP_TEST_ALLOW_SELF_UPGRADE_INSTALL_SH=1 \
   RACKUP_SELF_UPGRADE_INSTALL_SH="$RUN_SRC/scripts/install.sh" \
     RACKUP_FROM_LOCAL="$RUN_SRC" \
     run_rackup self-upgrade

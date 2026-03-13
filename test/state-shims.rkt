@@ -25,6 +25,9 @@
          "../libexec/rackup/versioning.rkt"
          (only-in (submod "../libexec/rackup/install.rkt" for-testing)
                   detect-bin-dir installed-toolchain-env-vars)
+         (only-in (submod "../libexec/rackup/main.rkt" for-testing)
+                  current-self-upgrade-download-url->file-proc
+                  current-self-upgrade-fetch-text-proc)
          (only-in (submod "../libexec/rackup/runtime.rkt" for-testing)
                   hidden-runtime-invocation-prefix)
          (submod "../libexec/rackup/shell.rkt" for-testing))
@@ -45,6 +48,13 @@
     (parameterize ([current-command-line-arguments (list->vector args)]
                    [exit-handler (lambda (v) (escape v))])
       (main))))
+
+(define (run-main/stderr args)
+  (define err (open-output-string))
+  (define rc
+    (parameterize ([current-error-port err])
+      (run-main args)))
+  (values rc (get-output-string err)))
 
 (define-runtime-path rackup-bin "../bin/rackup")
 
@@ -1320,6 +1330,22 @@
   (with-temp-rackup-home
    (lambda (_tmp)
      (ensure-index!)
+     (define bad-id "../../tmp/pwn")
+     (define old-env-id (getenv "RACKUP_TOOLCHAIN"))
+     (dynamic-wind
+      (lambda () (putenv "RACKUP_TOOLCHAIN" bad-id))
+      (lambda ()
+        (define-values (rc err) (run-main/stderr '("current" "id")))
+        (check-true (and (exact-integer? rc) (positive? rc)))
+        (check-regexp-match #px"invalid toolchain id in RACKUP_TOOLCHAIN" err))
+      (lambda ()
+        (if old-env-id
+            (putenv "RACKUP_TOOLCHAIN" old-env-id)
+            (putenv "RACKUP_TOOLCHAIN" ""))))))
+
+  (with-temp-rackup-home
+   (lambda (_tmp)
+     (ensure-index!)
      (define id "release-8.18-cs-x86_64-linux-full")
      (define install-root (rackup-toolchain-install-dir id))
      (define real-bin (build-path install-root "bin"))
@@ -1394,6 +1420,51 @@
   (with-temp-rackup-home
    (lambda (_tmp)
      (ensure-index!)
+     (define id "release-8.18-cs-x86_64-linux-full")
+     (define install-root (rackup-toolchain-install-dir id))
+     (define real-bin (build-path install-root "bin"))
+     (make-directory* real-bin)
+     (define racket-exe (build-path real-bin "racket"))
+     (write-string-file racket-exe "#!/usr/bin/env bash\necho ok\n")
+     (file-or-directory-permissions racket-exe #o755)
+     (make-file-or-directory-link real-bin (rackup-toolchain-bin-link id))
+     (with-state-lock
+       (register-toolchain!
+        id
+        (hash 'id id
+              'kind 'release
+              'requested-spec "stable"
+              'resolved-version "8.18"
+              'variant 'cs
+              'distribution 'full
+              'arch "x86_64"
+              'platform "linux"
+              'snapshot-site #f
+              'snapshot-stamp #f
+              'installer-url "https://example.invalid/racket.sh"
+              'installer-filename "racket.sh"
+              'install-root (path->string install-root)
+              'bin-link (path->string (rackup-toolchain-bin-link id))
+              'real-bin-dir (path->string real-bin)
+              'executables '("racket")
+              'installed-at "2026-02-26T00:00:00Z"))
+       (reshim!))
+     (define old-env-id (getenv "RACKUP_TOOLCHAIN"))
+     (dynamic-wind
+      (lambda () (putenv "RACKUP_TOOLCHAIN" "../../tmp/pwn"))
+      (lambda ()
+        (define shim-cmd (list (path->string (build-path (rackup-shims-dir) "racket")) "--version"))
+        (expect/shell shim-cmd #:status 2
+                      #:port 'stderr #:match 'contains
+                      "rackup: invalid toolchain id in RACKUP_TOOLCHAIN: '../../tmp/pwn'"))
+      (lambda ()
+        (if old-env-id
+            (putenv "RACKUP_TOOLCHAIN" old-env-id)
+            (putenv "RACKUP_TOOLCHAIN" ""))))))
+
+  (with-temp-rackup-home
+   (lambda (_tmp)
+     (ensure-index!)
      (define orphan-id "release-5.2-bc-x86_64-linux-full")
      (define tc-dir (rackup-toolchain-dir orphan-id))
      (define addon-dir (rackup-addon-dir orphan-id))
@@ -1420,8 +1491,11 @@
        (path->string mode-log)))
      (file-or-directory-permissions fake-installer #o755)
      (define old-override (getenv "RACKUP_SELF_UPGRADE_INSTALL_SH"))
+     (define old-allow (getenv "RACKUP_TEST_ALLOW_SELF_UPGRADE_INSTALL_SH"))
      (dynamic-wind
-      (lambda () (putenv "RACKUP_SELF_UPGRADE_INSTALL_SH" (path->string fake-installer)))
+      (lambda ()
+        (putenv "RACKUP_TEST_ALLOW_SELF_UPGRADE_INSTALL_SH" "1")
+        (putenv "RACKUP_SELF_UPGRADE_INSTALL_SH" (path->string fake-installer)))
       (lambda ()
         (expect (run-main '("self-upgrade"))
                 "Checking for updates...\n")
@@ -1437,7 +1511,73 @@
       (lambda ()
         (if old-override
             (putenv "RACKUP_SELF_UPGRADE_INSTALL_SH" old-override)
-            (putenv "RACKUP_SELF_UPGRADE_INSTALL_SH" ""))))))
+            (putenv "RACKUP_SELF_UPGRADE_INSTALL_SH" ""))
+        (if old-allow
+            (putenv "RACKUP_TEST_ALLOW_SELF_UPGRADE_INSTALL_SH" old-allow)
+            (putenv "RACKUP_TEST_ALLOW_SELF_UPGRADE_INSTALL_SH" ""))))))
+
+  (with-temp-rackup-home
+   (lambda (tmp)
+     (ensure-index!)
+     (define local-override (build-path tmp "local-override.sh"))
+     (define local-marker (build-path tmp "local-override.marker"))
+     (define remote-installer (build-path tmp "remote-install.sh"))
+     (define remote-args-log (build-path tmp "remote-self-upgrade-args.log"))
+     (write-string-file
+      local-override
+      (format "#!/bin/sh\nset -eu\ntouch ~s\n" (path->string local-marker)))
+     (file-or-directory-permissions local-override #o755)
+     (write-string-file
+      remote-installer
+      (format "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$@\" > ~s\nexit 0\n"
+              (path->string remote-args-log)))
+     (file-or-directory-permissions remote-installer #o755)
+     (define remote-sha (file-sha256 remote-installer))
+     (define old-override (getenv "RACKUP_SELF_UPGRADE_INSTALL_SH"))
+     (define old-allow (getenv "RACKUP_TEST_ALLOW_SELF_UPGRADE_INSTALL_SH"))
+     (dynamic-wind
+      (lambda ()
+        (putenv "RACKUP_SELF_UPGRADE_INSTALL_SH" (path->string local-override))
+        (putenv "RACKUP_TEST_ALLOW_SELF_UPGRADE_INSTALL_SH" ""))
+      (lambda ()
+        (parameterize ([current-self-upgrade-fetch-text-proc
+                        (lambda (url)
+                          (check-equal? url "https://samth.github.io/rackup/install.sh.sha256")
+                          (format "~a  install.sh\n" remote-sha))]
+                       [current-self-upgrade-download-url->file-proc
+                        (lambda (url dest)
+                          (check-equal? url "https://samth.github.io/rackup/install.sh")
+                          (copy-file remote-installer dest #t)
+                          dest)])
+          (run-main '("self-upgrade"))))
+      (lambda ()
+        (if old-override
+            (putenv "RACKUP_SELF_UPGRADE_INSTALL_SH" old-override)
+            (putenv "RACKUP_SELF_UPGRADE_INSTALL_SH" ""))
+        (if old-allow
+            (putenv "RACKUP_TEST_ALLOW_SELF_UPGRADE_INSTALL_SH" old-allow)
+            (putenv "RACKUP_TEST_ALLOW_SELF_UPGRADE_INSTALL_SH" ""))))
+     (check-false (file-exists? local-marker))
+     (check-true (file-exists? remote-args-log))))
+
+  (with-temp-rackup-home
+   (lambda (tmp)
+     (ensure-index!)
+     (define remote-installer (build-path tmp "remote-install-bad-sha.sh"))
+     (write-string-file remote-installer "#!/bin/sh\nset -eu\nexit 0\n")
+     (file-or-directory-permissions remote-installer #o755)
+     (parameterize ([current-self-upgrade-fetch-text-proc
+                     (lambda (url)
+                       (check-equal? url "https://samth.github.io/rackup/install.sh.sha256")
+                       (string-append (make-string 64 #\0) "  install.sh\n"))]
+                    [current-self-upgrade-download-url->file-proc
+                     (lambda (url dest)
+                       (check-equal? url "https://samth.github.io/rackup/install.sh")
+                       (copy-file remote-installer dest #t)
+                       dest)])
+       (define-values (rc err) (run-main/stderr '("self-upgrade")))
+       (check-true (and (exact-integer? rc) (positive? rc)))
+       (check-regexp-match #px"SHA-256 mismatch" err))))
 
   ;; self-upgrade prints completion message when SHA changes (i.e. actual update)
   (with-temp-rackup-home
@@ -1453,15 +1593,21 @@
        (path->string sha-file)))
      (file-or-directory-permissions fake-installer #o755)
      (define old-override (getenv "RACKUP_SELF_UPGRADE_INSTALL_SH"))
+     (define old-allow (getenv "RACKUP_TEST_ALLOW_SELF_UPGRADE_INSTALL_SH"))
      (dynamic-wind
-      (lambda () (putenv "RACKUP_SELF_UPGRADE_INSTALL_SH" (path->string fake-installer)))
+      (lambda ()
+        (putenv "RACKUP_TEST_ALLOW_SELF_UPGRADE_INSTALL_SH" "1")
+        (putenv "RACKUP_SELF_UPGRADE_INSTALL_SH" (path->string fake-installer)))
       (lambda ()
         (expect (run-main '("self-upgrade"))
                 "Checking for updates...\nrackup code upgrade complete.\n"))
       (lambda ()
         (if old-override
             (putenv "RACKUP_SELF_UPGRADE_INSTALL_SH" old-override)
-            (putenv "RACKUP_SELF_UPGRADE_INSTALL_SH" ""))))))
+            (putenv "RACKUP_SELF_UPGRADE_INSTALL_SH" ""))
+        (if old-allow
+            (putenv "RACKUP_TEST_ALLOW_SELF_UPGRADE_INSTALL_SH" old-allow)
+            (putenv "RACKUP_TEST_ALLOW_SELF_UPGRADE_INSTALL_SH" ""))))))
 
   ;; self-upgrade --exe forwards to install.sh
   (with-temp-rackup-home
@@ -1476,8 +1622,11 @@
        (path->string args-log)))
      (file-or-directory-permissions fake-installer #o755)
      (define old-override (getenv "RACKUP_SELF_UPGRADE_INSTALL_SH"))
+     (define old-allow (getenv "RACKUP_TEST_ALLOW_SELF_UPGRADE_INSTALL_SH"))
      (dynamic-wind
-      (lambda () (putenv "RACKUP_SELF_UPGRADE_INSTALL_SH" (path->string fake-installer)))
+      (lambda ()
+        (putenv "RACKUP_TEST_ALLOW_SELF_UPGRADE_INSTALL_SH" "1")
+        (putenv "RACKUP_SELF_UPGRADE_INSTALL_SH" (path->string fake-installer)))
       (lambda ()
         (run-main '("self-upgrade" "--exe"))
         (let ([args-lines
@@ -1495,7 +1644,10 @@
       (lambda ()
         (if old-override
             (putenv "RACKUP_SELF_UPGRADE_INSTALL_SH" old-override)
-            (putenv "RACKUP_SELF_UPGRADE_INSTALL_SH" ""))))))
+            (putenv "RACKUP_SELF_UPGRADE_INSTALL_SH" ""))
+        (if old-allow
+            (putenv "RACKUP_TEST_ALLOW_SELF_UPGRADE_INSTALL_SH" old-allow)
+            (putenv "RACKUP_TEST_ALLOW_SELF_UPGRADE_INSTALL_SH" ""))))))
 
   ;; Metadata-parts matching: "9.0-minimal" should resolve when both full and minimal exist
   (with-temp-rackup-home
@@ -1785,8 +1937,11 @@
      (file-or-directory-permissions fake-installer #o755)
 
      (define old-override (getenv "RACKUP_SELF_UPGRADE_INSTALL_SH"))
+     (define old-allow (getenv "RACKUP_TEST_ALLOW_SELF_UPGRADE_INSTALL_SH"))
      (dynamic-wind
-      (lambda () (putenv "RACKUP_SELF_UPGRADE_INSTALL_SH" (path->string fake-installer)))
+      (lambda ()
+        (putenv "RACKUP_TEST_ALLOW_SELF_UPGRADE_INSTALL_SH" "1")
+        (putenv "RACKUP_SELF_UPGRADE_INSTALL_SH" (path->string fake-installer)))
       (lambda ()
         (run-main '("self-upgrade"))
         ;; Verify the upgrade script ran
@@ -1799,7 +1954,10 @@
       (lambda ()
         (if old-override
             (putenv "RACKUP_SELF_UPGRADE_INSTALL_SH" old-override)
-            (putenv "RACKUP_SELF_UPGRADE_INSTALL_SH" ""))))))
+            (putenv "RACKUP_SELF_UPGRADE_INSTALL_SH" ""))
+        (if old-allow
+            (putenv "RACKUP_TEST_ALLOW_SELF_UPGRADE_INSTALL_SH" old-allow)
+            (putenv "RACKUP_TEST_ALLOW_SELF_UPGRADE_INSTALL_SH" ""))))))
 
   ;; ---- Snapshot site tests: Utah and Northwestern ----
   ;; Test that both Utah and Northwestern snapshot toolchains can be registered

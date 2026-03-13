@@ -39,9 +39,9 @@ jobs:
             cross_target: i386-linux
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
       - name: Setup Racket
-        uses: Bogdanp/setup-racket@v1.14
+        uses: Bogdanp/setup-racket@fda0f4d167468421766cea8a36140bd2c3c3450d
         with:
           architecture: ${{ matrix.setup_racket_arch }}
           distribution: full
@@ -74,7 +74,7 @@ jobs:
           /tmp/rackup-exe-test/rackup/bin/rackup help
       - name: Set up QEMU (cross builds only)
         if: matrix.cross_target != ''
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130
         with:
           platforms: arm,386
       - name: Smoke test via QEMU (cross builds only)
@@ -97,7 +97,7 @@ jobs:
             -e RACKUP_HOME=/rackup \
             "$BASE_IMAGE" /rackup/bin/rackup help
       - name: Upload exe artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: "rackup-exe-${{ matrix.artifact_name }}"
           path: "dist/rackup-${{ matrix.artifact_name }}.tar.gz"

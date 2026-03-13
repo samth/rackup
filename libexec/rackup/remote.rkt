@@ -31,6 +31,7 @@
          plt-generated-page-url->installer-filename
          resolve-install-request
          download-url->file
+         http-get-string
          distribution-fallback?)
 
 (define release-version-url "https://download.racket-lang.org/version.txt")
@@ -73,6 +74,31 @@
       (string->url location)
       (combine-url/relative base-url location)))
 
+(define (effective-url-port u)
+  (or (url-port u)
+      (and (equal? (url-scheme u) "https") 443)
+      (and (equal? (url-scheme u) "http") 80)
+      #f))
+
+(define (same-origin-url? a b)
+  (and (equal? (url-scheme a) (url-scheme b))
+       (equal? (url-host a) (url-host b))
+       (equal? (effective-url-port a) (effective-url-port b))))
+
+(define trusted-redirect-host-groups
+  '(("download.racket-lang.org" "mirror.racket-lang.org")))
+
+(define (same-trusted-redirect-group? host-a host-b)
+  (for/or ([group (in-list trusted-redirect-host-groups)])
+    (and (member host-a group)
+         (member host-b group))))
+
+(define (redirect-allowed? from to)
+  (or (same-origin-url? from to)
+      (and (equal? (url-scheme from) (url-scheme to))
+           (equal? (effective-url-port from) (effective-url-port to))
+           (same-trusted-redirect-group? (url-host from) (url-host to)))))
+
 (define (http-open/input url-str [redirects-left 5])
   (define u (if (url? url-str) url-str (string->url url-str)))
   (define scheme (url-scheme u))
@@ -101,7 +127,12 @@
                      (url->string u)))
      (unless (positive? redirects-left)
        (rackup-error "too many HTTP redirects while fetching ~a" (url->string u)))
-     (http-open/input (redirect-url u location) (sub1 redirects-left))]
+     (define target (redirect-url u location))
+     (unless (redirect-allowed? u target)
+       (rackup-error "refusing cross-origin redirect while fetching ~a\nredirect target: ~a"
+                     (url->string u)
+                     (url->string target)))
+     (http-open/input target (sub1 redirects-left))]
     [(equal? code 200) in]
     [else
      (close-input-port in)

@@ -68,35 +68,30 @@ if [ -x "$CORE_EXE" ]; then
 
   if [ "${1:-}" = "uninstall" ]; then
     REQUEST_DIR="$(mktemp -d "${TMPDIR:-/tmp}/rackup-uninstall.XXXXXX")"
-    REQUEST_FILE="$REQUEST_DIR/request.txt"
+    REQUEST_FILE="$REQUEST_DIR/removed-rcs.txt"
     # shellcheck disable=SC2317  # invoked via trap
     cleanup_uninstall_request() {
       rm -rf "$REQUEST_DIR"
     }
     trap cleanup_uninstall_request EXIT INT TERM HUP
-    export RACKUP_UNINSTALL_REQUEST_FILE="$REQUEST_FILE"
-    "$CORE_EXE" "$@"
+    "$CORE_EXE" "$@" --uninstall-request-dir "$REQUEST_DIR"
     status=$?
     if [ "$status" -ne 0 ]; then
       exit "$status"
     fi
-    unset RACKUP_UNINSTALL_REQUEST_FILE
-    if [ ! -f "$REQUEST_FILE" ]; then
+    if [ ! -f "$REQUEST_DIR/delete-ok" ]; then
       echo "rackup: uninstall request was not produced" >&2
       exit 1
     fi
-    TARGET_HOME="$(sed -n '1p' "$REQUEST_FILE")"
-    if [ -z "$TARGET_HOME" ]; then
-      echo "rackup: uninstall request did not include a target path" >&2
-      exit 1
-    fi
+    TARGET_HOME="$(rackup_home)"
+    rackup_validate_safe_uninstall_home_shell "$TARGET_HOME"
     if [ -e "$TARGET_HOME" ]; then
       rm -rf -- "$TARGET_HOME"
     fi
     echo "rackup uninstalled."
-    if [ "$(wc -l <"$REQUEST_FILE")" -gt 1 ]; then
+    if [ -s "$REQUEST_FILE" ]; then
       echo "Removed rackup shell init blocks from:"
-      sed -n '2,$p' "$REQUEST_FILE" | while IFS= read -r rc_path; do
+      sed -n '1,$p' "$REQUEST_FILE" | while IFS= read -r rc_path; do
         [ -n "$rc_path" ] || continue
         printf '  %s\n' "$rc_path"
       done
@@ -140,35 +135,30 @@ rackup_run_core() {
 
 if [ "${1:-}" = "uninstall" ]; then
   REQUEST_DIR="$(mktemp -d "${TMPDIR:-/tmp}/rackup-uninstall.XXXXXX")"
-  REQUEST_FILE="$REQUEST_DIR/request.txt"
+  REQUEST_FILE="$REQUEST_DIR/removed-rcs.txt"
   # shellcheck disable=SC2317  # invoked via trap
   cleanup_uninstall_request() {
     rm -rf "$REQUEST_DIR"
   }
   trap cleanup_uninstall_request EXIT INT TERM HUP
-  export RACKUP_UNINSTALL_REQUEST_FILE="$REQUEST_FILE"
-  "$RACKET_EXE" -y -U -A "$RUNTIME_ADDON_DIR" "$CORE" "$@"
+  "$RACKET_EXE" -y -U -A "$RUNTIME_ADDON_DIR" "$CORE" "$@" --uninstall-request-dir "$REQUEST_DIR"
   status=$?
   if [ "$status" -ne 0 ]; then
     exit "$status"
   fi
-  unset RACKUP_UNINSTALL_REQUEST_FILE
-  if [ ! -f "$REQUEST_FILE" ]; then
+  if [ ! -f "$REQUEST_DIR/delete-ok" ]; then
     echo "rackup: uninstall request was not produced" >&2
     exit 1
   fi
-  TARGET_HOME="$(sed -n '1p' "$REQUEST_FILE")"
-  if [ -z "$TARGET_HOME" ]; then
-    echo "rackup: uninstall request did not include a target path" >&2
-    exit 1
-  fi
+  TARGET_HOME="$(rackup_home)"
+  rackup_validate_safe_uninstall_home_shell "$TARGET_HOME"
   if [ -e "$TARGET_HOME" ]; then
     rm -rf -- "$TARGET_HOME"
   fi
   echo "rackup uninstalled."
-  if [ "$(wc -l <"$REQUEST_FILE")" -gt 1 ]; then
+  if [ -s "$REQUEST_FILE" ]; then
     echo "Removed rackup shell init blocks from:"
-    sed -n '2,$p' "$REQUEST_FILE" | while IFS= read -r rc_path; do
+    sed -n '1,$p' "$REQUEST_FILE" | while IFS= read -r rc_path; do
       [ -n "$rc_path" ] || continue
       printf '  %s\n' "$rc_path"
     done

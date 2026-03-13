@@ -12,7 +12,44 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
+      - name: Check workflow action pinning
+        shell: bash
+        run: |
+          workflow_files="$(git ls-files '.github/workflows/*.yml')"
+          bad_refs="$(printf '%s\n' "$workflow_files" | xargs rg -nP '^\s*uses:\s*(?!\./)[^@\s]+@(?![0-9a-f]{40}\b)\S+' || true)"
+          if [ -n "$bad_refs" ]; then
+            echo "Unpinned workflow actions detected:"
+            echo "$bad_refs"
+            exit 1
+          fi
+
+      - name: Check workflow permissions scope
+        shell: bash
+        run: |
+          workflow_files="$(git ls-files '.github/workflows/*.yml')"
+          top_level_permissions="$(printf '%s\n' "$workflow_files" | xargs rg -N -H '^permissions:\s*$' || true)"
+          expected_top_level_permissions='.github/workflows/pages.yml:permissions:'
+          if [ "$top_level_permissions" != "$expected_top_level_permissions" ]; then
+            echo "Unexpected top-level workflow permissions blocks detected:"
+            echo "$top_level_permissions"
+            exit 1
+          fi
+
+          if ! rg -q '^  contents: read$' .github/workflows/pages.yml; then
+            echo "pages.yml must keep top-level contents: read"
+            exit 1
+          fi
+
+          write_permissions="$(printf '%s\n' "$workflow_files" | xargs rg -N -H '^\s+[A-Za-z-]+:\s*write\s*$' || true)"
+          expected_write_permissions='.github/workflows/pages.yml:      pages: write
+.github/workflows/pages.yml:      id-token: write'
+          if [ "$write_permissions" != "$expected_write_permissions" ]; then
+            echo "Unexpected write-scoped workflow permissions detected:"
+            echo "$write_permissions"
+            exit 1
+          fi
 
       - name: Collect shell scripts
         shell: bash
@@ -31,7 +68,7 @@ jobs:
           xargs shellcheck --severity=warning < /tmp/shell-scripts.txt
 
       - name: Install shfmt
-        uses: mfinelli/setup-shfmt@v2
+        uses: mfinelli/setup-shfmt@8ec8aa2cfd83a7d20a6fb746c638aae1bc181ce9
 
       - name: shfmt (formatting check)
         shell: bash
@@ -64,6 +101,23 @@ jobs:
             exit 1
           fi
           echo "install.sh self-upgrade smoke OK (exit=$rc)"
+
+      - name: install.sh unsafe-prefix smoke
+        shell: bash
+        run: |
+          set +e
+          output="$(/bin/sh scripts/install.sh -y --no-init --from-local . --prefix / 2>&1)"
+          rc=$?
+          set -e
+          echo "$output"
+          if [ "$rc" -eq 0 ]; then
+            echo "FAIL: install.sh accepted / as an install prefix"
+            exit 1
+          fi
+          echo "$output" | grep -q 'refusing unsafe install prefix /' || {
+            echo "FAIL: install.sh did not explain the unsafe-prefix rejection"
+            exit 1
+          }
 
       - name: checkbashisms (POSIX portability)
         shell: bash

@@ -16,6 +16,16 @@ export TMPDIR="${TMPDIR:-/tmp}"
 export PATH="/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin"
 export RACKUP_HOME
 
+cleanup() {
+  rm -rf "$RUN_SRC"
+  rm -rf /tmp/rackup-extra-pkg /tmp/rackup-local-src
+  rm -f /tmp/rackup-matrix-isolation.out /tmp/rackup-matrix-isolation.err
+  if [[ "$UNINSTALL_AT_END" == "1" && -n "${RACKUP_HOME:-}" ]]; then
+    rm -rf "$RACKUP_HOME"
+  fi
+}
+trap cleanup EXIT
+
 note() {
   printf '\n== %s ==\n' "$*"
 }
@@ -180,7 +190,9 @@ note "Remove and reshim"
 note "Runtime and self-upgrade"
 "$RACKUP_BIN" runtime status
 "$RACKUP_BIN" runtime upgrade || true
-RACKUP_SELF_UPGRADE_INSTALL_SH="$RUN_SRC/scripts/install.sh" "$RACKUP_BIN" self-upgrade
+RACKUP_TEST_ALLOW_SELF_UPGRADE_INSTALL_SH=1 \
+RACKUP_SELF_UPGRADE_INSTALL_SH="$RUN_SRC/scripts/install.sh" \
+"$RACKUP_BIN" self-upgrade
 
 if [[ "$UNINSTALL_AT_END" == "1" ]]; then
   note "Uninstall"

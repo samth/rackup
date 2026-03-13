@@ -60,10 +60,15 @@
      (string-replace (file->string (build-path root-dir "scripts" "install.sh"))
                      "@@RACKUP_SRC_SHA256@@"
                      src-sha256))
+   (define install-sha256
+     (bytes->hex-string (sha256-bytes (open-input-string install-content))))
    (for ([name '("install.sh" "install")])
      (define p (build-path out-dir name))
      (call-with-output-file p (lambda (out) (display install-content out)) #:exists 'truncate/replace)
      (file-or-directory-permissions p #o755))
+   (call-with-output-file (build-path out-dir "install.sh.sha256")
+     (lambda (out) (fprintf out "~a  install.sh\n" install-sha256))
+     #:exists 'truncate/replace)
 
    ;; Generate HTML; Racket computes the install.sh checksum itself
    (make-directory* plt-web-stage)
