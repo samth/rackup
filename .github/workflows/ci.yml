@@ -156,9 +156,16 @@ jobs:
         run: |
           python3 -m http.server 18765 --directory /tmp/pages-site &
           echo $! > /tmp/pages-http-server.pid
-          sleep 1
-          # Verify the server is working
-          curl -fsS http://localhost:18765/install.sh >/dev/null
+          # Wait for the server to be ready (up to 30s)
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:18765/install.sh >/dev/null 2>&1; then
+              echo "HTTP server ready after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "HTTP server failed to start within 30s" >&2
+          exit 1
       - name: "Install.sh E2E (Docker: ${{ matrix.name }})"
         if: matrix.docker_platform != ''
         shell: bash
