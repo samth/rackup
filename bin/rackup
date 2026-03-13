@@ -10,7 +10,7 @@ while [ -L "$SELF_SCRIPT" ]; do
   _rackup_link_target="${_rackup_link_target#*" $SELF_SCRIPT -> "}"
   case "$_rackup_link_target" in
     /*) SELF_SCRIPT="$_rackup_link_target" ;;
-    *)  SELF_SCRIPT="$(dirname "$SELF_SCRIPT")/$_rackup_link_target" ;;
+    *) SELF_SCRIPT="$(dirname "$SELF_SCRIPT")/$_rackup_link_target" ;;
   esac
 done
 # shellcheck disable=SC1007
