@@ -18,7 +18,9 @@ jobs:
         shell: bash
         run: |
           workflow_files="$(git ls-files '.github/workflows/*.yml')"
-          bad_refs="$(printf '%s\n' "$workflow_files" | xargs rg -nP '^\s*uses:\s*(?!\./)[^@\s]+@(?![0-9a-f]{40}\b)\S+' || true)"
+          bad_refs="$(printf '%s\n' "$workflow_files" |
+            xargs grep -HnE '^[[:space:]]*uses:[[:space:]]*[^@[:space:]]+@[^[:space:]]+' |
+            grep -Ev '^[^:]+:[0-9]+:[[:space:]]*uses:[[:space:]]*\./|@[0-9a-f]{40}([[:space:]]|$)' || true)"
           if [ -n "$bad_refs" ]; then
             echo "Unpinned workflow actions detected:"
             echo "$bad_refs"
@@ -29,7 +31,7 @@ jobs:
         shell: bash
         run: |
           workflow_files="$(git ls-files '.github/workflows/*.yml')"
-          top_level_permissions="$(printf '%s\n' "$workflow_files" | xargs rg -N -H '^permissions:\s*$' || true)"
+          top_level_permissions="$(printf '%s\n' "$workflow_files" | xargs grep -H '^permissions:[[:space:]]*$' || true)"
           expected_top_level_permissions='.github/workflows/pages.yml:permissions:'
           if [ "$top_level_permissions" != "$expected_top_level_permissions" ]; then
             echo "Unexpected top-level workflow permissions blocks detected:"
@@ -37,12 +39,12 @@ jobs:
             exit 1
           fi
 
-          if ! rg -q '^  contents: read$' .github/workflows/pages.yml; then
+          if ! grep -q '^  contents: read$' .github/workflows/pages.yml; then
             echo "pages.yml must keep top-level contents: read"
             exit 1
           fi
 
-          write_permissions="$(printf '%s\n' "$workflow_files" | xargs rg -N -H '^\s+[A-Za-z-]+:\s*write\s*$' || true)"
+          write_permissions="$(printf '%s\n' "$workflow_files" | xargs grep -EH '^[[:space:]]+[A-Za-z-]+:[[:space:]]*write[[:space:]]*$' || true)"
           expected_write_permissions="$(printf '%s\n' \
             '.github/workflows/pages.yml:      pages: write' \
             '.github/workflows/pages.yml:      id-token: write')"
