@@ -1,66 +1,91 @@
 # rackup
 
-A Racket toolchain manager
+A toolchain manager for [Racket](https://racket-lang.org). Install and switch between stable releases, pre-releases, snapshots, old PLT Scheme builds, and local source trees.
 
-**[Documentation](https://samth.github.io/rackup/docs.html)** — full command reference and usage guide
-([Scribble source](docs/rackup.scrbl))
-
-## Status
-
-Linux-first v1 scaffold implemented in Bash + Racket with:
-
-- `rackup` CLI (`install`, `list`, `default`, `shell`, `run`, `which`, `current`, `remove`, `reshim`, `init`, `doctor`)
-- state + metadata under `~/.rackup` (or `RACKUP_HOME`)
-- dynamic shims and shell integration for bash/zsh
-- release / pre-release / snapshot installer resolution via Racket metadata endpoints (`table.rktd`, `version.rktd`, `version.txt`)
-- Linux installer orchestration for official `.sh` installers
-
-## Local Usage
-
-```bash
-./bin/rackup help
-./bin/rackup doctor
-./bin/rackup init --shell bash
-./bin/rackup install stable --set-default
-```
-
-## Bootstrap
-
-Bootstrap script (designed for `curl | sh`):
+## Install
 
 ```bash
 curl -fsSL https://samth.github.io/rackup/install.sh | sh
 ```
 
-Noninteractive:
+For non-interactive mode (no prompts):
 
 ```bash
 curl -fsSL https://samth.github.io/rackup/install.sh | sh -s -- -y
 ```
 
-Local bootstrap script (same script served via Pages):
+This installs `rackup` itself. Then install a Racket toolchain:
 
 ```bash
-sh scripts/install.sh
+rackup install stable
 ```
 
-It supports `-y` for noninteractive installs and prompts before shell config edits by default.
-The bootstrap installs a hidden internal Racket runtime for `rackup` itself, but does not
-install a user toolchain automatically. The first user toolchain install is explicit, e.g.:
+Set up shell integration so that `racket`, `raco`, etc. resolve through rackup shims:
 
 ```bash
-rackup install stable --set-default
+rackup init --shell bash   # or zsh
 ```
 
-## GitHub Pages Installer Site
+## Usage
 
-The repo includes a GitHub Pages workflow that publishes a small install page and serves:
+### Install toolchains
 
-- `/` (landing page with copy/paste commands)
-- `/install.sh` (bootstrap script for `curl | sh`)
-- `/install` (alias)
+```bash
+rackup install stable                    # current stable release
+rackup install 8.18                      # specific version
+rackup install pre-release               # latest pre-release build
+rackup install snapshot                  # latest snapshot build
+rackup install snapshot:utah             # snapshot from a specific mirror
+rackup install 4.2.5                     # historical PLT Scheme release
+```
 
-Workflow file: `.github/workflows/pages.yml`
+### Switch between toolchains
+
+```bash
+rackup default stable                    # set the global default
+rackup switch 8.18                       # switch in the current shell only
+rackup run snapshot -- raco test .       # run a command under a specific toolchain
+```
+
+### Link local source trees
+
+```bash
+rackup link dev ~/src/racket             # link a local Racket build
+rackup link dev ~/src/racket --set-default
+```
+
+### Other commands
+
+```bash
+rackup list                              # list installed toolchains
+rackup available                         # list installable versions
+rackup current                           # show active toolchain and source
+rackup which racket                      # show real executable path
+rackup remove 8.18                       # remove a toolchain
+rackup prompt                            # toolchain info for shell prompt
+rackup doctor                            # print diagnostics
+rackup self-upgrade                      # upgrade rackup itself
+```
+
+## Platforms
+
+rackup supports Linux (x86_64, aarch64, i386, arm32) and macOS (x86_64, aarch64). It works with both bash and zsh.
+
+Prebuilt binaries are available for all supported platforms. On platforms without a prebuilt binary, the installer bootstraps from source using a hidden internal Racket runtime.
+
+## Shell integration
+
+After running `rackup init`, your shell gets:
+
+- Shims on `PATH` so `racket`, `raco`, `scribble`, `drracket`, etc. resolve to the active toolchain
+- A `rackup` shell function so `rackup switch` takes effect immediately in the current shell
+- Per-toolchain `PLTHOME` and `PLTADDONDIR` management
+
+Add toolchain info to your prompt:
+
+```bash
+PS1='$(rackup prompt) '$PS1
+```
 
 ## Migrating from racket-dev-goodies
 
@@ -72,9 +97,8 @@ If you previously used [racket-dev-goodies](https://github.com/takikawa/racket-d
 function sets `PLTHOME` globally, which conflicts with rackup's per-toolchain
 environment management.
 
-**Install rackup and re-register your Racket builds.** After running
-`rackup init`, use `rackup link` to register existing Racket installations
-that you previously switched between with `plt`:
+**Re-register your Racket builds.** Use `rackup link` to register existing
+installations that you previously switched between with `plt`:
 
 ```bash
 rackup link dev ~/src/racket
@@ -82,16 +106,11 @@ rackup link 8.15 /usr/local/racket-8.15
 rackup default set dev
 ```
 
-`rackup link` replaces the role of `plt <dir>` — it registers a local Racket
-build so that rackup's shims and `PLTHOME`/`PLTADDONDIR` management work with it.
-For release versions you can also use `rackup install` instead of linking:
+For the short `r` and `dr` aliases from racket-dev-goodies:
 
 ```bash
-rackup install stable
-rackup install 8.15
+rackup reshim --short-aliases
 ```
-
-**Equivalents at a glance:**
 
 | racket-dev-goodies | rackup |
 |---|---|
@@ -99,31 +118,8 @@ rackup install 8.15
 | `plt` (show current) | `rackup current` |
 | `plt-make-links.sh` | `rackup reshim` (automatic on install/link) |
 | `plt-fresh-build` | Build manually, then `rackup link` |
+| `r` / `dr` aliases | `rackup reshim --short-aliases` |
 
-## Docker E2E (Fresh Container)
+## Documentation
 
-To test `rackup` installing a Racket toolchain in a fresh Linux container:
-
-```bash
-test/docker-test-fresh-install.sh
-```
-
-This builds a Docker image (`ubuntu:24.04` + distro `racket`) and then runs an
-end-to-end smoke test in a disposable container with an empty `RACKUP_HOME`.
-
-`rackup` bootstraps without a host Racket by installing a hidden internal
-runtime first. The default Docker E2E image includes system `racket`
-because several test modes exercise direct (non-bootstrap) execution.
-
-Useful variants:
-
-```bash
-# Test the bootstrap script path too (copies repo into a fresh prefix first)
-test/docker-test-fresh-install.sh --mode bootstrap
-
-# Also test pre-release install (network-dependent and slower)
-test/docker-test-fresh-install.sh --spec stable --spec pre-release
-
-# Snapshot test from a specific site
-test/docker-test-fresh-install.sh --spec snapshot --snapshot-site utah
-```
+Full command reference and usage guide: **[samth.github.io/rackup/docs.html](https://samth.github.io/rackup/docs.html)**

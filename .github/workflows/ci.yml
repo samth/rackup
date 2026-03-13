@@ -72,6 +72,185 @@ jobs:
           path: /tmp/pages-site-ci.tar.gz
           if-no-files-found: error
 
+  install-sh-e2e:
+    name: "Install.sh E2E (${{ matrix.name }})"
+    runs-on: ${{ matrix.runs_on }}
+    needs: [pages-build]
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Native Linux exe targets
+          - name: x86_64-linux
+            runs_on: ubuntu-latest
+            docker_platform: linux/amd64
+            expect_mode: exe
+            toolchain_spec: "stable"
+            toolchain_flags: "--distribution minimal"
+            install_flags: ""
+          - name: aarch64-linux
+            runs_on: ubuntu-24.04-arm
+            docker_platform: linux/arm64
+            expect_mode: exe
+            toolchain_spec: "stable"
+            toolchain_flags: "--distribution minimal"
+            install_flags: ""
+          # Cross-compiled Linux exe targets (via QEMU)
+          - name: arm32-linux
+            runs_on: ubuntu-latest
+            docker_platform: linux/arm/v7
+            expect_mode: exe
+            toolchain_spec: "stable"
+            toolchain_flags: "--distribution minimal"
+            install_flags: ""
+          - name: i386-linux
+            runs_on: ubuntu-latest
+            docker_platform: linux/386
+            expect_mode: exe
+            toolchain_spec: "stable"
+            toolchain_flags: "--distribution minimal --variant bc"
+            install_flags: ""
+          # macOS exe targets
+          - name: x86_64-macosx
+            runs_on: macos-15-intel
+            docker_platform: ""
+            expect_mode: exe
+            toolchain_spec: "stable"
+            toolchain_flags: "--distribution minimal"
+            install_flags: ""
+          - name: aarch64-macosx
+            runs_on: macos-14
+            docker_platform: ""
+            expect_mode: exe
+            toolchain_spec: "stable"
+            toolchain_flags: "--distribution minimal"
+            install_flags: ""
+          # Non-exe: source fallback (x86_64 with --source flag)
+          - name: x86_64-linux-source
+            runs_on: ubuntu-latest
+            docker_platform: linux/amd64
+            expect_mode: source
+            toolchain_spec: "stable"
+            toolchain_flags: "--distribution minimal"
+            install_flags: "--source"
+    steps:
+      - name: Download pages site
+        uses: actions/download-artifact@v4
+        with:
+          name: pages-site-ci
+          path: /tmp/pages-artifact
+      - name: Extract pages site
+        shell: bash
+        run: |
+          mkdir -p /tmp/pages-site
+          tar -xzf /tmp/pages-artifact/pages-site-ci.tar.gz -C /tmp/pages-site
+          ls -la /tmp/pages-site/rackup-*.tar.gz /tmp/pages-site/install.sh
+      - name: Set up QEMU
+        if: matrix.docker_platform == 'linux/arm/v7' || matrix.docker_platform == 'linux/386'
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm,386
+      - name: Start local HTTP server
+        shell: bash
+        run: |
+          python3 -m http.server 18765 --directory /tmp/pages-site &
+          echo $! > /tmp/pages-http-server.pid
+          sleep 1
+          # Verify the server is working
+          curl -fsS http://localhost:18765/install.sh >/dev/null
+      - name: "Install.sh E2E (Docker: ${{ matrix.name }})"
+        if: matrix.docker_platform != ''
+        shell: bash
+        run: |
+          docker run --rm \
+            --network host \
+            --platform "${{ matrix.docker_platform }}" \
+            -e RACKUP_PAGES_BASE_URL=http://localhost:18765 \
+            -e TOOLCHAIN_SPEC="${{ matrix.toolchain_spec }}" \
+            -e TOOLCHAIN_FLAGS="${{ matrix.toolchain_flags }}" \
+            -e EXPECT_MODE="${{ matrix.expect_mode }}" \
+            -e INSTALL_FLAGS="${{ matrix.install_flags }}" \
+            debian:12 bash -c '
+              set -eux
+
+              # Install curl (needed for curl|sh)
+              apt-get update -qq && apt-get install -y -qq curl ca-certificates >/dev/null 2>&1
+
+              # Run install.sh from the local pages server
+              curl -fsSL http://localhost:18765/install.sh | sh -s -- -y --no-init $INSTALL_FLAGS
+
+              export PATH="$HOME/.rackup/shims:$HOME/.rackup/bin:$PATH"
+              export RACKUP_HOME="$HOME/.rackup"
+
+              # Verify rackup runs
+              rackup version
+              rackup doctor
+
+              # Verify install mode
+              if [ -x "$HOME/.rackup/bin/rackup-core" ]; then
+                actual_mode=exe
+              else
+                actual_mode=source
+              fi
+              echo "Install mode: $actual_mode (expected: $EXPECT_MODE)"
+              if [ "$actual_mode" != "$EXPECT_MODE" ]; then
+                echo "ERROR: install mode mismatch" >&2
+                exit 1
+              fi
+
+              # Install a toolchain and run racket (if spec provided)
+              if [ -n "$TOOLCHAIN_SPEC" ]; then
+                rackup install "$TOOLCHAIN_SPEC" $TOOLCHAIN_FLAGS --set-default
+                rackup list
+                racket -e "(displayln (version))"
+                raco --help >/dev/null
+              fi
+            '
+      - name: "Install.sh E2E (macOS: ${{ matrix.name }})"
+        if: matrix.docker_platform == ''
+        shell: bash
+        run: |
+          set -eux
+          export RACKUP_HOME="$(mktemp -d)/rackup-install-sh-e2e"
+          export RACKUP_PAGES_BASE_URL=http://localhost:18765
+
+          # Run install.sh from the local pages server
+          curl -fsSL http://localhost:18765/install.sh | sh -s -- -y --no-init --prefix "$RACKUP_HOME" ${{ matrix.install_flags }}
+
+          export PATH="$RACKUP_HOME/shims:$RACKUP_HOME/bin:$PATH"
+
+          # Verify rackup runs
+          rackup version
+          rackup doctor
+
+          # Verify install mode
+          if [ -x "$RACKUP_HOME/bin/rackup-core" ]; then
+            actual_mode=exe
+          else
+            actual_mode=source
+          fi
+          echo "Install mode: $actual_mode (expected: ${{ matrix.expect_mode }})"
+          if [ "$actual_mode" != "${{ matrix.expect_mode }}" ]; then
+            echo "ERROR: install mode mismatch" >&2
+            exit 1
+          fi
+
+          # Install a toolchain and run racket
+          if [ -n "${{ matrix.toolchain_spec }}" ]; then
+            rackup install "${{ matrix.toolchain_spec }}" ${{ matrix.toolchain_flags }} --set-default
+            rackup list
+            racket -e '(displayln (version))'
+            raco --help >/dev/null
+          fi
+      - name: Stop HTTP server
+        if: always()
+        shell: bash
+        run: |
+          if [ -f /tmp/pages-http-server.pid ]; then
+            kill "$(cat /tmp/pages-http-server.pid)" 2>/dev/null || true
+          fi
+
   build-exe:
     uses: ./.github/workflows/build-exe.yml
 
@@ -125,18 +304,10 @@ jobs:
             arch_name: x64
             docker_arch: amd64
             base_image: "ubuntu:24.04"
-          - runs_on: ubuntu-latest
-            arch_name: x64
-            docker_arch: amd64
-            base_image: "debian:12"
           - runs_on: ubuntu-24.04-arm
             arch_name: arm64
             docker_arch: arm64
             base_image: "ubuntu:24.04"
-          - runs_on: ubuntu-24.04-arm
-            arch_name: arm64
-            docker_arch: arm64
-            base_image: "debian:12"
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
@@ -272,48 +443,6 @@ jobs:
         run: |
           test/docker-test-fresh-install.sh \
             --mode bootstrap \
-            --spec stable
-
-  docker-e2e-bootstrap-no-host-racket:
-    name: Docker E2E (bootstrap, no system Racket + hidden runtime)
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
-    steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
-      - name: Docker bootstrap without host racket (hidden runtime)
-        run: |
-          test/docker-test-fresh-install.sh \
-            --mode bootstrap \
-            --host-racket absent \
-            --spec stable \
-            --spec 8.18
-
-  docker-e2e-bootstrap-curl:
-    name: Docker E2E (curl | sh bootstrap in container)
-    runs-on: ubuntu-latest
-    needs:
-      - pages-build
-    timeout-minutes: 90
-    steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
-      - name: Download Pages site artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: pages-site-ci
-          path: .ci-cache/pages-site-artifact
-      - name: Extract Pages site artifact
-        shell: bash
-        run: |
-          mkdir -p .ci-cache/pages-site
-          tar -xzf .ci-cache/pages-site-artifact/pages-site-ci.tar.gz -C .ci-cache/pages-site
-      - name: Docker curl-pipe-sh bootstrap smoke (no host racket)
-        run: |
-          RACKUP_E2E_PREBUILT_PAGES_DIR="$PWD/.ci-cache/pages-site" \
-          test/docker-test-fresh-install.sh \
-            --mode bootstrap-curl \
-            --host-racket absent \
             --spec stable
 
   docker-e2e-upgrade-path:

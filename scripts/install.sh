@@ -14,6 +14,7 @@ BOOTSTRAP_MODE="${RACKUP_BOOTSTRAP_MODE:-install}"
 EXPECTED_SRC_SHA256="@@RACKUP_SRC_SHA256@@"
 FORCE_SOURCE="${RACKUP_FORCE_SOURCE:-0}"
 FORCE_EXE="${RACKUP_FORCE_EXE:-0}"
+PAGES_BASE_URL="${RACKUP_PAGES_BASE_URL:-}"
 
 is_tty_stdout() {
   [ -t 1 ]
@@ -171,6 +172,18 @@ detect_platform() {
   esac
 }
 
+# Map detected arch to the binary artifact name used by build-exe.
+# detect_arch returns "arm" for armv7, but the binary tarball is
+# named rackup-arm32-linux.tar.gz (matching the build-exe matrix).
+binary_target() {
+  arch="$1"
+  platform="$2"
+  case "$arch" in
+    arm) echo "arm32-${platform}" ;;
+    *) echo "${arch}-${platform}" ;;
+  esac
+}
+
 download_file() {
   url="$1"
   out="$2"
@@ -234,11 +247,12 @@ verify_sha256() {
 
 # Targets for which prebuilt binaries are published.
 # This list must match the build-exe matrix in .github/workflows/build-exe.yml.
+# Accepts both raw detect_arch output (arm-linux) and binary_target output (arm32-linux).
 has_prebuilt_binary() {
   target="$1"
   case "$target" in
     x86_64-linux | aarch64-linux | x86_64-macosx | aarch64-macosx | \
-      arm32-linux | i386-linux)
+      arm-linux | arm32-linux | i386-linux)
       return 0
       ;;
     *)
@@ -253,20 +267,22 @@ has_prebuilt_binary() {
 if [ "$BOOTSTRAP_MODE" = "self-upgrade" ] && [ -z "$FROM_LOCAL" ] &&
   [ -z "$ARCHIVE_URL_OVERRIDE" ] && [ "$REPO" = "samth/rackup" ] &&
   [ "$REF" = "main" ]; then
-  _upgrade_base_url="https://samth.github.io/rackup"
+  _upgrade_base_url="${PAGES_BASE_URL:-https://samth.github.io/rackup}"
   _installed_sha_file="$PREFIX/.installed-sha256"
   if [ "$FORCE_SOURCE" -eq 1 ]; then
     _remote_sha_url="$_upgrade_base_url/rackup-src.tar.gz.sha256"
   elif [ "$FORCE_EXE" -eq 1 ]; then
     _host_arch="$(detect_arch)"
     _host_platform="$(detect_platform)"
-    _remote_sha_url="$_upgrade_base_url/rackup-${_host_arch}-${_host_platform}.tar.gz.sha256"
+    _host_binary_target="$(binary_target "$_host_arch" "$_host_platform")"
+    _remote_sha_url="$_upgrade_base_url/rackup-${_host_binary_target}.tar.gz.sha256"
   else
     # Auto mode: check the exe checksum if a prebuilt is available, source otherwise.
     _host_arch="$(detect_arch)"
     _host_platform="$(detect_platform)"
+    _host_binary_target="$(binary_target "$_host_arch" "$_host_platform")"
     if has_prebuilt_binary "${_host_arch}-${_host_platform}"; then
-      _remote_sha_url="$_upgrade_base_url/rackup-${_host_arch}-${_host_platform}.tar.gz.sha256"
+      _remote_sha_url="$_upgrade_base_url/rackup-${_host_binary_target}.tar.gz.sha256"
     else
       _remote_sha_url="$_upgrade_base_url/rackup-src.tar.gz.sha256"
     fi
@@ -298,10 +314,13 @@ if [ -z "$FROM_LOCAL" ] && [ "$FORCE_SOURCE" -eq 0 ]; then
   HOST_ARCH="$(detect_arch)"
   HOST_PLATFORM="$(detect_platform)"
   HOST_TARGET="${HOST_ARCH}-${HOST_PLATFORM}"
-  BINARY_NAME="rackup-${HOST_TARGET}.tar.gz"
+  BINARY_TARGET="$(binary_target "$HOST_ARCH" "$HOST_PLATFORM")"
+  BINARY_NAME="rackup-${BINARY_TARGET}.tar.gz"
 
   if [ -n "$ARCHIVE_URL_OVERRIDE" ]; then
     BINARY_BASE_URL=""
+  elif [ -n "$PAGES_BASE_URL" ]; then
+    BINARY_BASE_URL="$PAGES_BASE_URL"
   elif [ "$REPO" = "samth/rackup" ] && [ "$REF" = "main" ]; then
     BINARY_BASE_URL="https://samth.github.io/rackup"
   else
@@ -394,6 +413,8 @@ if [ "$INSTALLED_PREBUILT" -eq 0 ]; then
   else
     if [ -n "$ARCHIVE_URL_OVERRIDE" ]; then
       ARCHIVE_URL="$ARCHIVE_URL_OVERRIDE"
+    elif [ -n "$PAGES_BASE_URL" ]; then
+      ARCHIVE_URL="$PAGES_BASE_URL/rackup-src.tar.gz"
     elif [ "$REPO" = "samth/rackup" ] && [ "$REF" = "main" ]; then
       ARCHIVE_URL="https://samth.github.io/rackup/rackup-src.tar.gz"
     else
