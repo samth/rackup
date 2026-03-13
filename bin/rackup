@@ -1,8 +1,20 @@
 #!/bin/sh
 set -eu
 
+# Resolve symlinks so SELF_DIR points at the real bin/ directory
+# (the shim in ~/.rackup/shims/ is a symlink to this script).
+SELF_SCRIPT="$0"
+while [ -L "$SELF_SCRIPT" ]; do
+  # POSIX-portable readlink: ls -l and strip prefix
+  _rackup_link_target="$(ls -ld "$SELF_SCRIPT" 2>/dev/null)" || break
+  _rackup_link_target="${_rackup_link_target#*" $SELF_SCRIPT -> "}"
+  case "$_rackup_link_target" in
+    /*) SELF_SCRIPT="$_rackup_link_target" ;;
+    *)  SELF_SCRIPT="$(dirname "$SELF_SCRIPT")/$_rackup_link_target" ;;
+  esac
+done
 # shellcheck disable=SC1007
-SELF_DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
+SELF_DIR=$(CDPATH= cd -- "$(dirname "$SELF_SCRIPT")" && pwd)
 LIBEXEC_DIR="$SELF_DIR/../libexec"
 CORE="$LIBEXEC_DIR/rackup-core.rkt"
 CORE_EXE="$SELF_DIR/rackup-core"
