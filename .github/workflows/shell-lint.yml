@@ -43,8 +43,9 @@ jobs:
           fi
 
           write_permissions="$(printf '%s\n' "$workflow_files" | xargs rg -N -H '^\s+[A-Za-z-]+:\s*write\s*$' || true)"
-          expected_write_permissions='.github/workflows/pages.yml:      pages: write
-.github/workflows/pages.yml:      id-token: write'
+          expected_write_permissions="$(printf '%s\n' \
+            '.github/workflows/pages.yml:      pages: write' \
+            '.github/workflows/pages.yml:      id-token: write')"
           if [ "$write_permissions" != "$expected_write_permissions" ]; then
             echo "Unexpected write-scoped workflow permissions detected:"
             echo "$write_permissions"

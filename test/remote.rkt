@@ -362,6 +362,32 @@
     (check-true (port-closed? redirect-in))
     (check-true (port-closed? ok-in)))
 
+  (let ([step 0]
+        [redirect-in (open-input-string "")]
+        [ok-in (open-input-string "legacy-redirect-ok")])
+    (parameterize ([current-http-sendrecv-proc
+                    (make-keyword-procedure
+                     (lambda (_kws _kw-args host target . _args)
+                       (set! step (add1 step))
+                       (case step
+                         [(1)
+                          (check-equal? host "download.plt-scheme.org")
+                          (check-equal? target "/bundles/4.2.5/plt/plt-4.2.5-bin-i386-osx-mac.dmg")
+                          (values "HTTP/1.1 302 Found"
+                                  (list #"Location: http://www.cs.utah.edu/plt/download/4.2.5/plt-4.2.5-bin-i386-osx-mac.dmg")
+                                  redirect-in)]
+                         [(2)
+                          (check-equal? host "www.cs.utah.edu")
+                          (check-equal? target "/plt/download/4.2.5/plt-4.2.5-bin-i386-osx-mac.dmg")
+                          (values "HTTP/1.1 200 OK" null ok-in)]
+                         [else
+                          (error 'test "unexpected legacy redirect step ~a" step)])))])
+      (check-equal? (http-get-string
+                     "http://download.plt-scheme.org/bundles/4.2.5/plt/plt-4.2.5-bin-i386-osx-mac.dmg")
+                    "legacy-redirect-ok"))
+    (check-true (port-closed? redirect-in))
+    (check-true (port-closed? ok-in)))
+
   (let ([in (open-input-string "")])
     (parameterize ([current-http-sendrecv-proc
                     (make-keyword-procedure

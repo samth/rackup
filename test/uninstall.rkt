@@ -98,22 +98,23 @@
      (ensure-index!)
      (make-directory* tmp-home)
      (define request-dir (make-temporary-file "rackup-uninstall-request-~a" 'directory tmp-root))
+     (define dummy-rc (build-path tmp-root "dummy.rc"))
      (dynamic-wind
       void
       (lambda ()
         (parameterize ([current-remove-shell-init-blocks-proc
-                        (lambda () (list (build-path tmp-home "dummy.rc")))]
+                        (lambda () (list dummy-rc))]
                        [current-uninstall-system*-proc
                         (lambda _args
                           (error 'test "unexpected direct deletion in request-dir mode"))])
           (cmd-uninstall (list "--yes"
                                "--uninstall-request-dir"
                                (path->string request-dir))))
-        (define report-path (build-path request-dir "removed-rcs.txt"))
-        (check-true (file-exists? report-path))
-        (define report-text (file->string report-path))
-        (check-true (string-contains? report-text "dummy.rc"))
-        (check-false (string-contains? report-text (path->string tmp-home)))))
+        (let* ([report-path (build-path request-dir "removed-rcs.txt")]
+               [report-text (file->string report-path)])
+          (check-true (file-exists? report-path))
+          (check-true (string-contains? report-text (path->string dummy-rc)))
+          (check-false (string-contains? report-text (path->string tmp-home)))))
       (lambda ()
         (delete-directory/files request-dir #:must-exist? #f)))))
 
@@ -203,4 +204,4 @@
      (write-string-file (rackup-toolchain-meta-file "release-bad") "not-rktd")
      (define metas (installed-toolchain-metas/safe))
      (check-equal? (length metas) 1)
-     (check-true (hash? (car metas)))))
+     (check-true (hash? (car metas))))))

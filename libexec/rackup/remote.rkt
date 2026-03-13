@@ -86,7 +86,9 @@
        (equal? (effective-url-port a) (effective-url-port b))))
 
 (define trusted-redirect-host-groups
-  '(("download.racket-lang.org" "mirror.racket-lang.org")))
+  '(("download.racket-lang.org" "mirror.racket-lang.org")
+    ;; Legacy PLT Scheme artifacts may redirect through Utah-hosted mirrors.
+    ("download.plt-scheme.org" "www.cs.utah.edu")))
 
 (define (same-trusted-redirect-group? host-a host-b)
   (for/or ([group (in-list trusted-redirect-host-groups)])
