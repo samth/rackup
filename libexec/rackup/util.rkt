@@ -136,7 +136,7 @@
 ;; so the hidden runtime is not affected. restore-saved-racket-env-vars!
 ;; puts them back for user toolchain subprocesses (rackup run).
 (define sanitized-racket-env-vars
-  '("PLTHOME" "PLTCOLLECTS" "PLTADDONDIR" "PLTCOMPILEDROOTS"
+  '("PLTCOLLECTS" "PLTADDONDIR" "PLTCOMPILEDROOTS"
     "PLTUSERHOME" "RACKET_XPATCH" "PLT_COMPILED_FILE_CHECK"))
 
 (define (restore-saved-racket-env-vars! env)

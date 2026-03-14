@@ -175,9 +175,9 @@ if [ "$MODE" = debug ]; then
   # shellcheck disable=SC2016
   run_case_sh direct-no-aslr 'exec setarch i386 -R "$1"' "$REAL_BIN"
   # shellcheck disable=SC2016
-  run_case_sh direct-min-env 'exec env -i HOME=/root PATH=/usr/bin:/bin PLTHOME="$2" PLTADDONDIR="$3" "$1"' "$REAL_BIN" "$PLTHOME" "$PLTADDONDIR"
+  run_case_sh direct-min-env 'exec env -i HOME=/root PATH=/usr/bin:/bin PLTADDONDIR="$2" "$1"' "$REAL_BIN" "$PLTADDONDIR"
   # shellcheck disable=SC2016
-  run_case_sh direct-no-aslr-min-env 'exec env -i HOME=/root PATH=/usr/bin:/bin PLTHOME="$2" PLTADDONDIR="$3" setarch i386 -R "$1"' "$REAL_BIN" "$PLTHOME" "$PLTADDONDIR"
+  run_case_sh direct-no-aslr-min-env 'exec env -i HOME=/root PATH=/usr/bin:/bin PLTADDONDIR="$2" setarch i386 -R "$1"' "$REAL_BIN" "$PLTADDONDIR"
 
   set +e
   strace -f -o "$OUTPUT_DIR/mzscheme.strace" "$REAL_BIN" <"$OUTPUT_DIR/mzscheme.input" >"$OUTPUT_DIR/mzscheme-strace.stdout" 2>"$OUTPUT_DIR/mzscheme-strace.stderr"
