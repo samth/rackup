@@ -170,6 +170,11 @@ string_has_control_chars() {
       }'
 }
 
+is_sha256_hex() {
+  value="$1"
+  printf '%s\n' "$value" | grep -Eq '^[0-9a-f]{64}$'
+}
+
 validate_safe_prefix() {
   prefix="$1"
   reason=""
@@ -482,7 +487,7 @@ if [ "$INSTALLED_PREBUILT" -eq 0 ]; then
     else
       ARCHIVE_URL="https://github.com/${REPO}/archive/refs/heads/${REF}.tar.gz"
     fi
-    if [ "$EXPECTED_SRC_SHA256" = "@@RACKUP_SRC_SHA256@@" ]; then
+    if ! is_sha256_hex "$EXPECTED_SRC_SHA256"; then
       warn "Error: this checked-in install.sh template does not have a baked source checksum."
       warn "Build the published installer first, or use --from-local for a local source install."
       exit 1
@@ -543,7 +548,7 @@ if [ "$INSTALLED_PREBUILT" -eq 0 ]; then
 
   ok "Installed: $PREFIX/bin/rackup"
   # Store the checksum so self-upgrade can detect no-ops.
-  if [ "$EXPECTED_SRC_SHA256" != "@@RACKUP_SRC_SHA256@@" ]; then
+  if is_sha256_hex "$EXPECTED_SRC_SHA256"; then
     printf '%s\n' "$EXPECTED_SRC_SHA256" >"$PREFIX/.installed-sha256"
   elif [ -f "$TMPDIR_INSTALL/rackup.tar.gz" ]; then
     _src_sha="$(compute_sha256 "$TMPDIR_INSTALL/rackup.tar.gz")" || true

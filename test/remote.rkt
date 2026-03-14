@@ -363,7 +363,8 @@
     (check-true (port-closed? ok-in)))
 
   (let ([step 0]
-        [redirect-in (open-input-string "")]
+        [redirect-in-1 (open-input-string "")]
+        [redirect-in-2 (open-input-string "")]
         [ok-in (open-input-string "legacy-redirect-ok")])
     (parameterize ([current-http-sendrecv-proc
                     (make-keyword-procedure
@@ -375,9 +376,15 @@
                           (check-equal? target "/bundles/4.2.5/plt/plt-4.2.5-bin-i386-osx-mac.dmg")
                           (values "HTTP/1.1 302 Found"
                                   (list #"Location: http://www.cs.utah.edu/plt/download/4.2.5/plt-4.2.5-bin-i386-osx-mac.dmg")
-                                  redirect-in)]
+                                  redirect-in-1)]
                          [(2)
                           (check-equal? host "www.cs.utah.edu")
+                          (check-equal? target "/plt/download/4.2.5/plt-4.2.5-bin-i386-osx-mac.dmg")
+                          (values "HTTP/1.1 302 Found"
+                                  (list #"Location: https://www-old.cs.utah.edu/plt/download/4.2.5/plt-4.2.5-bin-i386-osx-mac.dmg")
+                                  redirect-in-2)]
+                         [(3)
+                          (check-equal? host "www-old.cs.utah.edu")
                           (check-equal? target "/plt/download/4.2.5/plt-4.2.5-bin-i386-osx-mac.dmg")
                           (values "HTTP/1.1 200 OK" null ok-in)]
                          [else
@@ -385,7 +392,8 @@
       (check-equal? (http-get-string
                      "http://download.plt-scheme.org/bundles/4.2.5/plt/plt-4.2.5-bin-i386-osx-mac.dmg")
                     "legacy-redirect-ok"))
-    (check-true (port-closed? redirect-in))
+    (check-true (port-closed? redirect-in-1))
+    (check-true (port-closed? redirect-in-2))
     (check-true (port-closed? ok-in)))
 
   (let ([in (open-input-string "")])
