@@ -641,25 +641,19 @@ else
   assert_nonempty "$linked_version" "linked source-built racket should report a version"
 fi
 echo "linked racket version=$linked_version"
+# PLTHOME and PLTCOLLECTS are not set by rackup — the binary finds its own collects.
 linked_plthome="$(shim_racket -e '(display (or (getenv "PLTHOME") ""))')"
-# In-place source layouts (racket/collects) set PLTHOME to the checkout root;
-# installed-prefix layouts (racket/share/racket/collects) keep PLTHOME as
-# the racket subdirectory since there is no source-root to use.
-if [[ -d "${local_src_root}/racket/collects" ]]; then
-  expected_plthome="${local_src_root}"
-else
-  expected_plthome="${local_src_root}/racket"
-fi
-assert_eq "$expected_plthome" "$linked_plthome" "linked shim should export PLTHOME"
+assert_eq "" "$linked_plthome" "linked shim should NOT export PLTHOME"
 linked_collects="$(shim_racket -e '(display (or (getenv "PLTCOLLECTS") ""))')"
-assert_contains "${local_collects_dir}" "$linked_collects" "linked shim should export PLTCOLLECTS"
+assert_eq "" "$linked_collects" "linked shim should NOT export PLTCOLLECTS"
 linked_addon="$(shim_racket -e '(display (or (getenv "PLTADDONDIR") ""))')"
 assert_nonempty "$linked_addon" "linked shim should export PLTADDONDIR"
 linked_addon_path="$(shim_racket -e '(display (find-system-path (quote addon-dir)))')"
 assert_eq "$linked_addon_path" "$linked_addon" "linked shim PLTADDONDIR should match the linked installation addon dir"
 echo "linked shim environment verified"
+# Verify rackup run also does not set PLTHOME
 link_run_plthome="$(run_rackup run localsrc -- racket -e '(display (or (getenv "PLTHOME") ""))')"
-assert_eq "$expected_plthome" "$link_run_plthome" "rackup run should apply linked toolchain env"
+assert_eq "" "$link_run_plthome" "rackup run should NOT set PLTHOME"
 echo "rackup run environment verified"
 if [[ "$LOCAL_LINK_MODE" == "build" ]]; then
   run_rackup run localsrc -- raco help >/dev/null

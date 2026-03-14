@@ -373,9 +373,6 @@
 (define (path-complete-string p)
   (path->string* (path->complete-path p)))
 
-(define (path-join/colon paths)
-  (string-join (map path->string* paths) ":"))
-
 (define (maybe-parent p)
   (and p (path-only p)))
 
@@ -560,29 +557,16 @@
               (and (directory-exists? pkgs) (path-complete-string pkgs)))])]))
 
 (define (local-layout-env-vars layout [addon-dir #f])
-  (define collects-dir (hash-ref layout 'collects-dir))
-  (define pkgs-dir (hash-ref layout 'pkgs-dir #f))
   (define source-root (hash-ref layout 'source-root #f))
-  ;; PLTHOME should be the checkout root when linking a source tree,
-  ;; matching the plt-bin convention.  For installed-prefix layouts
-  ;; (no source-root), use the racket installation directory.
-  (define plthome-env (or source-root (hash-ref layout 'plthome)))
-  ;; Only include the collects dir in PLTCOLLECTS.  Packages in pkgs/ are
-  ;; discovered through links.rktd and do not need to be on the collection
-  ;; search path; including them causes "tool registered twice" warnings from
-  ;; raco because tools get found through both links and PLTCOLLECTS.
-  (define collects-path (path-join/colon (list collects-dir)))
   ;; For source checkouts, default PLTADDONDIR to <checkout>/add-on
   ;; (matching the plt-bin convention).
   (define effective-addon-dir
     (or addon-dir
         (and source-root
              (path->string* (build-path (string->path source-root) "add-on")))))
-  (append (list (cons "PLTHOME" plthome-env)
-                (cons "PLTCOLLECTS" collects-path))
-          (if (and (string? effective-addon-dir) (not (string-blank? effective-addon-dir)))
-              (list (cons "PLTADDONDIR" effective-addon-dir))
-              null)))
+  (if (and (string? effective-addon-dir) (not (string-blank? effective-addon-dir)))
+      (list (cons "PLTADDONDIR" effective-addon-dir))
+      null))
 
 (define (probe-local-racket-version+variant+addon-dir bin-dir env-vars)
   (define racket-exe (build-path (string->path bin-dir) "racket"))
@@ -608,21 +592,6 @@
   (values (and version-out (not (string-blank? version-out)) version-out)
           (normalize-vm-name variant-out)
           (and addon-out (not (string-blank? addon-out)) addon-out)))
-
-(define (installed-toolchain-env-vars real-bin-dir)
-  (define plthome (maybe-parent real-bin-dir))
-  (define-values (plthome-base plthome-leaf _plthome-dir?)
-    (if plthome
-        (split-path plthome)
-        (values #f #f #f)))
-  (define plthome-name
-    (and (path? plthome-leaf) (path->string plthome-leaf)))
-  (define plthome-normalized
-    (and plthome-base (path? plthome-leaf) (build-path plthome-base plthome-leaf)))
-  (cond
-    [(and plthome-normalized (equal? plthome-name "plt"))
-     (list (cons "PLTHOME" (path->string* plthome-normalized)))]
-    [else null]))
 
 (define (toolchain-meta request id real-bin-dir executables [env-vars null])
   (hash 'id
@@ -769,7 +738,7 @@
         'plthome
         (hash-ref layout 'plthome)
         'pltcollects
-        (cdr (assoc "PLTCOLLECTS" env-vars))
+        (hash-ref layout 'collects-dir)
         'install-root
         #f
         'bin-link
@@ -818,7 +787,9 @@
        (define env-vars (local-layout-env-vars layout addon-dir*))
        (make-bin-overlay! id real-bin-dir extra-exes)
        (maybe-wrap-local-chez-extra-executables! id extra-exes layout)
-       (write-toolchain-env-file! id env-vars)
+       (if (pair? env-vars)
+           (write-toolchain-env-file! id env-vars)
+           (delete-toolchain-env-file! id))
        (ensure-toolchain-addon-dir! id)
        (define executables (enumerate-toolchain-executables (rackup-toolchain-bin-link id)))
        (define meta (local-toolchain-meta id name layout real-bin-dir executables env-vars version* variant*))
@@ -934,13 +905,10 @@
          (define real-bin-dir (detect-bin-dir install-root))
          (maybe-modernize-legacy-archsys! real-bin-dir)
          (make-bin-link! id real-bin-dir)
-         (define env-vars (installed-toolchain-env-vars real-bin-dir))
-         (if (pair? env-vars)
-             (write-toolchain-env-file! id env-vars)
-             (delete-toolchain-env-file! id))
+         (delete-toolchain-env-file! id)
          (ensure-toolchain-addon-dir! id)
          (define executables (enumerate-toolchain-executables real-bin-dir))
-         (define meta (toolchain-meta request id real-bin-dir executables env-vars))
+         (define meta (toolchain-meta request id real-bin-dir executables))
          (commit-state-change!
           (register-toolchain! id meta)
           (when explicit-default?
@@ -1008,5 +976,4 @@
 
 (module+ for-testing
   (provide detect-bin-dir
-           installed-toolchain-env-vars
            ensure-installer-cached!))

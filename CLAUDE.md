@@ -1,5 +1,9 @@
 # Project Instructions
 
+## Architecture
+
+See `docs/IMPLEMENTATION.md` for a detailed description of the project's design and internals.
+
 ## Git
 
 - Use `Closes #N` or `Fixes #N` in commit messages to auto-close GitHub issues.

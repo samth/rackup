@@ -24,7 +24,7 @@
          "../libexec/rackup/util.rkt"
          "../libexec/rackup/versioning.rkt"
          (only-in (submod "../libexec/rackup/install.rkt" for-testing)
-                  detect-bin-dir installed-toolchain-env-vars)
+                  detect-bin-dir)
          (only-in (submod "../libexec/rackup/runtime.rkt" for-testing)
                   hidden-runtime-invocation-prefix)
          (submod "../libexec/rackup/shell.rkt" for-testing))
@@ -291,7 +291,7 @@
                            (check-true (link-exists? (build-path (rackup-shims-dir) "racket")))
                            (check-true (link-exists? (build-path (rackup-shims-dir) "rackup")))
                            (define dispatcher-src (file->string (rackup-shim-dispatcher)))
-                           (check-true (string-contains? dispatcher-src "PLTHOME/.bin"))
+                           (check-true (string-contains? dispatcher-src "install_root/.bin"))
                            (check-true
                             (string-contains? dispatcher-src "resolved underlying executable"))
                            (check-true
@@ -343,12 +343,6 @@
           })
      (file-or-directory-permissions mzscheme-exe #o755)
      (make-file-or-directory-link real-bin (rackup-toolchain-bin-link id))
-     (define env-vars (installed-toolchain-env-vars real-bin))
-     (check-equal? env-vars (list (cons "PLTHOME" (path->string plthome))))
-     (write-string-file (rackup-toolchain-env-file id)
-                        (string-append "#!/usr/bin/env bash\n"
-                                       "export PLTHOME="
-                                       (format "'~a'\n" (path->string plthome))))
      (define meta
        (hash 'id
              id
@@ -381,8 +375,7 @@
              'real-bin-dir
              (path->string real-bin)
              'env-vars
-             (for/list ([kv (in-list env-vars)])
-               (list (car kv) (cdr kv)))
+             '()
              'executables
              '("mzscheme")
              'installed-at
@@ -393,21 +386,23 @@
      (define mzscheme-out
        (capture-output
         (lambda () (system* (build-path (rackup-shims-dir) "mzscheme")))))
-     (check-true (string-contains? mzscheme-out (format "PLTHOME=~a" (path->string plthome))))))
+     ;; PLTHOME should NOT be set by the shim (it is not a Racket env var)
+     (check-true (string-contains? mzscheme-out "PLTHOME="))))
 
   (with-temp-rackup-home
    (lambda (tmp)
      (ensure-index!)
      (define id "release-103p1-bc-i386-linux-full")
      (define install-root (rackup-toolchain-install-dir id))
-     (define real-bin (build-path install-root "bin"))
+     ;; In a real PLT 103 installation, the layout is plt/bin/ and plt/.bin/.
+     ;; The dispatcher derives the install root from dirname(BIN_REAL) to find .bin/.
      (define plthome (build-path install-root "plt"))
+     (define real-bin (build-path plthome "bin"))
      (define legacy-bin (build-path plthome ".bin" "i386-linux"))
      (define archsys (build-path plthome "bin" "archsys"))
      (define fake-binfmt-dir (build-path tmp "binfmt"))
      (make-directory* real-bin)
      (make-directory* legacy-bin)
-     (make-directory* (build-path plthome "bin"))
      (make-directory* fake-binfmt-dir)
      (define racket-exe (build-path real-bin "racket"))
      (write-string-file racket-exe "#!/usr/bin/env bash\nexit 139\n")
@@ -422,9 +417,6 @@
      (file-or-directory-permissions (build-path legacy-bin "racket") #o755)
      (write-string-file (build-path fake-binfmt-dir "qemu-i386")
                         "enabled\ninterpreter /usr/bin/qemu-i386\n")
-     (write-string-file (rackup-toolchain-env-file id)
-                        (format "#!/usr/bin/env bash\nexport PLTHOME='~a'\n"
-                                (path->string plthome)))
      (make-file-or-directory-link real-bin (rackup-toolchain-bin-link id))
      (with-state-lock
        (register-toolchain!
@@ -580,18 +572,26 @@
 
      (define shim-racket (build-path (rackup-shims-dir) "racket"))
      (define old-pltaddon (getenv "PLTADDONDIR"))
+     (define old-plthome (getenv "PLTHOME"))
+     (define old-pltcollects (getenv "PLTCOLLECTS"))
      (void (putenv "PLTADDONDIR" ""))
+     (void (putenv "PLTHOME" ""))
+     (void (putenv "PLTCOLLECTS" ""))
      (define shim-out
        (capture-output (lambda () (system* shim-racket))))
      (void (if old-pltaddon
                (putenv "PLTADDONDIR" old-pltaddon)
                (putenv "PLTADDONDIR" "")))
-     ;; PLTHOME should be the checkout root, not the racket/ subdirectory
-     (check-true (regexp-match? (regexp (regexp-quote (format "PLTHOME=~a" (path->string src-root))))
-                                shim-out))
-     (check-true (regexp-match? (regexp (regexp-quote (format "PLTCOLLECTS=~a"
-                                                              (path->string collects-dir))))
-                                shim-out))
+     (void (if old-plthome
+               (putenv "PLTHOME" old-plthome)
+               (putenv "PLTHOME" "")))
+     (void (if old-pltcollects
+               (putenv "PLTCOLLECTS" old-pltcollects)
+               (putenv "PLTCOLLECTS" "")))
+     ;; PLTHOME and PLTCOLLECTS should NOT be set by the shim — they are not
+     ;; Racket env vars, and the binary finds its own collects.
+     (check-true (string-contains? shim-out "PLTHOME=\n"))
+     (check-true (string-contains? shim-out "PLTCOLLECTS=\n"))
      (check-true (regexp-match?
                   (regexp (regexp-quote (format "PLTADDONDIR=~a"
                                                 (path->string addon-dir))))
@@ -610,8 +610,8 @@
                                                       (path->string petite-boot))))
 
      (define activation (emit-shell-activation linked-id))
-     (check-true (string-contains? activation "export PLTHOME="))
-     (check-true (string-contains? activation "export PLTCOLLECTS="))
+     (check-false (string-contains? activation "export PLTHOME="))
+     (check-false (string-contains? activation "export PLTCOLLECTS="))
      (check-true (string-contains? activation (format "export PLTADDONDIR='~a'" (path->string addon-dir))))
      (expect (run-main (list "switch" "devsrc")) activation)
      @expect[(run-main '("prompt"))]{devsrc
@@ -626,8 +626,8 @@
 }
      (void (putenv "RACKUP_TOOLCHAIN" linked-id))
      (define deactivation (emit-shell-deactivation))
-     (check-true (string-contains? deactivation "unset PLTHOME"))
-     (check-true (string-contains? deactivation "unset PLTCOLLECTS"))
+     (check-false (string-contains? deactivation "unset PLTHOME"))
+     (check-false (string-contains? deactivation "unset PLTCOLLECTS"))
      (expect (run-main '("switch" "--unset")) deactivation)
      (void (putenv "RACKUP_TOOLCHAIN" ""))))
 
@@ -656,13 +656,11 @@
          (define raco-shim (build-path (rackup-shims-dir) "raco"))
          (define old-pltaddon (getenv "PLTADDONDIR"))
          (define old-pltcollects (getenv "PLTCOLLECTS"))
-         (define old-plthome (getenv "PLTHOME"))
          (define old-toolchain (getenv "RACKUP_TOOLCHAIN"))
          (dynamic-wind
            (lambda ()
              (putenv "PLTADDONDIR" "")
              (putenv "PLTCOLLECTS" "")
-             (putenv "PLTHOME" "")
              (putenv "RACKUP_TOOLCHAIN" ""))
            (lambda ()
              (define-values (proc stdout stdin stderr)
@@ -677,7 +675,6 @@
            (lambda ()
              (if old-pltaddon (putenv "PLTADDONDIR" old-pltaddon) (putenv "PLTADDONDIR" ""))
              (if old-pltcollects (putenv "PLTCOLLECTS" old-pltcollects) (putenv "PLTCOLLECTS" ""))
-             (if old-plthome (putenv "PLTHOME" old-plthome) (putenv "PLTHOME" ""))
              (if old-toolchain (putenv "RACKUP_TOOLCHAIN" old-toolchain)
                  (putenv "RACKUP_TOOLCHAIN" ""))))))))
 
@@ -737,14 +734,22 @@
      (check-not-false (member "scheme" (hash-ref linked-meta 'executables)))
      (check-not-false (member "petite" (hash-ref linked-meta 'executables)))
 
+     (define old-plthome (getenv "PLTHOME"))
+     (define old-pltcollects (getenv "PLTCOLLECTS"))
+     (void (putenv "PLTHOME" ""))
+     (void (putenv "PLTCOLLECTS" ""))
      (define shim-out
        (capture-output
         (lambda () (system* (build-path (rackup-shims-dir) "racket")))))
-     (check-true (regexp-match? (regexp (regexp-quote (format "PLTHOME=~a" (path->string plthome))))
-                                shim-out))
-     (check-true (regexp-match? (regexp (regexp-quote (format "PLTCOLLECTS=~a"
-                                                              (path->string collects-dir))))
-                                shim-out))
+     (void (if old-plthome
+               (putenv "PLTHOME" old-plthome)
+               (putenv "PLTHOME" "")))
+     (void (if old-pltcollects
+               (putenv "PLTCOLLECTS" old-pltcollects)
+               (putenv "PLTCOLLECTS" "")))
+     ;; PLTHOME and PLTCOLLECTS should NOT be set for linked toolchains
+     (check-true (string-contains? shim-out "PLTHOME=\n"))
+     (check-true (string-contains? shim-out "PLTCOLLECTS=\n"))
      (check-true (regexp-match? (regexp (regexp-quote (format "PLTADDONDIR=~a"
                                                               (path->string addon-dir))))
                                 shim-out))))
@@ -790,13 +795,11 @@
      (define current-collects
        (string-join (map path->string (current-library-collection-paths)) ":"))
      (define old-toolchain (getenv "RACKUP_TOOLCHAIN"))
-     (define old-plthome (getenv "PLTHOME"))
      (define old-pltcollects (getenv "PLTCOLLECTS"))
      (define old-pltaddondir (getenv "PLTADDONDIR"))
      (dynamic-wind
       (lambda ()
         (putenv "RACKUP_TOOLCHAIN" linked-id)
-        (putenv "PLTHOME" (path->string plthome))
         (putenv "PLTCOLLECTS"
                 (string-append (path->string poisoned-collects) ":" current-collects))
         (putenv "PLTADDONDIR" (path->string (build-path tmp "poisoned-addon"))))
@@ -807,9 +810,6 @@
         (if old-toolchain
             (putenv "RACKUP_TOOLCHAIN" old-toolchain)
             (putenv "RACKUP_TOOLCHAIN" ""))
-        (if old-plthome
-            (putenv "PLTHOME" old-plthome)
-            (putenv "PLTHOME" ""))
         (if old-pltcollects
             (putenv "PLTCOLLECTS" old-pltcollects)
             (putenv "PLTCOLLECTS" ""))
@@ -947,6 +947,8 @@
                                   (string-append (path->string fake-bin-dir)
                                                  ":"
                                                  (or (getenv "PATH") "/usr/bin:/bin"))))
+     ;; PLTHOME is not a Racket env var, so bin/rackup does not save/unset it.
+     ;; It passes through to the subprocess unchanged.
      (environment-variables-set! env #"PLTHOME" #"poison-plthome")
      (environment-variables-set! env #"PLTCOLLECTS" #"poison-collects")
      (environment-variables-set! env #"PLTADDONDIR" #"poison-addon")
@@ -966,8 +968,10 @@
      (check-true (string-suffix? (list-ref argv 4) "libexec/rackup-core.rkt"))
      (check-equal? (drop argv 5) '("current" "id"))
      (define env-lines (string-split (string-trim (file->string captured-env)) "\n"))
+     ;; PLTHOME passes through (not a Racket env var); PLTCOLLECTS and
+     ;; PLTADDONDIR are cleared by bin/rackup to protect its own runtime.
      (check-equal? env-lines
-                   '("PLTHOME="
+                   '("PLTHOME=poison-plthome"
                      "PLTCOLLECTS="
                      "PLTADDONDIR="))))
 

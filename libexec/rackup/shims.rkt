@@ -102,17 +102,19 @@ rackup_is_elf32() {
 
 rackup_resolve_inspect_target() {
   local target="$1" inspect_target sys candidate
+  local install_root
+  install_root="$(dirname "$BIN_REAL")"
   inspect_target="$target"
   if ! rackup_is_elf32 "$inspect_target"; then
-    if [[ -n "${PLTHOME:-}" && -d "$PLTHOME/.bin" ]]; then
-      if [[ -x "$PLTHOME/bin/archsys" ]]; then
-        sys="$("$PLTHOME/bin/archsys" z 2>/dev/null || true)"
-        if [[ -n "$sys" && -x "$PLTHOME/.bin/$sys/$SHIM_NAME" ]]; then
-          inspect_target="$PLTHOME/.bin/$sys/$SHIM_NAME"
+    if [[ -d "$install_root/.bin" ]]; then
+      if [[ -x "$install_root/bin/archsys" ]]; then
+        sys="$("$install_root/bin/archsys" z 2>/dev/null || true)"
+        if [[ -n "$sys" && -x "$install_root/.bin/$sys/$SHIM_NAME" ]]; then
+          inspect_target="$install_root/.bin/$sys/$SHIM_NAME"
         fi
       fi
       if [[ "$inspect_target" == "$target" ]]; then
-        for candidate in "$PLTHOME"/.bin/*/"$SHIM_NAME"; do
+        for candidate in "$install_root"/.bin/*/"$SHIM_NAME"; do
           if [[ -x "$candidate" ]]; then
             inspect_target="$candidate"
             break
@@ -355,19 +357,8 @@ EOF
   (when (file-exists? p)
     (delete-file p)))
 
-(define (detect-collects-dir plthome)
-  (define in-place (build-path (string->path plthome) "collects"))
-  (define prefix (build-path (string->path plthome) "share" "racket" "collects"))
-  (cond
-    [(directory-exists? in-place) (path->string* in-place)]
-    [(directory-exists? prefix) (path->string* prefix)]
-    [else #f]))
-
 (define (compute-local-env-vars meta)
-  (define plthome (hash-ref meta 'plthome #f))
   (define source-root (hash-ref meta 'source-root #f))
-  (define plthome-env (or source-root plthome))
-  (define collects-dir (and plthome (detect-collects-dir plthome)))
   (define old-env-vars (hash-ref meta 'env-vars '()))
   (define old-addon-dir
     (for/or ([kv (in-list old-env-vars)])
@@ -376,11 +367,9 @@ EOF
     (or old-addon-dir
         (and source-root
              (path->string* (build-path (string->path source-root) "add-on")))))
-  (append (if plthome-env (list (cons "PLTHOME" plthome-env)) null)
-          (if collects-dir (list (cons "PLTCOLLECTS" collects-dir)) null)
-          (if (and (string? effective-addon-dir) (not (string-blank? effective-addon-dir)))
-              (list (cons "PLTADDONDIR" effective-addon-dir))
-              null)))
+  (if (and (string? effective-addon-dir) (not (string-blank? effective-addon-dir)))
+      (list (cons "PLTADDONDIR" effective-addon-dir))
+      null))
 
 (define (regenerate-env-files!)
   (for ([id (in-list (installed-toolchain-ids))])

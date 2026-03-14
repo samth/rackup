@@ -88,15 +88,15 @@ The `.rktd` reader disables `read-accept-reader`, `read-accept-lang`, and `read-
 
 ## Environment variable isolation
 
-When `bin/rackup` starts, it saves any user-set Racket environment variables (`PLTHOME`, `PLTCOLLECTS`, `PLTADDONDIR`, `PLTCOMPILEDROOTS`, `PLTUSERHOME`, `RACKET_XPATCH`, `PLT_COMPILED_FILE_CHECK`) as `_RACKUP_ORIG_*` and then unsets the originals. This prevents the user's Racket environment from interfering with rackup's own runtime (whether hidden runtime or embedded exe).
+When `bin/rackup` starts, it saves any user-set Racket environment variables (`PLTCOLLECTS`, `PLTADDONDIR`, `PLTCOMPILEDROOTS`, `PLTUSERHOME`, `RACKET_XPATCH`, `PLT_COMPILED_FILE_CHECK`) as `_RACKUP_ORIG_*` and then unsets the originals. This prevents the user's Racket environment from interfering with rackup's own runtime (whether hidden runtime or embedded exe). `PLTHOME` is not included because it is not a Racket environment variable (it is a convention from the `plt-bin` script in `racket-dev-goodies`).
 
-When `rackup run` spawns a subprocess, `restore-saved-racket-env-vars!` in `util.rkt` first restores the user's original Racket environment variables from the `_RACKUP_ORIG_*` copies. Then `cmd-run` overlays the target toolchain's managed environment variables on top (including `PLTADDONDIR`, `PLTHOME`, and `PLTCOLLECTS` from the toolchain's env-vars). The toolchain-managed values take precedence over the restored originals.
+When `rackup run` spawns a subprocess, `restore-saved-racket-env-vars!` in `util.rkt` first restores the user's original Racket environment variables from the `_RACKUP_ORIG_*` copies. Then `cmd-run` overlays the target toolchain's managed environment variables on top (currently only `PLTADDONDIR`). This means a user-set `PLTCOLLECTS` passes through to the toolchain's Racket, allowing users to add collection directories that are available regardless of which toolchain is active.
 
 ## Per-toolchain env.sh
 
-The shim dispatcher sources a per-toolchain `env.sh` file if present. For installed (release/snapshot) toolchains, this file is computed once at install time. For linked (local) toolchains, the env file is regenerated on every `reshim!` call by `regenerate-env-files!` in `shims.rkt`, because the source tree layout may change. If a local toolchain has no derivable env vars (e.g., the source root cannot be located), the env file is deleted rather than written empty.
+The shim dispatcher sources a per-toolchain `env.sh` file if present. For linked (local) toolchains, the env file is regenerated on every `reshim!` call by `regenerate-env-files!` in `shims.rkt`, because the source tree layout may change. If a local toolchain has no derivable env vars (e.g., the source root cannot be located), the env file is deleted rather than written empty. Installed (release/snapshot) toolchains do not have env files.
 
-The env file conditionally exports `PLTHOME`, `PLTCOLLECTS`, and `PLTADDONDIR` — each key is only emitted when a value can be computed. If `PLTADDONDIR` is still unset after sourcing (or if no env file exists), the dispatcher synthesizes a fallback value (`~/.rackup/addons/<id>`). The `PLTCOLLECTS` value, when set, points at the bare collects directory (not the search-path form with a trailing empty element) so that user-installed packages are found through the addon directory rather than through the source tree's `pkgs/` directory.
+The env file exports only `PLTADDONDIR` when a value can be computed. Neither `PLTHOME` nor `PLTCOLLECTS` is set — the Racket binary finds its own collections via compiled-in relative paths, and `PLTHOME` is not a Racket environment variable. If `PLTADDONDIR` is still unset after sourcing (or if no env file exists), the dispatcher synthesizes a fallback value (`~/.rackup/addons/<id>`).
 
 ## Shell integration
 

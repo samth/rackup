@@ -58,13 +58,13 @@ fi
 if [ -x "$CORE_EXE" ]; then
   # Save user's Racket env vars for pass-through (rackup run), then clear
   # so the embedded runtime is not affected.
-  for _rackup_v in PLTHOME PLTCOLLECTS PLTADDONDIR PLTCOMPILEDROOTS PLTUSERHOME RACKET_XPATCH PLT_COMPILED_FILE_CHECK; do
+  for _rackup_v in PLTCOLLECTS PLTADDONDIR PLTCOMPILEDROOTS PLTUSERHOME RACKET_XPATCH PLT_COMPILED_FILE_CHECK; do
     eval "_rackup_val=\${$_rackup_v:-}"
     if [ -n "$_rackup_val" ]; then
       eval "export _RACKUP_ORIG_$_rackup_v=\"\$_rackup_val\""
     fi
   done
-  unset PLTHOME PLTCOLLECTS PLTADDONDIR PLTCOMPILEDROOTS PLTUSERHOME RACKET_XPATCH PLT_COMPILED_FILE_CHECK
+  unset PLTCOLLECTS PLTADDONDIR PLTCOMPILEDROOTS PLTUSERHOME RACKET_XPATCH PLT_COMPILED_FILE_CHECK
 
   if [ "${1:-}" = "uninstall" ]; then
     REQUEST_DIR="$(mktemp -d "${TMPDIR:-/tmp}/rackup-uninstall.XXXXXX")"
@@ -128,7 +128,7 @@ for _rackup_v in PLTHOME PLTCOLLECTS PLTADDONDIR PLTCOMPILEDROOTS PLTUSERHOME RA
     eval "export _RACKUP_ORIG_$_rackup_v=\"\$_rackup_val\""
   fi
 done
-unset PLTHOME PLTCOLLECTS PLTADDONDIR PLTCOMPILEDROOTS PLTUSERHOME RACKET_XPATCH PLT_COMPILED_FILE_CHECK
+unset PLTCOLLECTS PLTADDONDIR PLTCOMPILEDROOTS PLTUSERHOME RACKET_XPATCH PLT_COMPILED_FILE_CHECK
 
 rackup_run_core() {
   if [ "$USE_Y" -eq 1 ]; then
