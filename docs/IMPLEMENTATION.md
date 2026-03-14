@@ -96,7 +96,7 @@ When `rackup run` spawns a subprocess, `restore-saved-racket-env-vars!` in `util
 
 The shim dispatcher sources a per-toolchain `env.sh` file if present. For linked (local) toolchains, the env file is regenerated on every `reshim!` call by `regenerate-env-files!` in `shims.rkt`, because the source tree layout may change. If a local toolchain has no derivable env vars (e.g., the source root cannot be located), the env file is deleted rather than written empty. Installed (release/snapshot) toolchains do not have env files.
 
-The env file exports only `PLTADDONDIR` when a value can be computed. Neither `PLTHOME` nor `PLTCOLLECTS` is set — the Racket binary finds its own collections via compiled-in relative paths, and `PLTHOME` is not a Racket environment variable. If `PLTADDONDIR` is still unset after sourcing (or if no env file exists), the dispatcher synthesizes a fallback value (`~/.rackup/addons/<id>`).
+The env file exports only `PLTADDONDIR` when a value can be computed. Neither `PLTHOME` nor `PLTCOLLECTS` is set — the Racket binary finds its own collections via compiled-in relative paths, and `PLTHOME` is not a Racket environment variable. The one exception is old PLT Scheme installations (version <= 4.x) where the parent directory is named `plt`: these set `PLTHOME` because PLT Scheme's `bin/mzscheme` shell wrapper uses it to locate the real binary under `.bin/<archsys>/`. If `PLTADDONDIR` is still unset after sourcing (or if no env file exists), the dispatcher synthesizes a fallback value (`~/.rackup/addons/<id>`).
 
 ## Shell integration
 

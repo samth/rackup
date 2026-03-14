@@ -593,6 +593,24 @@
           (normalize-vm-name variant-out)
           (and addon-out (not (string-blank? addon-out)) addon-out)))
 
+;; Old PLT Scheme installations (version <= 4.x) have a shell wrapper at
+;; plt/bin/mzscheme that uses $PLTHOME to locate the real binary under
+;; plt/.bin/<archsys>/. Set PLTHOME for these so the wrapper works.
+(define (installed-toolchain-env-vars real-bin-dir)
+  (define plthome (maybe-parent real-bin-dir))
+  (define-values (plthome-base plthome-leaf _plthome-dir?)
+    (if plthome
+        (split-path plthome)
+        (values #f #f #f)))
+  (define plthome-name
+    (and (path? plthome-leaf) (path->string plthome-leaf)))
+  (define plthome-normalized
+    (and plthome-base (path? plthome-leaf) (build-path plthome-base plthome-leaf)))
+  (cond
+    [(and plthome-normalized (equal? plthome-name "plt"))
+     (list (cons "PLTHOME" (path->string* plthome-normalized)))]
+    [else null]))
+
 (define (toolchain-meta request id real-bin-dir executables [env-vars null])
   (hash 'id
         id
@@ -905,10 +923,13 @@
          (define real-bin-dir (detect-bin-dir install-root))
          (maybe-modernize-legacy-archsys! real-bin-dir)
          (make-bin-link! id real-bin-dir)
-         (delete-toolchain-env-file! id)
+         (define env-vars (installed-toolchain-env-vars real-bin-dir))
+         (if (pair? env-vars)
+             (write-toolchain-env-file! id env-vars)
+             (delete-toolchain-env-file! id))
          (ensure-toolchain-addon-dir! id)
          (define executables (enumerate-toolchain-executables real-bin-dir))
-         (define meta (toolchain-meta request id real-bin-dir executables))
+         (define meta (toolchain-meta request id real-bin-dir executables env-vars))
          (commit-state-change!
           (register-toolchain! id meta)
           (when explicit-default?
@@ -976,4 +997,5 @@
 
 (module+ for-testing
   (provide detect-bin-dir
+           installed-toolchain-env-vars
            ensure-installer-cached!))

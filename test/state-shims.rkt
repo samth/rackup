@@ -24,7 +24,7 @@
          "../libexec/rackup/util.rkt"
          "../libexec/rackup/versioning.rkt"
          (only-in (submod "../libexec/rackup/install.rkt" for-testing)
-                  detect-bin-dir)
+                  detect-bin-dir installed-toolchain-env-vars)
          (only-in (submod "../libexec/rackup/runtime.rkt" for-testing)
                   hidden-runtime-invocation-prefix)
          (submod "../libexec/rackup/shell.rkt" for-testing))
@@ -343,6 +343,14 @@
           })
      (file-or-directory-permissions mzscheme-exe #o755)
      (make-file-or-directory-link real-bin (rackup-toolchain-bin-link id))
+     ;; Old PLT Scheme (parent dir named "plt") needs PLTHOME for its
+     ;; bin/mzscheme shell wrapper to find .bin/<archsys>/mzscheme.
+     (define env-vars (installed-toolchain-env-vars real-bin))
+     (check-equal? env-vars (list (cons "PLTHOME" (path->string plthome))))
+     (write-string-file (rackup-toolchain-env-file id)
+                        (string-append "#!/usr/bin/env bash\n"
+                                       "export PLTHOME="
+                                       (format "'~a'\n" (path->string plthome))))
      (define meta
        (hash 'id
              id
@@ -375,7 +383,8 @@
              'real-bin-dir
              (path->string real-bin)
              'env-vars
-             '()
+             (for/list ([kv (in-list env-vars)])
+               (list (car kv) (cdr kv)))
              'executables
              '("mzscheme")
              'installed-at
@@ -386,8 +395,8 @@
      (define mzscheme-out
        (capture-output
         (lambda () (system* (build-path (rackup-shims-dir) "mzscheme")))))
-     ;; PLTHOME should NOT be set by the shim (it is not a Racket env var)
-     (check-true (string-contains? mzscheme-out "PLTHOME="))))
+     ;; Old PLT Scheme needs PLTHOME for its bin/mzscheme wrapper
+     (check-true (string-contains? mzscheme-out (format "PLTHOME=~a" (path->string plthome))))))
 
   (with-temp-rackup-home
    (lambda (tmp)
