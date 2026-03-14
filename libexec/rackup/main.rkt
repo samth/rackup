@@ -718,6 +718,11 @@
   (define raw (getenv "RACKUP_UNINSTALL_REQUEST_FILE"))
   (and raw
        (not (string-blank? raw))
+       ;; Only honor RACKUP_UNINSTALL_REQUEST_FILE when set by the
+       ;; wrapper script (which also sets _RACKUP_WRAPPER=1) or in
+       ;; test mode.
+       (or (getenv "_RACKUP_WRAPPER")
+           (getenv "RACKUP_TESTING"))
        (string->path raw)))
 
 (define (write-uninstall-request! request-path home-path removed-rcs)
@@ -736,6 +741,9 @@
   (simplify-path (path->complete-path p) #t))
 
 (define (validate-uninstall-home-path! home-path)
+  (define home-str (path->string home-path))
+  (when (regexp-match? #rx"[\0-\x1f\x7f]" home-str)
+    (rackup-error "refusing to uninstall: path contains control characters"))
   (define normalized-home (normalized-path home-path))
   (define user-home (normalized-path (find-system-path 'home-dir)))
   (define env-home
@@ -799,7 +807,10 @@
       "Your current shell may still have rackup-related PATH/env changes until you start a new shell.")]))
 
 (define (self-upgrade-script-source)
-  (or (getenv "RACKUP_SELF_UPGRADE_INSTALL_SH") "https://samth.github.io/rackup/install.sh"))
+  (define env-override (getenv "RACKUP_SELF_UPGRADE_INSTALL_SH"))
+  (if (and env-override (getenv "RACKUP_TESTING"))
+      env-override
+      "https://samth.github.io/rackup/install.sh"))
 
 (define (url-like? s)
   (and (string? s) (regexp-match? #px"^[a-zA-Z][a-zA-Z0-9+.-]*://" s)))

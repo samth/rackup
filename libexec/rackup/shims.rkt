@@ -54,6 +54,10 @@ if [[ -z "$ACTIVE" ]]; then
   echo "Inspect choices with: rackup list | rackup available --limit 20" >&2
   exit 2
 fi
+if [[ "$ACTIVE" == */* || "$ACTIVE" == .* || "$ACTIVE" != "${ACTIVE//[[:cntrl:]]/}" ]]; then
+  echo "rackup: invalid toolchain ID: $ACTIVE" >&2
+  exit 2
+fi
 BIN_DIR="$HOME_DIR/toolchains/$ACTIVE/bin"
 BIN_REAL="$(cd -P "$BIN_DIR" 2>/dev/null && pwd)" || BIN_REAL="$BIN_DIR"
 TARGET="$BIN_REAL/$SHIM_NAME"
@@ -255,11 +259,26 @@ EOF
   (make-file-or-directory-link (rackup-bin-entry) shim)
   shim)
 
+(define (valid-toolchain-id? s)
+  (and (string? s)
+       (not (string-blank? s))
+       (not (string-contains? s "/"))
+       (not (string-prefix? s "."))
+       (not (regexp-match? #rx"[\0-\x1f\x7f]" s))))
+
+(define (validate-toolchain-id! id source)
+  (unless (valid-toolchain-id? id)
+    (rackup-error "invalid toolchain ID from ~a: ~a" source id))
+  id)
+
 (define (resolve-active-toolchain-id)
   (define env (getenv "RACKUP_TOOLCHAIN"))
   (cond
-    [(and env (not (string-blank? env))) env]
-    [else (get-default-toolchain)]))
+    [(and env (not (string-blank? env)))
+     (validate-toolchain-id! env "RACKUP_TOOLCHAIN")]
+    [else
+     (define default (get-default-toolchain))
+     (and default (validate-toolchain-id! default "default-toolchain file"))]))
 
 (define (current-toolchain-source)
   (define env (getenv "RACKUP_TOOLCHAIN"))

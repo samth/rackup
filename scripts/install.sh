@@ -146,6 +146,18 @@ if [ "$FORCE_EXE" -eq 1 ] && [ -n "$FROM_LOCAL" ]; then
   exit 2
 fi
 
+# Resolve PREFIX to an absolute path and reject dangerous values.
+case "$PREFIX" in
+  /*) ;;
+  *) PREFIX="$(cd "$(dirname "$PREFIX")" 2>/dev/null && pwd)/$(basename "$PREFIX")" ;;
+esac
+case "$PREFIX" in
+  /)
+    warn "Error: refusing to install to /"; exit 2 ;;
+  "$HOME")
+    warn "Error: refusing to install directly to your home directory"; exit 2 ;;
+esac
+
 TMPDIR_INSTALL="$(mktemp -d "${TMPDIR:-/tmp}/rackup-install.XXXXXX")"
 cleanup() {
   rm -rf "$TMPDIR_INSTALL"
@@ -432,6 +444,10 @@ if [ "$INSTALLED_PREBUILT" -eq 0 ]; then
     if [ "$EXPECTED_SRC_SHA256" != "@@RACKUP_SRC_SHA256@@" ]; then
       info "Verifying source download (SHA-256)..."
       verify_sha256 "$TMPDIR_INSTALL/rackup.tar.gz" "$EXPECTED_SRC_SHA256" "rackup-src.tar.gz"
+    elif [ "$FORCE_SOURCE" -eq 1 ] && [ -z "$FROM_LOCAL" ] && [ -z "$ARCHIVE_URL_OVERRIDE" ]; then
+      warn "Error: source checksum is not available in this copy of install.sh."
+      warn "This is expected when running the repo copy directly. Use --from-local or --archive-url instead."
+      exit 1
     fi
     mkdir -p "$TMPDIR_INSTALL/src"
     # Use -m so future mtimes in the archive do not produce noisy warnings on skewed clocks.

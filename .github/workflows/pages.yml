@@ -38,7 +38,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Setup Racket
-        uses: Bogdanp/setup-racket@v1.14
+        uses: Bogdanp/setup-racket@fda0f4d167468421766cea8a36140bd2c3c3450d # v1.14
         with:
           architecture: x64
           distribution: full

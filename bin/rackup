@@ -75,6 +75,7 @@ if [ -x "$CORE_EXE" ]; then
     }
     trap cleanup_uninstall_request EXIT INT TERM HUP
     export RACKUP_UNINSTALL_REQUEST_FILE="$REQUEST_FILE"
+    export _RACKUP_WRAPPER=1
     "$CORE_EXE" "$@"
     status=$?
     if [ "$status" -ne 0 ]; then

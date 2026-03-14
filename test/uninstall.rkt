@@ -31,6 +31,10 @@
 
 
 (module+ test
+  (check-exn #px"control characters"
+             (lambda () (validate-uninstall-home-path! (string->path "/tmp/x\n/etc"))))
+  (check-exn #px"control characters"
+             (lambda () (validate-uninstall-home-path! (string->path "/tmp/x\ty"))))
   (check-exn #px"unsafe rackup home target: /"
              (lambda () (validate-uninstall-home-path! (string->path "/"))))
   (check-exn #px"unsafe rackup home target equal to your home directory"
