@@ -4,8 +4,28 @@ set -eu
 # Shared shell helpers for rackup bootstrap and wrapper runtime selection.
 # POSIX sh only (for curl|sh compatibility).
 
+rackup_string_has_control_chars_shell() {
+  _rackup_value="$1"
+  printf '%s' "$_rackup_value" |
+    od -An -t u1 2>/dev/null |
+    awk '
+      {
+        for (i = 1; i <= NF; i++) {
+          if ($i < 32 || $i == 127) {
+            found = 1
+          }
+        }
+      }
+      END {
+        exit(found ? 0 : 1)
+      }'
+}
+
 rackup_home() {
   if [ "${RACKUP_HOME:-}" ]; then
+    if rackup_string_has_control_chars_shell "$RACKUP_HOME"; then
+      rackup_fail "unsafe RACKUP_HOME contains control characters"
+    fi
     printf '%s\n' "$RACKUP_HOME"
   else
     printf '%s\n' "$HOME/.rackup"
@@ -200,6 +220,27 @@ rackup_warn() {
 rackup_fail() {
   printf 'rackup bootstrap: %s\n' "$*" >&2
   exit 1
+}
+
+rackup_validate_safe_uninstall_home_shell() {
+  _rackup_home="$1"
+  if rackup_string_has_control_chars_shell "$_rackup_home"; then
+    rackup_fail "unsafe rackup home contains control characters"
+  fi
+  case "$_rackup_home" in
+    /*) ;;
+    *) rackup_fail "refusing to uninstall non-absolute target: $_rackup_home" ;;
+  esac
+  if [ "$_rackup_home" = "/" ]; then
+    rackup_fail "refusing to uninstall unsafe rackup home target: /"
+  fi
+  if [ -n "${HOME:-}" ] && [ "$_rackup_home" = "$HOME" ]; then
+    rackup_fail "refusing to uninstall unsafe rackup home target equal to your home directory: $_rackup_home"
+  fi
+  _rackup_pwd="$(pwd)"
+  if [ "$_rackup_home" = "$_rackup_pwd" ]; then
+    rackup_fail "refusing to uninstall unsafe rackup home target equal to the current directory: $_rackup_home"
+  fi
 }
 
 rackup_download_to() {

@@ -7,6 +7,7 @@
          racket/port
          racket/runtime-path
          racket/string
+         file/sha1
          "../libexec/rackup/install.rkt"
          "../libexec/rackup/legacy-plt-catalog.rkt"
          "../libexec/rackup/remote.rkt"
@@ -41,6 +42,9 @@
 
 
   (define tmp-root (string->path "/tmp"))
+
+  (define (sha256-hex-string s)
+    (bytes->hex-string (sha256-bytes (open-input-string s))))
 
   (define (with-temp-rackup-home proc)
     (define tmp-home (make-temporary-file "rackup-remote-home-~a" 'directory tmp-root))
@@ -334,6 +338,90 @@
     (check-true (port-closed? in))
     (delete-directory/files dest-dir))
 
+  (let ([step 0]
+        [redirect-in (open-input-string "")]
+        [ok-in (open-input-string "redirect-ok")])
+    (parameterize ([current-http-sendrecv-proc
+                    (make-keyword-procedure
+                     (lambda (_kws _kw-args host target . _args)
+                       (set! step (add1 step))
+                       (case step
+                         [(1)
+                          (check-equal? host "example.invalid")
+                          (check-equal? target "/start")
+                          (values "HTTP/1.1 302 Found"
+                                  (list #"Location: /next")
+                                  redirect-in)]
+                         [(2)
+                          (check-equal? host "example.invalid")
+                          (check-equal? target "/next")
+                          (values "HTTP/1.1 200 OK" null ok-in)]
+                         [else
+                          (error 'test "unexpected redirect step ~a" step)])))])
+      (check-equal? (http-get-string "https://example.invalid/start") "redirect-ok"))
+    (check-true (port-closed? redirect-in))
+    (check-true (port-closed? ok-in)))
+
+  (let ([step 0]
+        [redirect-in-1 (open-input-string "")]
+        [redirect-in-2 (open-input-string "")]
+        [ok-in (open-input-string "legacy-redirect-ok")])
+    (parameterize ([current-http-sendrecv-proc
+                    (make-keyword-procedure
+                     (lambda (_kws _kw-args host target . _args)
+                       (set! step (add1 step))
+                       (case step
+                         [(1)
+                          (check-equal? host "download.plt-scheme.org")
+                          (check-equal? target "/bundles/4.2.5/plt/plt-4.2.5-bin-i386-osx-mac.dmg")
+                          (values "HTTP/1.1 302 Found"
+                                  (list #"Location: http://www.cs.utah.edu/plt/download/4.2.5/plt-4.2.5-bin-i386-osx-mac.dmg")
+                                  redirect-in-1)]
+                         [(2)
+                          (check-equal? host "www.cs.utah.edu")
+                          (check-equal? target "/plt/download/4.2.5/plt-4.2.5-bin-i386-osx-mac.dmg")
+                          (values "HTTP/1.1 302 Found"
+                                  (list #"Location: https://www-old.cs.utah.edu/plt/download/4.2.5/plt-4.2.5-bin-i386-osx-mac.dmg")
+                                  redirect-in-2)]
+                         [(3)
+                          (check-equal? host "www-old.cs.utah.edu")
+                          (check-equal? target "/plt/download/4.2.5/plt-4.2.5-bin-i386-osx-mac.dmg")
+                          (values "HTTP/1.1 200 OK" null ok-in)]
+                         [else
+                          (error 'test "unexpected legacy redirect step ~a" step)])))])
+      (check-equal? (http-get-string
+                     "http://download.plt-scheme.org/bundles/4.2.5/plt/plt-4.2.5-bin-i386-osx-mac.dmg")
+                    "legacy-redirect-ok"))
+    (check-true (port-closed? redirect-in-1))
+    (check-true (port-closed? redirect-in-2))
+    (check-true (port-closed? ok-in)))
+
+  (let ([in (open-input-string "")])
+    (parameterize ([current-http-sendrecv-proc
+                    (make-keyword-procedure
+                     (lambda (_kws _kw-args . _args)
+                       (values "HTTP/1.1 302 Found"
+                               (list #"Location: https://evil.invalid/payload")
+                               in)))])
+      (check-exn
+       #px"refusing cross-origin redirect"
+       (lambda ()
+         (http-get-string "https://example.invalid/start"))))
+    (check-true (port-closed? in)))
+
+  (let ([in (open-input-string "")])
+    (parameterize ([current-http-sendrecv-proc
+                    (make-keyword-procedure
+                     (lambda (_kws _kw-args . _args)
+                       (values "HTTP/1.1 302 Found"
+                               (list #"Location: http://example.invalid/downgraded")
+                               in)))])
+      (check-exn
+       #px"refusing cross-origin redirect"
+       (lambda ()
+         (http-get-string "https://example.invalid/start"))))
+    (check-true (port-closed? in)))
+
   (with-temp-rackup-home
    (lambda (_tmp-home)
      (check-exn
@@ -347,6 +435,52 @@
       #px"refusing to download installer over HTTP without a hardcoded SHA-256 checksum"
       (lambda ()
         (runtime-ensure-installer-cached! "http://download.plt-scheme.org/example.sh")))))
+
+  (with-temp-rackup-home
+   (lambda (_tmp-home)
+     (define payload "verified-installer")
+     (define payload-sha256 (sha256-hex-string payload))
+     (define download-count 0)
+     (define (sendrecv _kws _kw-args . _args)
+       (set! download-count (add1 download-count))
+       (values "HTTP/1.1 200 OK" null (open-input-string payload)))
+     (parameterize ([current-http-sendrecv-proc (make-keyword-procedure sendrecv)])
+       (define cache-path
+         (install-ensure-installer-cached! "https://example.invalid/toolchain.sh"
+                                           #:sha256 payload-sha256))
+       (call-with-output-file* cache-path
+         #:exists 'truncate/replace
+         (lambda (out) (display "tampered" out)))
+       (set! download-count 0)
+       (define cache-path*
+         (install-ensure-installer-cached! "https://example.invalid/toolchain.sh"
+                                           #:sha256 payload-sha256))
+       (check-equal? cache-path* cache-path)
+       (check-equal? download-count 1)
+       (check-equal? (file->string cache-path*) payload))))
+
+  (with-temp-rackup-home
+   (lambda (_tmp-home)
+     (define payload "verified-runtime-installer")
+     (define payload-sha256 (sha256-hex-string payload))
+     (define download-count 0)
+     (define (sendrecv _kws _kw-args . _args)
+       (set! download-count (add1 download-count))
+       (values "HTTP/1.1 200 OK" null (open-input-string payload)))
+     (parameterize ([current-http-sendrecv-proc (make-keyword-procedure sendrecv)])
+       (define cache-path
+         (runtime-ensure-installer-cached! "https://example.invalid/runtime.sh"
+                                           #:sha256 payload-sha256))
+       (call-with-output-file* cache-path
+         #:exists 'truncate/replace
+         (lambda (out) (display "tampered" out)))
+       (set! download-count 0)
+       (define cache-path*
+         (runtime-ensure-installer-cached! "https://example.invalid/runtime.sh"
+                                           #:sha256 payload-sha256))
+       (check-equal? cache-path* cache-path)
+       (check-equal? download-count 1)
+       (check-equal? (file->string cache-path*) payload))))
 
   (check-exn exn:fail?
              (lambda () (resolve-install-request "053" #:arch "i386" #:platform "linux")))
@@ -447,7 +581,10 @@
     (hash 'a "racket-minimal-9.1-riscv64-linux-cs.sh"
           'b "racket-minimal-9.1-riscv64-linux-cs.tgz"
           'c "racket-9.1-x86_64-linux-cs.sh"
-          'd "racket-minimal-9.1-x86_64-linux-cs.sh"))
+          'd "racket-minimal-9.1-x86_64-linux-cs.sh"
+          'e "racket-9.1-aarch64-linux-cs.sh"
+          'f "racket-9.1-i386-linux-cs.sh"
+          'g "racket-9.1-arm-linux-cs.sh"))
 
   ;; riscv64 has no full installer -- select-installer-filename should fail
   (check-exn exn:fail?
@@ -480,31 +617,52 @@
   (check-false (distribution-fallback? 'minimal 'minimal))
   (check-false (distribution-fallback? 'full 'minimal))
 
-  ;; End-to-end: riscv64 is minimal-only -- requesting full falls back to minimal.
-  (define riscv-req
-    (resolve-install-request "9.1" #:distribution 'full #:arch "riscv64" #:platform "linux"))
-  (check-equal? (hash-ref riscv-req 'distribution) 'minimal)
-  (check-equal? (hash-ref riscv-req 'arch) "riscv64")
-  (check-true (regexp-match? #rx"minimal" (hash-ref riscv-req 'installer-filename)))
+  (define (with-fake-release-metadata proc)
+    (parameterize ([current-http-sendrecv-proc
+                    (make-keyword-procedure
+                     (lambda (_kws _kw-args host target . _args)
+                       (cond
+                         [(and (equal? host "download.racket-lang.org")
+                               (equal? target "/version.txt"))
+                          (values "HTTP/1.1 200 OK"
+                                  null
+                                  (open-input-string "(stable \"9.1\")\n"))]
+                         [(and (equal? host "download.racket-lang.org")
+                               (equal? target "/installers/9.1/table.rktd"))
+                          (values "HTTP/1.1 200 OK"
+                                  null
+                                  (open-input-string (format "~s" minimal-only-table)))]
+                         [else
+                          (error 'test "unexpected remote fetch: host=~a target=~a" host target)])))])
+      (proc)))
 
-  ;; Architectures that have full Linux installers in 9.1 should NOT fall back.
-  (for ([arch (in-list '("x86_64" "aarch64" "i386" "arm"))])
-    (define req
-      (resolve-install-request "9.1" #:distribution 'full #:arch arch #:platform "linux"))
-    (check-equal? (hash-ref req 'distribution) 'full
-                  (format "~a: full installer should be found" arch))
-    (check-equal? (hash-ref req 'arch) arch)
-    (check-false (regexp-match? #rx"minimal" (hash-ref req 'installer-filename))
-                 (format "~a: should not fall back to minimal" arch)))
+  (with-fake-release-metadata
+   (lambda ()
+     ;; End-to-end: riscv64 is minimal-only -- requesting full falls back to minimal.
+     (define riscv-req
+       (resolve-install-request "9.1" #:distribution 'full #:arch "riscv64" #:platform "linux"))
+     (check-equal? (hash-ref riscv-req 'distribution) 'minimal)
+     (check-equal? (hash-ref riscv-req 'arch) "riscv64")
+     (check-true (regexp-match? #rx"minimal" (hash-ref riscv-req 'installer-filename)))
 
-  ;; Explicitly requesting minimal on riscv64 works directly (no fallback needed).
-  (define riscv-minimal-req
-    (resolve-install-request "9.1" #:distribution 'minimal #:arch "riscv64" #:platform "linux"))
-  (check-equal? (hash-ref riscv-minimal-req 'distribution) 'minimal)
-  (check-true (regexp-match? #rx"minimal" (hash-ref riscv-minimal-req 'installer-filename)))
+     ;; Architectures that have full Linux installers in 9.1 should NOT fall back.
+     (for ([arch (in-list '("x86_64" "aarch64" "i386" "arm"))])
+       (define req
+         (resolve-install-request "9.1" #:distribution 'full #:arch arch #:platform "linux"))
+       (check-equal? (hash-ref req 'distribution) 'full
+                     (format "~a: full installer should be found" arch))
+       (check-equal? (hash-ref req 'arch) arch)
+       (check-false (regexp-match? #rx"minimal" (hash-ref req 'installer-filename))
+                    (format "~a: should not fall back to minimal" arch)))
 
-  ;; Stable resolves for riscv64 with full -> minimal fallback.
-  (define riscv-stable-req
-    (resolve-install-request "stable" #:distribution 'full #:arch "riscv64" #:platform "linux"))
-  (check-equal? (hash-ref riscv-stable-req 'distribution) 'minimal)
-  (check-equal? (hash-ref riscv-stable-req 'arch) "riscv64"))
+     ;; Explicitly requesting minimal on riscv64 works directly (no fallback needed).
+     (define riscv-minimal-req
+       (resolve-install-request "9.1" #:distribution 'minimal #:arch "riscv64" #:platform "linux"))
+     (check-equal? (hash-ref riscv-minimal-req 'distribution) 'minimal)
+     (check-true (regexp-match? #rx"minimal" (hash-ref riscv-minimal-req 'installer-filename)))
+
+     ;; Stable resolves for riscv64 with full -> minimal fallback.
+     (define riscv-stable-req
+       (resolve-install-request "stable" #:distribution 'full #:arch "riscv64" #:platform "linux"))
+     (check-equal? (hash-ref riscv-stable-req 'distribution) 'minimal)
+     (check-equal? (hash-ref riscv-stable-req 'arch) "riscv64"))))

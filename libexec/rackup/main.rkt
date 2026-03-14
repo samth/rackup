@@ -650,13 +650,23 @@
 
 (define (parse-uninstall-options rest)
   (define yes? #f)
+  (define request-dir #f)
+  (define argv
+    (let loop ([rest rest] [acc null])
+      (match rest
+        [(list "--uninstall-request-dir" dir more ...)
+         (set! request-dir (string->path dir))
+         (loop more acc)]
+        [(list arg more ...)
+         (loop more (cons arg acc))]
+        ['() (reverse acc)])))
   (command-line #:program "rackup uninstall"
-                #:argv rest
+                #:argv argv
                 #:once-each
                 [("-y" "--yes") "Skip confirmation prompt" (set! yes? #t)]
                 #:args ()
                 (void))
-  yes?)
+  (hash 'yes? yes? 'request-dir request-dir))
 
 (define (installed-toolchain-metas/safe)
   (with-handlers ([exn:fail? (lambda (_) null)])
@@ -714,33 +724,40 @@
 (define current-uninstall-system*-proc
   (make-parameter system*))
 
-(define (uninstall-request-file)
-  (define raw (getenv "RACKUP_UNINSTALL_REQUEST_FILE"))
-  (and raw
-       (not (string-blank? raw))
-       (string->path raw)))
+(define (uninstall-removed-rcs-file request-dir)
+  (build-path request-dir "removed-rcs.txt"))
 
-(define (write-uninstall-request! request-path home-path removed-rcs)
+(define (uninstall-delete-ok-file request-dir)
+  (build-path request-dir "delete-ok"))
+
+(define (write-uninstall-report! request-dir removed-rcs)
+  (ensure-path-without-control-chars! request-dir "uninstall request directory")
+  (unless (directory-exists? request-dir)
+    (rackup-error "uninstall request directory not found: ~a" (path->string request-dir)))
   (write-string-file
-   request-path
-   (string-append
-    (path->string home-path)
-    "\n"
-    (if (null? removed-rcs)
-        ""
-        (string-append
-         (string-join (map path->string removed-rcs) "\n")
-         "\n")))))
+   (uninstall-removed-rcs-file request-dir)
+   (if (null? removed-rcs)
+       ""
+       (string-append
+        (string-join (map path->string removed-rcs) "\n")
+        "\n")))
+  (write-string-file (uninstall-delete-ok-file request-dir) "ok\n"))
 
 (define (normalized-path p)
   (simplify-path (path->complete-path p) #t))
 
 (define (validate-uninstall-home-path! home-path)
+  (ensure-path-without-control-chars! home-path "rackup home")
   (define normalized-home (normalized-path home-path))
+  (ensure-path-without-control-chars! normalized-home "rackup home")
   (define user-home (normalized-path (find-system-path 'home-dir)))
   (define env-home
     (let ([h (getenv "HOME")])
-      (and h (not (string-blank? h)) (normalized-path h))))
+      (and h
+           (not (string-blank? h))
+           (begin
+             (ensure-string-without-control-chars! h "HOME")
+             (normalized-path h)))))
   (define current-dir (normalized-path (current-directory)))
   (cond
     [(not (absolute-path? normalized-home))
@@ -772,7 +789,9 @@
                   (path->string normalized-home))))
 
 (define (cmd-uninstall rest)
-  (define yes? (parse-uninstall-options rest))
+  (define opts (parse-uninstall-options rest))
+  (define yes? (hash-ref opts 'yes? #f))
+  (define request-dir (hash-ref opts 'request-dir #f))
   (define home-path (validate-uninstall-home-path! (rackup-home)))
   (warn-uninstall-summary home-path)
   (confirm-uninstall! home-path yes?)
@@ -782,10 +801,9 @@
                                           (exn-message e))
                                  null)])
       ((current-remove-shell-init-blocks-proc))))
-  (define request-file (uninstall-request-file))
   (cond
-    [request-file
-     (write-uninstall-request! request-file home-path removed-rcs)]
+    [request-dir
+     (write-uninstall-report! request-dir removed-rcs)]
     [else
      (when (directory-exists? home-path)
        (delete-rackup-home!/external home-path))
@@ -798,11 +816,42 @@
      (displayln
       "Your current shell may still have rackup-related PATH/env changes until you start a new shell.")]))
 
+(define current-self-upgrade-download-url->file-proc
+  (make-parameter download-url->file))
+
+(define current-self-upgrade-fetch-text-proc
+  (make-parameter http-get-string))
+
 (define (self-upgrade-script-source)
-  (or (getenv "RACKUP_SELF_UPGRADE_INSTALL_SH") "https://samth.github.io/rackup/install.sh"))
+  (define override (getenv "RACKUP_SELF_UPGRADE_INSTALL_SH"))
+  (define allow-override?
+    (equal? (getenv "RACKUP_TEST_ALLOW_SELF_UPGRADE_INSTALL_SH") "1"))
+  (cond
+    [(and override (not (string-blank? override)) allow-override?) override]
+    [else "https://samth.github.io/rackup/install.sh"]))
 
 (define (url-like? s)
   (and (string? s) (regexp-match? #px"^[a-zA-Z][a-zA-Z0-9+.-]*://" s)))
+
+(define (self-upgrade-checksum-url source)
+  (string-append source ".sha256"))
+
+(define (parse-sha256-sidecar text source)
+  (or (for/or ([line (in-list (string-split (string-downcase text) "\n"))])
+        (match (regexp-match #px"^([0-9a-f]{64})\\b" (string-trim line))
+          [(list _ sha) sha]
+          [_ #f]))
+      (rackup-error "failed to parse SHA-256 checksum from ~a" source)))
+
+(define (download-self-upgrade-script! source)
+  (define checksum-url (self-upgrade-checksum-url source))
+  (define checksum-text ((current-self-upgrade-fetch-text-proc) checksum-url))
+  (define expected-sha (parse-sha256-sidecar checksum-text checksum-url))
+  (define p (make-temporary-file "rackup-self-upgrade-~a.sh"))
+  ((current-self-upgrade-download-url->file-proc) source p)
+  (verify-file-sha256! p expected-sha source)
+  (file-or-directory-permissions p #o755)
+  p)
 
 (define (parse-self-upgrade-options rest)
   (define with-init? #f)
@@ -825,10 +874,7 @@
   (define script-path
     (cond
       [(url-like? source)
-       (define p (make-temporary-file "rackup-self-upgrade-~a.sh"))
-       (download-url->file source p)
-       (file-or-directory-permissions p #o755)
-       p]
+       (download-self-upgrade-script! source)]
       [else (string->path source)]))
   (unless (file-exists? script-path)
     (rackup-error "self-upgrade installer script not found: ~a" source))
@@ -944,4 +990,6 @@
            delete-rackup-home!/external
            installed-toolchain-metas/safe
            current-remove-shell-init-blocks-proc
-           current-uninstall-system*-proc))
+           current-uninstall-system*-proc
+           current-self-upgrade-download-url->file-proc
+           current-self-upgrade-fetch-text-proc))

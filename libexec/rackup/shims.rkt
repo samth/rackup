@@ -41,8 +41,19 @@ DEFAULT_FILE="$HOME_DIR/state/default-toolchain"
 DEFAULT_ID=""
 ENV_FILE=""
 ACTIVE="${RACKUP_TOOLCHAIN:-}"
+rackup_valid_toolchain_id() {
+  [[ "$1" =~ ^[A-Za-z0-9._-]+$ ]]
+}
 if [[ -f "$DEFAULT_FILE" ]]; then
   DEFAULT_ID="$(tr -d '\r\n' < "$DEFAULT_FILE")"
+  if [[ -n "$DEFAULT_ID" ]] && ! rackup_valid_toolchain_id "$DEFAULT_ID"; then
+    echo "rackup: invalid default toolchain id in $DEFAULT_FILE: '$DEFAULT_ID'" >&2
+    exit 2
+  fi
+fi
+if [[ -n "$ACTIVE" ]] && ! rackup_valid_toolchain_id "$ACTIVE"; then
+  echo "rackup: invalid toolchain id in RACKUP_TOOLCHAIN: '$ACTIVE'" >&2
+  exit 2
 fi
 if [[ -z "$ACTIVE" && -n "$DEFAULT_ID" ]]; then
   ACTIVE="$DEFAULT_ID"
@@ -255,16 +266,22 @@ EOF
   (make-file-or-directory-link (rackup-bin-entry) shim)
   shim)
 
-(define (resolve-active-toolchain-id)
+(define (env-toolchain-id)
   (define env (getenv "RACKUP_TOOLCHAIN"))
+  (and env
+       (not (string-blank? env))
+       (begin
+         (ensure-valid-toolchain-id! env "toolchain id in RACKUP_TOOLCHAIN")
+         env)))
+
+(define (resolve-active-toolchain-id)
   (cond
-    [(and env (not (string-blank? env))) env]
+    [(env-toolchain-id)]
     [else (get-default-toolchain)]))
 
 (define (current-toolchain-source)
-  (define env (getenv "RACKUP_TOOLCHAIN"))
   (cond
-    [(and env (not (string-blank? env))) 'env]
+    [(env-toolchain-id) 'env]
     [(get-default-toolchain) 'default]
     [else #f]))
 
@@ -272,6 +289,7 @@ EOF
   (define id (or toolchain-id (resolve-active-toolchain-id)))
   (unless id
     (rackup-error "no active/default toolchain configured"))
+  (ensure-valid-toolchain-id! id "toolchain id")
   (define p (build-path (rackup-toolchain-bin-link id) exe))
   (if (file-exists? p)
       p

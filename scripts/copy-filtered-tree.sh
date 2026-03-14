@@ -9,6 +9,8 @@ Copies files from SRC_DIR into DEST_DIR while excluding:
   - any directory named compiled
   - any .zo or .dep file
   - .git directories
+  - transient/generated directories such as .ci-cache, .claude, .tmp*, and _site
+  - editor backup/lock files such as *~, .#*, and #*#
 
 If PATH arguments are provided, they are interpreted relative to SRC_DIR.
 EOF
@@ -37,7 +39,7 @@ mkdir -p "$DEST_DIR"
 (
   cd "$SRC_DIR"
   find "$@" \
-    \( -type d \( -name .git -o -name compiled \) -prune \) -o \
-    \( -type f \( -name '*.zo' -o -name '*.dep' \) -prune \) -o \
+    \( -type d \( -name .git -o -name compiled -o -name .ci-cache -o -name .claude -o -name '.tmp*' -o -name _site \) -prune \) -o \
+    \( -type f \( -name '*.zo' -o -name '*.dep' -o -name '*~' -o -name '.#*' -o -name '#*#' \) -prune \) -o \
     \( -type f -o -type l \) -print0
 ) | tar -C "$SRC_DIR" --null -T - -cf - | tar -C "$DEST_DIR" -xf -
