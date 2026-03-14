@@ -17,6 +17,20 @@ raco test -y test/all.rkt           # run all unit tests
 raco test -y test/<name>.rkt        # run a single test file
 ```
 
+### Shell linting
+
+Run before pushing changes to shell scripts (`*.sh`, `bin/rackup`):
+
+```bash
+# ShellCheck (catches bugs and warnings)
+find . -name '*.sh' -type f -print0 | xargs -0 shellcheck --severity=warning
+shellcheck --severity=warning bin/rackup
+
+# shfmt (formatting)
+find . -name '*.sh' -type f -print0 | xargs -0 shfmt -d -i 2 -ci
+shfmt -d -i 2 -ci bin/rackup
+```
+
 ### Docker E2E tests
 
 These match what CI runs. Each invocation builds a Docker image and runs the full install/smoke test inside it.
