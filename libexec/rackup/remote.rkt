@@ -88,7 +88,7 @@
 (define trusted-redirect-host-groups
   '(("download.racket-lang.org" "mirror.racket-lang.org")
     ;; Legacy PLT Scheme artifacts may redirect through Utah-hosted mirrors.
-    ("download.plt-scheme.org" "www.cs.utah.edu")))
+    ("download.plt-scheme.org" "www.cs.utah.edu" "www-old.cs.utah.edu")))
 
 (define (same-trusted-redirect-group? host-a host-b)
   (for/or ([group (in-list trusted-redirect-host-groups)])
@@ -97,9 +97,13 @@
 
 (define (redirect-allowed? from to)
   (or (same-origin-url? from to)
-      (and (equal? (url-scheme from) (url-scheme to))
-           (equal? (effective-url-port from) (effective-url-port to))
-           (same-trusted-redirect-group? (url-host from) (url-host to)))))
+      (and (same-trusted-redirect-group? (url-host from) (url-host to))
+           (or (and (equal? (url-scheme from) (url-scheme to))
+                    (equal? (effective-url-port from) (effective-url-port to)))
+               ;; Legacy PLT downloads can bounce through Utah mirrors and
+               ;; upgrade from HTTP to HTTPS before landing on the artifact.
+               (and (equal? (url-scheme from) "http")
+                    (equal? (url-scheme to) "https"))))))
 
 (define (http-open/input url-str [redirects-left 5])
   (define u (if (url? url-str) url-str (string->url url-str)))
