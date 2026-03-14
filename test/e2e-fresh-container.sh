@@ -621,11 +621,6 @@ case "$LOCAL_LINK_MODE" in
     fail "unsupported local link mode: $LOCAL_LINK_MODE"
     ;;
 esac
-if [[ -d "${local_src_root}/racket/share/racket/collects" ]]; then
-  local_collects_dir="${local_src_root}/racket/share/racket/collects"
-else
-  local_collects_dir="${local_src_root}/racket/collects"
-fi
 linked_id="$(run_rackup link localsrc "$local_src_root" --set-default | tail -n 1)"
 assert_eq "local-localsrc" "$linked_id" "unexpected linked toolchain id"
 echo "linked_id=$linked_id"
