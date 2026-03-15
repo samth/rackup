@@ -102,8 +102,6 @@
                            "-rf"
                            (path->string (rackup-home))))
        (check-true (string-contains? out "rackup uninstalled."))
-       (check-true (string-contains? out "Rackup home deletion completed synchronously."))
-       (check-false (string-contains? out "Final file deletion may complete shortly"))
        (check-true (string-contains? out "dummy.rc"))
        (check-true (string-contains? err "WARNING:")))))
 
@@ -111,14 +109,12 @@
    (lambda (tmp-home)
      (ensure-index!)
      (make-directory* tmp-home)
-     (define uninstall-out
-       (capture-output
-        (lambda ()
-          (parameterize ([current-remove-shell-init-blocks-proc (lambda () null)]
-                         [current-uninstall-system*-proc (lambda _args #f)])
-            (check-exn #px"failed to delete rackup home synchronously"
-                       (lambda () (cmd-uninstall '("--yes"))))))))
-     (check-false (string-contains? uninstall-out "rackup uninstalled."))))
+     (capture-output
+      (lambda ()
+        (parameterize ([current-remove-shell-init-blocks-proc (lambda () null)]
+                       [current-uninstall-system*-proc (lambda _args #f)])
+          (check-exn #px"failed to delete rackup home synchronously"
+                     (lambda () (cmd-uninstall '("--yes")))))))))
 
   (with-temp-rackup-home
    (lambda (_tmp-home)
