@@ -173,7 +173,7 @@ When rackup does have access to Racket (either hidden runtime or prebuilt exe), 
 
 `rackup uninstall` must delete `~/.rackup` including the binary that is currently running. Before proceeding, the Racket code validates the target path: it rejects paths with control characters, refuses to uninstall `/`, `$HOME`, or the current directory. Unless `--yes` is passed, it requires the user to type `DELETE` at an interactive prompt.
 
-The Racket code handles the entire uninstall: strip shell init blocks, print status messages, flush output, then delete the rackup home via an external `rm -rf` call. The deletion happens last because Racket may need compiled `.zo` files from the rackup home directory until that point. On Unix, deleting files that are mapped by a running process is safe — the kernel keeps the mappings alive until the process exits. (On Windows, open files cannot be deleted; see issue #2.)
+The Racket code handles confirmation, shell init block cleanup, and user-facing output. The actual `rm -rf` is done by the shell wrapper after the Racket process exits. This split is necessary because in source mode, `RACKUP_HOME` contains the running `.rkt`/`.zo` files — deleting them while Racket is still running causes load failures during process exit. No environment variables or request files are used; the wrapper simply calls `rackup_home()` to determine the path to delete.
 
 ## Cross-compilation and prebuilt binaries
 

@@ -282,6 +282,17 @@ download_file() {
 
 # Compute SHA-256 of a file, printing the hex digest to stdout.
 # Returns 1 if no hash tool is available.
+is_sha256_hex() {
+  case "$1" in
+    [0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F])
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
 compute_sha256() {
   file="$1"
   if command -v sha256sum >/dev/null 2>&1; then
@@ -513,7 +524,7 @@ if [ "$INSTALLED_PREBUILT" -eq 0 ]; then
       warn "Error: need curl or wget to download rackup sources."
       exit 1
     fi
-    if [ "$EXPECTED_SRC_SHA256" != "@@RACKUP_SRC_SHA256@@" ]; then
+    if is_sha256_hex "$EXPECTED_SRC_SHA256"; then
       info "Verifying source download (SHA-256)..."
       verify_sha256 "$TMPDIR_INSTALL/rackup.tar.gz" "$EXPECTED_SRC_SHA256" "rackup-src.tar.gz"
     elif [ "$FORCE_SOURCE" -eq 1 ] && [ -z "$FROM_LOCAL" ] && [ -z "$ARCHIVE_URL_OVERRIDE" ]; then
@@ -566,7 +577,7 @@ if [ "$INSTALLED_PREBUILT" -eq 0 ]; then
 
   ok "Installed: $PREFIX/bin/rackup"
   # Store the checksum so self-upgrade can detect no-ops.
-  if [ "$EXPECTED_SRC_SHA256" != "@@RACKUP_SRC_SHA256@@" ]; then
+  if is_sha256_hex "$EXPECTED_SRC_SHA256"; then
     printf '%s\n' "$EXPECTED_SRC_SHA256" >"$PREFIX/.installed-sha256"
   elif [ -f "$TMPDIR_INSTALL/rackup.tar.gz" ]; then
     _src_sha="$(compute_sha256 "$TMPDIR_INSTALL/rackup.tar.gz")" || true

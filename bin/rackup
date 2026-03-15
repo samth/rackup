@@ -98,23 +98,18 @@ rackup_run_core() {
   fi
 }
 
-# Uninstall deletes RACKUP_HOME (which contains the running .rkt/.zo files
-# in source mode). Racket may crash during exit when it tries to load
-# deleted modules. Suppress the .zo error if the directory is actually gone.
+# Uninstall: the Racket code handles confirmation and RC cleanup but does
+# NOT delete RACKUP_HOME. The wrapper does the rm -rf after Racket exits,
+# avoiding issues with deleting .zo files the running process needs.
 if [ "${1:-}" = "uninstall" ]; then
   _rackup_home="$(rackup_home)"
-  _rackup_err="$(mktemp "${TMPDIR:-/tmp}/rackup-uninstall-err.XXXXXX")"
   if [ "$USE_Y" -eq 1 ]; then
-    "$RACKET_EXE" -y -U -A "$RUNTIME_ADDON_DIR" "$CORE" "$@" 2>"$_rackup_err" || true
+    "$RACKET_EXE" -y -U -A "$RUNTIME_ADDON_DIR" "$CORE" "$@"
   else
-    "$RACKET_EXE" -U -A "$RUNTIME_ADDON_DIR" "$CORE" "$@" 2>"$_rackup_err" || true
+    "$RACKET_EXE" -U -A "$RUNTIME_ADDON_DIR" "$CORE" "$@"
   fi
-  # Show stderr but filter out .zo load errors from post-deletion crash
-  grep -v "open-input-file: cannot open module file\|rkt_err=\|system error: no such file" "$_rackup_err" >&2 || true
-  rm -f "$_rackup_err"
   if [ -d "$_rackup_home" ]; then
-    echo "rackup: error: uninstall did not remove $_rackup_home" >&2
-    exit 1
+    rm -rf -- "$_rackup_home"
   fi
   exit 0
 fi

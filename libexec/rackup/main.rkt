@@ -771,14 +771,10 @@
     (for ([p (in-list removed-rcs)])
       (printf "  ~a\n" (path->string p))))
   (displayln "Your current shell may still have rackup-related PATH/env changes until you start a new shell.")
-  ;; In source mode, RACKUP_HOME contains the running .rkt/.zo files.
-  ;; After deletion, Racket may fail to load modules during exit. We
-  ;; delete synchronously (so callers see the directory gone), then
-  ;; suppress any errors during process exit.
-  (flush-output)
-  (flush-output (current-error-port))
-  (when (directory-exists? home-path)
-    (delete-rackup-home!/external home-path)))
+  ;; The actual rm -rf is done by the shell wrapper after this process
+  ;; exits. In source mode, RACKUP_HOME contains the running .rkt/.zo
+  ;; files, so deleting in-process would crash during exit.
+  )
 
 (define (self-upgrade-script-source)
   (define env-override (getenv "RACKUP_SELF_UPGRADE_INSTALL_SH"))
