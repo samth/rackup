@@ -231,14 +231,14 @@ rackup_lookup_runtime_checksum() {
   # Search for filename in the checksums list (filename:sha256hex per line).
   # Use a temp file to avoid subshell issues with piped while-read.
   _checksum_tmp="$(mktemp "${TMPDIR:-/tmp}/rackup-checksum.XXXXXX")"
-  printf '%s\n' "$_checksums" > "$_checksum_tmp"
+  printf '%s\n' "$_checksums" >"$_checksum_tmp"
   _found_sha=""
   while IFS=: read -r name sha; do
     if [ "$name" = "$_filename" ]; then
       _found_sha="$sha"
       break
     fi
-  done < "$_checksum_tmp"
+  done <"$_checksum_tmp"
   rm -f "$_checksum_tmp"
   if [ -n "$_found_sha" ]; then
     printf '%s' "$_found_sha"

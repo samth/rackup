@@ -16,6 +16,7 @@ RACKUP_RUNTIME_CHECKSUMS="@@RACKUP_RUNTIME_CHECKSUMS@@"
 export RACKUP_RUNTIME_CHECKSUMS
 FORCE_SOURCE="${RACKUP_FORCE_SOURCE:-0}"
 FORCE_EXE="${RACKUP_FORCE_EXE:-0}"
+ALLOW_UNSAFE_PREFIX=0
 PAGES_BASE_URL="${RACKUP_PAGES_BASE_URL:-}"
 
 is_tty_stdout() {
@@ -57,7 +58,7 @@ usage() {
 rackup bootstrap installer
 
 Usage:
-  install.sh [-y] [--no-init] [--prefix DIR] [--repo owner/name] [--ref REF] [--archive-url URL] [--shell bash|zsh] [--from-local PATH] [--source | --exe]
+  install.sh [-y] [--no-init] [--prefix DIR] [--repo owner/name] [--ref REF] [--archive-url URL] [--shell bash|zsh] [--from-local PATH] [--source | --exe] [--allow-unsafe-prefix]
 
 Behavior:
   - Prompts before editing shell config by default.
@@ -68,6 +69,7 @@ Behavior:
   - Falls back to source distribution + hidden runtime if no binary is available.
   - Use --source to skip the prebuilt binary and install from source directly.
   - Use --exe to require a prebuilt binary (error if unavailable for this platform).
+  - Use --allow-unsafe-prefix to override the safety check that rejects system directories.
   - Internal: set RACKUP_BOOTSTRAP_MODE=self-upgrade for upgrade-oriented completion messaging.
 
 Examples:
@@ -118,6 +120,10 @@ while [ "$#" -gt 0 ]; do
       FORCE_EXE=1
       shift
       ;;
+    --allow-unsafe-prefix)
+      ALLOW_UNSAFE_PREFIX=1
+      shift
+      ;;
     -h | --help)
       usage
       exit 0
@@ -153,16 +159,76 @@ case "$PREFIX" in
   /*) ;;
   *) PREFIX="$(cd "$(dirname "$PREFIX")" 2>/dev/null && pwd)/$(basename "$PREFIX")" ;;
 esac
-case "$PREFIX" in
-  /)
-    warn "Error: refusing to install to /"
+
+# Return 0 if the string contains control characters (bytes 0x00-0x1f, 0x7f).
+string_has_control_chars() {
+  case "$1" in
+    *[[:cntrl:]]*)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+# Validate that PREFIX is safe to install into.
+# Sets _prefix_error on failure.
+validate_safe_prefix() {
+  _p="$1"
+  _prefix_error=""
+
+  if string_has_control_chars "$_p"; then
+    _prefix_error="prefix contains control characters"
+    return 1
+  fi
+
+  if [ -z "$_p" ]; then
+    _prefix_error="prefix is empty"
+    return 1
+  fi
+
+  case "$_p" in
+    /*) ;;
+    *)
+      _prefix_error="prefix is not an absolute path: $_p"
+      return 1
+      ;;
+  esac
+
+  _cwd="$(pwd -P)"
+  case "$_p" in
+    /)
+      _prefix_error="refusing to install to /"
+      return 1
+      ;;
+    "$HOME")
+      _prefix_error="refusing to install directly to your home directory"
+      return 1
+      ;;
+    "$_cwd")
+      _prefix_error="refusing to install to current directory ($_cwd)"
+      return 1
+      ;;
+    /Applications | /bin | /boot | /dev | /etc | /home | \
+      /lib | /lib64 | /opt | /private | /proc | /root | /sbin | \
+      /srv | /sys | /tmp | /usr | /usr/bin | /usr/local | \
+      /usr/local/bin | /usr/local/lib | /var | /var/tmp)
+      _prefix_error="refusing to install to system directory $_p"
+      return 1
+      ;;
+  esac
+
+  return 0
+}
+
+if ! validate_safe_prefix "$PREFIX"; then
+  if [ "$ALLOW_UNSAFE_PREFIX" -eq 1 ]; then
+    warn "Warning: $_prefix_error (continuing due to --allow-unsafe-prefix)"
+  else
+    warn "Error: $_prefix_error"
+    warn "Use --allow-unsafe-prefix to override this check."
     exit 2
-    ;;
-  "$HOME")
-    warn "Error: refusing to install directly to your home directory"
-    exit 2
-    ;;
-esac
+  fi
+fi
 
 TMPDIR_INSTALL="$(mktemp -d "${TMPDIR:-/tmp}/rackup-install.XXXXXX")"
 cleanup() {
