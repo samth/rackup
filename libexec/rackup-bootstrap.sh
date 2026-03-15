@@ -228,12 +228,23 @@ rackup_lookup_runtime_checksum() {
     fi
     rackup_fail "runtime checksums not available (unsubstituted install.sh); set RACKUP_TESTING=1 for development use"
   fi
-  printf '%s\n' "$_checksums" | while IFS=: read -r name sha; do
+  # Search for filename in the checksums list (filename:sha256hex per line).
+  # Use a temp file to avoid subshell issues with piped while-read.
+  _checksum_tmp="$(mktemp "${TMPDIR:-/tmp}/rackup-checksum.XXXXXX")"
+  printf '%s\n' "$_checksums" > "$_checksum_tmp"
+  _found_sha=""
+  while IFS=: read -r name sha; do
     if [ "$name" = "$_filename" ]; then
-      printf '%s' "$sha"
-      return 0
+      _found_sha="$sha"
+      break
     fi
-  done
+  done < "$_checksum_tmp"
+  rm -f "$_checksum_tmp"
+  if [ -n "$_found_sha" ]; then
+    printf '%s' "$_found_sha"
+    return 0
+  fi
+  return 1
 }
 
 rackup_verify_runtime_installer() {

@@ -155,9 +155,13 @@ case "$PREFIX" in
 esac
 case "$PREFIX" in
   /)
-    warn "Error: refusing to install to /"; exit 2 ;;
+    warn "Error: refusing to install to /"
+    exit 2
+    ;;
   "$HOME")
-    warn "Error: refusing to install directly to your home directory"; exit 2 ;;
+    warn "Error: refusing to install directly to your home directory"
+    exit 2
+    ;;
 esac
 
 TMPDIR_INSTALL="$(mktemp -d "${TMPDIR:-/tmp}/rackup-install.XXXXXX")"

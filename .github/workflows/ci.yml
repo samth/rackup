@@ -593,6 +593,7 @@ jobs:
         shell: bash
         run: |
           export RACKUP_HOME="$(mktemp -d)/rackup-bootstrap"
+          export RACKUP_TESTING=1
           sh scripts/install.sh -y --from-local . --prefix "$RACKUP_HOME"
           "$RACKUP_HOME/bin/rackup" install stable --set-default
           "$RACKUP_HOME/shims/racket" -e '(displayln "bootstrap ok")'

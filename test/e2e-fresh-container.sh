@@ -18,6 +18,9 @@ HOST_RACKET="${RACKUP_E2E_HOST_RACKET:-present}"
 WORKDIR="${WORKDIR:-/work}"
 TEST_HOME="${HOME:-/tmp/rackup-e2e-home}"
 export HOME="$TEST_HOME"
+# E2E tests run from the repo copy where tokens like @@RACKUP_RUNTIME_CHECKSUMS@@
+# are not substituted. RACKUP_TESTING allows the bootstrap to proceed without them.
+export RACKUP_TESTING=1
 export TMPDIR="${TMPDIR:-/tmp}"
 export PATH="/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin"
 RUN_SRC="${TMPDIR}/rackup-src"
