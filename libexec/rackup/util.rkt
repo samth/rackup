@@ -28,6 +28,11 @@
          file-sha1
          verify-installer-sha256!
          verify-installer-checksum!
+         valid-toolchain-id?
+         ensure-valid-toolchain-id!
+         string-has-control-char?
+         ensure-string-without-control-chars!
+         ensure-path-without-control-chars!
          sh-single-quote
          color-enabled?
          ansi
@@ -191,6 +196,34 @@
                      (path->string* installer-path)
                      expected-sha1
                      actual))]))
+
+;; Toolchain ID validation: positive allowlist
+(define toolchain-id-rx #px"^[A-Za-z0-9._-]+$")
+
+(define (valid-toolchain-id? s)
+  (and (string? s)
+       (not (string-blank? s))
+       (regexp-match? toolchain-id-rx s)))
+
+(define (ensure-valid-toolchain-id! s [what "toolchain id"])
+  (unless (valid-toolchain-id? s)
+    (rackup-error "invalid ~a: ~v" what s))
+  s)
+
+;; Control character detection
+(define (string-has-control-char? s)
+  (and (string? s)
+       (for/or ([ch (in-string s)])
+         (or (char<? ch #\space) (char=? ch #\rubout)))))
+
+(define (ensure-string-without-control-chars! s what)
+  (when (string-has-control-char? s)
+    (rackup-error "refusing unsafe ~a with control characters" what))
+  s)
+
+(define (ensure-path-without-control-chars! p what)
+  (ensure-string-without-control-chars! (path->string* p) what)
+  p)
 
 (define (sh-single-quote s)
   (define str (format "~a" s))

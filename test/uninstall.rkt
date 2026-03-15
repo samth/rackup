@@ -35,6 +35,23 @@
              (lambda () (validate-uninstall-home-path! (string->path "/tmp/x\n/etc"))))
   (check-exn #px"control characters"
              (lambda () (validate-uninstall-home-path! (string->path "/tmp/x\ty"))))
+  ;; Verify that RACKUP_UNINSTALL_REQUEST_FILE env var has no effect (regression).
+  ;; cmd-uninstall should use direct deletion regardless of this env var.
+  (with-temp-rackup-home
+   (lambda (tmp-home)
+     (ensure-index!)
+     (define env (current-environment-variables))
+     (environment-variables-set! env #"RACKUP_UNINSTALL_REQUEST_FILE" #"/tmp/evil-sink")
+     (define rm-called? #f)
+     (let-values ([(out err)
+                   (parameterize ([current-remove-shell-init-blocks-proc (lambda () null)]
+                                  [current-uninstall-system*-proc
+                                   (lambda args (set! rm-called? #t) #t)])
+                     (capture-output/split (lambda () (cmd-uninstall '("--yes")))))])
+       ;; Direct deletion path should have been taken (rm called)
+       (check-true rm-called?)
+       ;; And the poisoned file should NOT have been written
+       (check-false (file-exists? (string->path "/tmp/evil-sink"))))))
   (check-exn #px"unsafe rackup home target: /"
              (lambda () (validate-uninstall-home-path! (string->path "/"))))
   (check-exn #px"unsafe rackup home target equal to your home directory"

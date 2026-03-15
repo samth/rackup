@@ -32,6 +32,7 @@
          plt-generated-page-url->installer-filename
          resolve-install-request
          download-url->file
+         http-get-string
          distribution-fallback?)
 
 (define release-version-url "https://download.racket-lang.org/version.txt")
@@ -74,6 +75,21 @@
       (string->url location)
       (combine-url/relative base-url location)))
 
+;; Trusted download domains. Redirects are only followed to hosts in this list
+;; (or same-origin redirects). This prevents open-redirect attacks.
+(define trusted-download-hosts
+  '("download.racket-lang.org"
+    "mirror.racket-lang.org"
+    "pre-release.racket-lang.org"
+    "users.cs.utah.edu"
+    "plt.cs.northwestern.edu"
+    "download.plt-scheme.org"
+    "samth.github.io"))
+
+(define (redirect-allowed? from-url to-url)
+  (or (equal? (url-host from-url) (url-host to-url))
+      (member (url-host to-url) trusted-download-hosts)))
+
 (define (http-open/input url-str [redirects-left 5])
   (define u (if (url? url-str) url-str (string->url url-str)))
   (define scheme (url-scheme u))
@@ -102,7 +118,12 @@
                      (url->string u)))
      (unless (positive? redirects-left)
        (rackup-error "too many HTTP redirects while fetching ~a" (url->string u)))
-     (http-open/input (redirect-url u location) (sub1 redirects-left))]
+     (define target (redirect-url u location))
+     (unless (redirect-allowed? u target)
+       (rackup-error "refusing redirect to untrusted host while fetching ~a\nredirect target: ~a"
+                     (url->string u)
+                     (url->string target)))
+     (http-open/input target (sub1 redirects-left))]
     [(equal? code 200) in]
     [else
      (close-input-port in)
