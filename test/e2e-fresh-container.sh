@@ -841,7 +841,6 @@ if [[ "$HOST_RACKET" != "absent" ]]; then
   fi
   assert_contains "WARNING:" "$uninstall_out" "uninstall should print warnings"
   assert_contains "rackup uninstalled." "$uninstall_out" "uninstall should confirm success"
-  assert_contains "rackup uninstalled." "$uninstall_out" "uninstall should confirm completion"
   [[ ! -e "$old_home" ]] || fail "RACKUP_HOME should be removed by uninstall before returning"
   [[ ! -e "$old_rackup_bin" ]] || fail "rackup binary should be removed by uninstall"
   [[ ! -e "$old_racket_shim" ]] || fail "racket shim should be removed by uninstall"
