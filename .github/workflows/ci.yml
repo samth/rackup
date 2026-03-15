@@ -302,6 +302,7 @@ jobs:
 
   docker-e2e-linux-distros:
     name: "Docker E2E (native ${{ matrix.arch_name }} / ${{ matrix.base_image }})"
+    needs: [unit-tests]
     runs-on: ${{ matrix.runs_on }}
     strategy:
       fail-fast: false
@@ -365,6 +366,7 @@ jobs:
 
   docker-e2e-direct:
     name: Docker E2E (direct, stable + older + local link)
+    needs: [unit-tests]
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -379,6 +381,7 @@ jobs:
 
   docker-e2e-legacy-6_0:
     name: Docker E2E (legacy 6.0 install smoke)
+    needs: [unit-tests]
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -392,6 +395,7 @@ jobs:
 
   docker-e2e-prerelease:
     name: Docker E2E (pre-release.racket-lang.org)
+    needs: [unit-tests]
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -404,6 +408,7 @@ jobs:
 
   native-i386-vm-103p1:
     name: Native i386 VM (103p1 smoke)
+    needs: [unit-tests]
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
@@ -441,6 +446,7 @@ jobs:
 
   docker-e2e-bootstrap:
     name: Docker E2E (bootstrap + local link)
+    needs: [unit-tests]
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -454,6 +460,7 @@ jobs:
 
   docker-e2e-upgrade-path:
     name: Docker E2E (upgrade 9.0 -> stable + snapshot sites)
+    needs: [unit-tests]
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
@@ -467,6 +474,7 @@ jobs:
 
   docker-e2e-snapshot-utah:
     name: Docker E2E (snapshot:utah explicit)
+    needs: [unit-tests]
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -480,6 +488,7 @@ jobs:
 
   docker-e2e-snapshot-northwestern:
     name: Docker E2E (snapshot:northwestern explicit)
+    needs: [unit-tests]
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -493,6 +502,7 @@ jobs:
 
   docker-e2e-source-build-link:
     name: Docker E2E (real source build local link)
+    needs: [unit-tests]
     runs-on: ubuntu-latest
     timeout-minutes: 180
     steps:
@@ -510,6 +520,7 @@ jobs:
 
   macos-e2e:
     name: "macOS E2E (${{ matrix.runner }})"
+    needs: [unit-tests]
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -579,6 +590,7 @@ jobs:
 
   macos-e2e-bootstrap:
     name: "macOS E2E Bootstrap (${{ matrix.runner }})"
+    needs: [unit-tests]
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
