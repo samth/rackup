@@ -765,16 +765,17 @@
                                           (exn-message e))
                                  null)])
       ((current-remove-shell-init-blocks-proc))))
-  (when (directory-exists? home-path)
-    (delete-rackup-home!/external home-path))
   (displayln "rackup uninstalled.")
   (when (pair? removed-rcs)
     (displayln "Removed rackup shell init blocks from:")
     (for ([p (in-list removed-rcs)])
       (printf "  ~a\n" (path->string p))))
-  (displayln "Rackup home deletion completed synchronously.")
-  (displayln
-   "Your current shell may still have rackup-related PATH/env changes until you start a new shell."))
+  (displayln "Your current shell may still have rackup-related PATH/env changes until you start a new shell.")
+  ;; Delete last: Racket may need compiled .zo files from RACKUP_HOME
+  ;; until this point. Flush output before deletion.
+  (flush-output)
+  (when (directory-exists? home-path)
+    (delete-rackup-home!/external home-path)))
 
 (define (self-upgrade-script-source)
   (define env-override (getenv "RACKUP_SELF_UPGRADE_INSTALL_SH"))

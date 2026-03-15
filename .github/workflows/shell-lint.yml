@@ -86,6 +86,8 @@ jobs:
           rc=0
           for f in .github/workflows/*.yml; do
             base="$(basename "$f")"
+            # Skip the lint file itself (contains "write" in error messages)
+            [ "$base" != "shell-lint.yml" ] || continue
             # Use awk to find "write" inside permissions blocks
             # For pages.yml we allow write only inside the deploy job
             while IFS=: read -r lineno line; do

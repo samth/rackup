@@ -82,6 +82,8 @@
     "mirror.racket-lang.org"
     "pre-release.racket-lang.org"
     "users.cs.utah.edu"
+    "www.cs.utah.edu"
+    "www-old.cs.utah.edu"
     "plt.cs.northwestern.edu"
     "download.plt-scheme.org"
     "samth.github.io"))
