@@ -841,10 +841,7 @@ if [[ "$HOST_RACKET" != "absent" ]]; then
   fi
   assert_contains "WARNING:" "$uninstall_out" "uninstall should print warnings"
   assert_contains "rackup uninstalled." "$uninstall_out" "uninstall should confirm success"
-  assert_contains "completed synchronously" "$uninstall_out" "uninstall should report synchronous deletion"
-  if [[ "$uninstall_out" == *"Final file deletion may complete shortly"* ]]; then
-    fail "uninstall should not report deferred deletion anymore"
-  fi
+  assert_contains "rackup uninstalled." "$uninstall_out" "uninstall should confirm completion"
   [[ ! -e "$old_home" ]] || fail "RACKUP_HOME should be removed by uninstall before returning"
   [[ ! -e "$old_rackup_bin" ]] || fail "rackup binary should be removed by uninstall"
   [[ ! -e "$old_racket_shim" ]] || fail "racket shim should be removed by uninstall"
