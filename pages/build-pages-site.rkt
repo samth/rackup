@@ -1,11 +1,16 @@
 #lang racket/base
 
 (require racket/file
+         racket/hash
+         racket/match
          racket/path
+         racket/port
          racket/runtime-path
          racket/string
          racket/system
-         file/sha1)
+         file/sha1
+         net/url
+         "../libexec/rackup/remote.rkt")
 
 (define-runtime-path here ".")
 (define root-dir (simplify-path (build-path here "..")))
@@ -56,10 +61,34 @@
    (call-with-output-file (build-path out-dir "rackup-src.tar.gz.sha256")
      (lambda (out) (fprintf out "~a  rackup-src.tar.gz\n" src-sha256))
      #:exists 'truncate/replace)
+   ;; Fetch current stable Racket version and extract runtime installer checksums
+   ;; from the release page HTML for embedding into install.sh.
+   (define runtime-checksums-str
+     (with-handlers ([exn:fail? (lambda (e)
+                                  (eprintf "warning: could not fetch runtime checksums: ~a\n" (exn-message e))
+                                  "")])
+       (define version-txt (port->string (get-pure-port (string->url "https://download.racket-lang.org/version.txt"))))
+       (define stable-ver
+         (match (regexp-match #px"\\(stable \"([^\"]+)\"\\)" version-txt)
+           [(list _ v) v]
+           [_ (error "could not parse stable version from version.txt")]))
+       (define page-html
+         (port->string (get-pure-port (string->url (format "https://download.racket-lang.org/releases/~a/" stable-ver)))))
+       (define checksums (parse-download-page-checksums page-html))
+       ;; Filter to minimal installers and format as filename:sha256 lines
+       (string-join
+        (for/list ([(filename algo+hex) (in-hash checksums)]
+                   #:when (string-contains? filename "-minimal-"))
+          (format "~a:~a" filename (cdr algo+hex)))
+        "\n")))
+
    (define install-content
-     (string-replace (file->string (build-path root-dir "scripts" "install.sh"))
-                     "@@RACKUP_SRC_SHA256@@"
-                     src-sha256))
+     (string-replace
+      (string-replace (file->string (build-path root-dir "scripts" "install.sh"))
+                      "@@RACKUP_SRC_SHA256@@"
+                      src-sha256)
+      "@@RACKUP_RUNTIME_CHECKSUMS@@"
+      runtime-checksums-str))
    (for ([name '("install.sh" "install")])
      (define p (build-path out-dir name))
      (call-with-output-file p (lambda (out) (display install-content out)) #:exists 'truncate/replace)

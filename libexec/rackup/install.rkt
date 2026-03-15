@@ -78,20 +78,21 @@
 
 (define (ensure-installer-cached! installer-url
                                   #:no-cache? [no-cache? #f]
-                                  #:sha256 [expected-sha256 #f])
+                                  #:sha256 [expected-sha256 #f]
+                                  #:sha1 [expected-sha1 #f])
   (ensure-rackup-layout!)
   (require-checksummed-http-installer! installer-url expected-sha256)
   (define cache-path (installer-cache-file installer-url))
-  (when (and (file-exists? cache-path) expected-sha256)
+  (when (and (file-exists? cache-path) (or expected-sha256 expected-sha1))
     (with-handlers ([exn:fail? (lambda (_)
                                  (delete-file cache-path))])
-      (verify-installer-sha256! cache-path expected-sha256)))
+      (verify-installer-checksum! cache-path #:sha256 expected-sha256 #:sha1 expected-sha1)))
   (when (or no-cache? (not (file-exists? cache-path)))
     (if (install-verbose?)
         (install-verbose "Downloading installer: ~a" installer-url)
         (install-info "Downloading installer..."))
     (download-url->file installer-url cache-path)
-    (verify-installer-sha256! cache-path expected-sha256)
+    (verify-installer-checksum! cache-path #:sha256 expected-sha256 #:sha1 expected-sha1)
     (file-or-directory-permissions cache-path #o755))
   cache-path)
 
@@ -867,7 +868,8 @@
        (define installer-path
          (ensure-installer-cached! (hash-ref request 'installer-url)
                                    #:no-cache? (hash-ref parsed-opts 'no-cache? #f)
-                                   #:sha256 (hash-ref request 'installer-sha256 #f)))
+                                   #:sha256 (hash-ref request 'installer-sha256 #f)
+                                   #:sha1 (hash-ref request 'installer-sha1 #f)))
        (define installer-ext
          (installer-filename-extension
           (hash-ref request

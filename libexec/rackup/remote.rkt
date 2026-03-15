@@ -1,6 +1,8 @@
 #lang racket/base
 
-(require racket/file
+(require html
+         xml
+         racket/file
          racket/list
          racket/match
          racket/path
@@ -17,6 +19,7 @@
 (provide lookup-stable-version
          parse-all-versions-html
          fetch-all-release-versions
+         parse-download-page-checksums
          fetch-table-rktd
          fetch-version-rktd
          fetch-snapshot-stamp
@@ -186,6 +189,84 @@
 
 (define (fetch-snapshot-stamp site)
   (http-get-string (format "~a/snapshots/current/stamp.txt" (hash-ref snapshot-sites site))))
+
+;; Fetch checksums from a Racket download page HTML.
+;; Returns a hash mapping installer filename to (cons algorithm hex-string).
+;; The page has entries like:
+;;   <a href="installers/filename">...</a> ... SHA256: <span class="checksum">hex</span>
+;; Releases >= 8.2 have SHA256; releases 6.x-8.1 have SHA1 only.
+(define (fetch-page-checksums page-url)
+  (with-handlers ([exn:fail? (lambda (e)
+                               (eprintf "rackup: warning: could not fetch checksums from ~a: ~a\n"
+                                        page-url (exn-message e))
+                               (hash))])
+    (define html (http-get-string page-url))
+    (parse-download-page-checksums html)))
+
+(define (parse-download-page-checksums html-str)
+  ;; Parse HTML into xexprs, then collect two parallel lists:
+  ;; 1. All <a> elements with class containing "installer" (installer links)
+  ;; 2. All <span> elements with class "checksum" containing hex (checksums)
+  ;; These appear in the same order on the page, so we zip them.
+  (define xml-content (read-html-as-xml (open-input-string html-str)))
+  (define doc (xml->xexpr (findf element? (reverse xml-content))))
+
+  (define (xe-children x)
+    (cond [(not (pair? x)) null]
+          [(not (symbol? (car x))) null]
+          [(and (pair? (cdr x)) (pair? (cadr x)) (pair? (caadr x))) (cddr x)]
+          [else (cdr x)]))
+  (define (xe-attr key x)
+    (and (pair? x) (pair? (cdr x)) (pair? (cadr x)) (pair? (caadr x))
+         (for/or ([a (cadr x)]) (and (eq? (car a) key) (cadr a)))))
+  (define (xe-text x)
+    (cond [(string? x) x]
+          [(not (pair? x)) ""]
+          [(symbol? (car x)) (apply string-append (map xe-text (xe-children x)))]
+          [else ""]))
+  (define (xe-find-all tag tree)
+    (cond [(not (pair? tree)) null]
+          [(and (pair? tree) (symbol? (car tree)) (eq? (car tree) tag))
+           (cons tree (append-map (lambda (c) (xe-find-all tag c)) (xe-children tree)))]
+          [(and (pair? tree) (symbol? (car tree)))
+           (append-map (lambda (c) (xe-find-all tag c)) (xe-children tree))]
+          [else null]))
+
+  ;; Collect installer hrefs (class contains "installer")
+  (define installer-filenames
+    (for/list ([a (xe-find-all 'a doc)]
+               #:do [(define cls (xe-attr 'class a))]
+               #:when (and cls (string-contains? cls "installer"))
+               #:do [(define href (xe-attr 'href a))]
+               #:when href)
+      (last (string-split href "/"))))
+
+  ;; Collect checksum hex values (class contains "checksum", value is hex)
+  (define checksum-values
+    (for/list ([sp (xe-find-all 'span doc)]
+               #:do [(define cls (xe-attr 'class sp))]
+               #:when (and cls (string-contains? cls "checksum"))
+               #:do [(define txt (string-trim (xe-text sp)))]
+               #:when (regexp-match? #px"^[0-9a-fA-F]{40,64}$" txt))
+      (string-downcase txt)))
+
+  ;; Determine algorithm from checksum length (SHA256 = 64, SHA1 = 40)
+  (for/hash ([filename installer-filenames]
+             [hex checksum-values])
+    (values filename
+            (cons (if (= (string-length hex) 64) 'sha256 'sha1) hex))))
+
+(define (download-page-url-for-base installers-base)
+  ;; Convert installers base URL to the download page URL.
+  ;; "https://download.racket-lang.org/installers/9.1/" → "https://download.racket-lang.org/releases/9.1/"
+  ;; "https://pre-release.racket-lang.org/installers/" → "https://pre-release.racket-lang.org/"
+  ;; "https://users.cs.utah.edu/plt/snapshots/current/installers/" → "https://users.cs.utah.edu/plt/snapshots/current/"
+  (cond
+    [(regexp-match #px"^(https://download\\.racket-lang\\.org/)installers/([^/]+)/" installers-base)
+     => (lambda (m) (string-append (cadr m) "releases/" (caddr m) "/"))]
+    [(string-suffix? installers-base "/installers/")
+     (substring installers-base 0 (- (string-length installers-base) (string-length "installers/")))]
+    [else installers-base]))
 
 (define installer-rx #px"^(racket(?:-minimal)?)-([^-]+)-(.+?)(?:-(bc|cs))?\\.([A-Za-z0-9]+)$")
 
@@ -391,14 +472,23 @@
                                          #:exts preferred-exts
                                          #:allow-version-prefix? #t)
                  distribution*)))
-     (release-request-hash requested-spec
-                           resolved-version
-                           variant
-                           actual-distribution
-                           arch
-                           platform
-                           base
-                           filename)]
+     (define page-url (download-page-url-for-base base))
+     (define checksums (fetch-page-checksums page-url))
+     (define cksum (hash-ref checksums filename #f))
+     (define req (release-request-hash requested-spec
+                                       resolved-version
+                                       variant
+                                       actual-distribution
+                                       arch
+                                       platform
+                                       base
+                                       filename))
+     (cond
+       [(and cksum (eq? (car cksum) 'sha256))
+        (hash-set req 'installer-sha256 (cdr cksum))]
+       [(and cksum (eq? (car cksum) 'sha1))
+        (hash-set req 'installer-sha1 (cdr cksum))]
+       [else req])]
        [else
         ;; Older Racket releases may use Apache index listings (e.g. 5.2).
         (define-values (base* filename* actual-distribution)
@@ -418,14 +508,23 @@
                                                            #:arch arch
                                                            #:platform platform)])
               (values b f distribution*))))
-        (release-request-hash requested-spec
-                              resolved-version
-                              variant
-                              actual-distribution
-                              arch
-                              platform
-                              base*
-                              filename*)])]))
+        (define page-url* (download-page-url-for-base base*))
+        (define checksums* (fetch-page-checksums page-url*))
+        (define cksum* (hash-ref checksums* filename* #f))
+        (define req* (release-request-hash requested-spec
+                                           resolved-version
+                                           variant
+                                           actual-distribution
+                                           arch
+                                           platform
+                                           base*
+                                           filename*))
+        (cond
+          [(and cksum* (eq? (car cksum*) 'sha256))
+           (hash-set req* 'installer-sha256 (cdr cksum*))]
+          [(and cksum* (eq? (car cksum*) 'sha1))
+           (hash-set req* 'installer-sha1 (cdr cksum*))]
+          [else req*])])]))
 
 (define (distribution-fallback? actual-distribution requested-distribution)
   (and (eq? actual-distribution 'minimal)
@@ -703,32 +802,42 @@
                                                distribution*)]
                                       [else (raise e)]))])
          (values (select-pre-release "current") distribution*)))
-     (hash 'kind
-           'pre-release
-           'requested-spec
-           requested-spec
-           'resolved-version
-           resolved-version
-           'version-token
-           "current"
-           'variant
-           variant
-           'distribution
-           actual-distribution
-           'arch
-           arch
-           'platform
-           platform
-           'snapshot-site
-           #f
-           'snapshot-stamp
-           #f
-           'installers-base
-           pre-release-installers-base
-           'installer-filename
-           filename
-           'installer-url
-           (string-append pre-release-installers-base filename))]
+     (define pre-page-url (download-page-url-for-base pre-release-installers-base))
+     (define pre-checksums (fetch-page-checksums pre-page-url))
+     (define pre-cksum (hash-ref pre-checksums filename #f))
+     (define pre-req
+       (hash 'kind
+             'pre-release
+             'requested-spec
+             requested-spec
+             'resolved-version
+             resolved-version
+             'version-token
+             "current"
+             'variant
+             variant
+             'distribution
+             actual-distribution
+             'arch
+             arch
+             'platform
+             platform
+             'snapshot-site
+             #f
+             'snapshot-stamp
+             #f
+             'installers-base
+             pre-release-installers-base
+             'installer-filename
+             filename
+             'installer-url
+             (string-append pre-release-installers-base filename)))
+     (cond
+       [(and pre-cksum (eq? (car pre-cksum) 'sha256))
+        (hash-set pre-req 'installer-sha256 (cdr pre-cksum))]
+       [(and pre-cksum (eq? (car pre-cksum) 'sha1))
+        (hash-set pre-req 'installer-sha1 (cdr pre-cksum))]
+       [else pre-req])]
     ['snapshot
      (define requested-site
        (normalize-site-option (hash-ref spec* 'snapshot-site #f) snapshot-site-opt))
@@ -772,32 +881,42 @@
                                            #:arch arch
                                            #:platform platform
                                            #:exts preferred-exts))
-     (hash 'kind
-           'snapshot
-           'requested-spec
-           requested-spec
-           'resolved-version
-           resolved-version
-           'version-token
-           "current"
-           'variant
-           variant
-           'distribution
-           actual-distribution
-           'arch
-           arch
-           'platform
-           platform
-           'snapshot-site
-           site
-           'snapshot-stamp
-           stamp
-           'installers-base
-           base
-           'installer-filename
-           filename
-           'installer-url
-           (string-append base filename))]
+     (define snap-page-url (download-page-url-for-base base))
+     (define snap-checksums (fetch-page-checksums snap-page-url))
+     (define snap-cksum (hash-ref snap-checksums filename #f))
+     (define snap-req
+       (hash 'kind
+             'snapshot
+             'requested-spec
+             requested-spec
+             'resolved-version
+             resolved-version
+             'version-token
+             "current"
+             'variant
+             variant
+             'distribution
+             actual-distribution
+             'arch
+             arch
+             'platform
+             platform
+             'snapshot-site
+             site
+             'snapshot-stamp
+             stamp
+             'installers-base
+             base
+             'installer-filename
+             filename
+             'installer-url
+             (string-append base filename)))
+     (cond
+       [(and snap-cksum (eq? (car snap-cksum) 'sha256))
+        (hash-set snap-req 'installer-sha256 (cdr snap-cksum))]
+       [(and snap-cksum (eq? (car snap-cksum) 'sha1))
+        (hash-set snap-req 'installer-sha1 (cdr snap-cksum))]
+       [else snap-req])]
     [_ (rackup-error "unsupported install kind: ~a" kind)]))
 
 (module+ for-testing

@@ -64,17 +64,19 @@
   (build-path (rackup-download-cache-dir)
               (path-basename-string (string->path (car (reverse (string-split installer-url "/")))))))
 
-(define (ensure-installer-cached! installer-url #:sha256 [expected-sha256 #f])
+(define (ensure-installer-cached! installer-url
+                                  #:sha256 [expected-sha256 #f]
+                                  #:sha1 [expected-sha1 #f])
   (ensure-rackup-layout!)
   (require-checksummed-http-installer! installer-url expected-sha256)
   (define cache-path (runtime-cache-file installer-url))
-  (when (and (file-exists? cache-path) expected-sha256)
+  (when (and (file-exists? cache-path) (or expected-sha256 expected-sha1))
     (with-handlers ([exn:fail? (lambda (_) (delete-file cache-path))])
-      (verify-installer-sha256! cache-path expected-sha256)))
+      (verify-installer-checksum! cache-path #:sha256 expected-sha256 #:sha1 expected-sha1)))
   (unless (file-exists? cache-path)
     (displayln (format "Downloading hidden runtime installer: ~a" installer-url))
     (download-url->file installer-url cache-path)
-    (verify-installer-sha256! cache-path expected-sha256)
+    (verify-installer-checksum! cache-path #:sha256 expected-sha256 #:sha1 expected-sha1)
     (when (regexp-match? #px"[.]sh$" (string-downcase (path->string* cache-path)))
       (file-or-directory-permissions cache-path #o755)))
   cache-path)
@@ -332,7 +334,8 @@
              [installer-url (hash-ref req 'installer-url)]
              [installer-file
               (ensure-installer-cached! installer-url
-                                        #:sha256 (hash-ref req 'installer-sha256 #f))]
+                                        #:sha256 (hash-ref req 'installer-sha256 #f)
+                                        #:sha1 (hash-ref req 'installer-sha1 #f))]
              [installer-ext (installer-extension installer-file)])
         (if (and (directory-exists? version-dir) (file-exists? (build-path bin-link "racket")))
             (begin

@@ -1,11 +1,13 @@
 #lang racket/base
 
-(require racket/date
+(require file/sha1
+         racket/date
          racket/file
          racket/format
          racket/list
          racket/match
          racket/path
+         racket/port
          racket/string
          racket/system)
 
@@ -23,7 +25,9 @@
          http-url?
          require-checksummed-http-installer!
          file-sha256
+         file-sha1
          verify-installer-sha256!
+         verify-installer-checksum!
          sh-single-quote
          color-enabled?
          ansi
@@ -170,6 +174,23 @@
                     (path->string* installer-path)
                     expected-sha256
                     actual-sha256))))
+
+(define (file-sha1 p)
+  (call-with-input-file p sha1))
+
+(define (verify-installer-checksum! installer-path
+                                    #:sha256 [expected-sha256 #f]
+                                    #:sha1 [expected-sha1 #f])
+  (cond
+    [expected-sha256
+     (verify-installer-sha256! installer-path expected-sha256)]
+    [expected-sha1
+     (define actual (file-sha1 installer-path))
+     (unless (equal? (string-downcase actual) (string-downcase expected-sha1))
+       (rackup-error "download checksum mismatch (SHA1) for ~a\nexpected: ~a\nactual:   ~a"
+                     (path->string* installer-path)
+                     expected-sha1
+                     actual))]))
 
 (define (sh-single-quote s)
   (define str (format "~a" s))
