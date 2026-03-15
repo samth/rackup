@@ -31,27 +31,24 @@
 
 
 (module+ test
-  (check-exn #px"control characters"
-             (lambda () (validate-uninstall-home-path! (string->path "/tmp/x\n/etc"))))
-  (check-exn #px"control characters"
-             (lambda () (validate-uninstall-home-path! (string->path "/tmp/x\ty"))))
-  ;; Verify that RACKUP_UNINSTALL_REQUEST_FILE env var has no effect (regression).
-  ;; cmd-uninstall should use direct deletion regardless of this env var.
+  ;; Regression: RACKUP_UNINSTALL_REQUEST_FILE env var should have no effect
   (with-temp-rackup-home
    (lambda (tmp-home)
      (ensure-index!)
      (define env (current-environment-variables))
      (environment-variables-set! env #"RACKUP_UNINSTALL_REQUEST_FILE" #"/tmp/evil-sink")
-     (define rm-called? #f)
      (let-values ([(out err)
                    (parameterize ([current-remove-shell-init-blocks-proc (lambda () null)]
-                                  [current-uninstall-system*-proc
-                                   (lambda args (set! rm-called? #t) #t)])
+                                  [current-uninstall-system*-proc (lambda _args #t)])
                      (capture-output/split (lambda () (cmd-uninstall '("--yes")))))])
-       ;; Direct deletion path should have been taken (rm called)
-       (check-true rm-called?)
-       ;; And the poisoned file should NOT have been written
+       ;; The poisoned file should NOT have been written
        (check-false (file-exists? (string->path "/tmp/evil-sink"))))))
+
+  ;; Path validation
+  (check-exn #px"control characters"
+             (lambda () (validate-uninstall-home-path! (string->path "/tmp/x\n/etc"))))
+  (check-exn #px"control characters"
+             (lambda () (validate-uninstall-home-path! (string->path "/tmp/x\ty"))))
   (check-exn #px"unsafe rackup home target: /"
              (lambda () (validate-uninstall-home-path! (string->path "/"))))
   (check-exn #px"unsafe rackup home target equal to your home directory"
@@ -66,6 +63,7 @@
     (check-exn #px"unsafe rackup home target equal to the current directory"
                (lambda () (validate-uninstall-home-path! (string->path ".")))))
 
+  ;; delete-rackup-home!/external actually deletes
   (define delete-home (make-temporary-file "rackup-uninstall-delete-~a" 'directory tmp-root))
   (call-with-output-file* (build-path delete-home "keep.txt")
     #:exists 'truncate/replace
@@ -74,6 +72,7 @@
   (delete-rackup-home!/external delete-home)
   (check-false (directory-exists? delete-home))
 
+  ;; Confirmation required
   (with-temp-rackup-home
    (lambda (_tmp-home)
      (check-exn #px"refusing to uninstall without interactive confirmation"
@@ -81,41 +80,23 @@
                   (parameterize ([current-input-port (open-input-string "")])
                     (cmd-uninstall null))))))
 
+  ;; cmd-uninstall does confirmation + RC cleanup + output (deletion is done by wrapper)
   (with-temp-rackup-home
    (lambda (tmp-home)
      (ensure-index!)
-     (define removed-rcs null)
-     (define rm-args #f)
      (make-directory* tmp-home)
-      (let-values ([(out err)
+     (let-values ([(out err)
                    (parameterize ([current-remove-shell-init-blocks-proc
                                    (lambda ()
-                                     (set! removed-rcs (list (build-path tmp-home "dummy.rc")))
-                                     removed-rcs)]
+                                     (list (build-path tmp-home "dummy.rc")))]
                                   [current-uninstall-system*-proc
-                                   (lambda args
-                                     (set! rm-args args)
-                                     #t)])
+                                   (lambda _args #t)])
                      (capture-output/split (lambda () (cmd-uninstall '("--yes")))))])
-       (check-equal? (map (lambda (v) (if (path? v) (path->string v) v)) rm-args)
-                     (list (path->string (or (find-executable-path "rm") (string->path "/bin/rm")))
-                           "-rf"
-                           (path->string (rackup-home))))
        (check-true (string-contains? out "rackup uninstalled."))
        (check-true (string-contains? out "dummy.rc"))
        (check-true (string-contains? err "WARNING:")))))
 
-  (with-temp-rackup-home
-   (lambda (tmp-home)
-     (ensure-index!)
-     (make-directory* tmp-home)
-     (capture-output
-      (lambda ()
-        (parameterize ([current-remove-shell-init-blocks-proc (lambda () null)]
-                       [current-uninstall-system*-proc (lambda _args #f)])
-          (check-exn #px"failed to delete rackup home synchronously"
-                     (lambda () (cmd-uninstall '("--yes")))))))))
-
+  ;; Linked local toolchain warning
   (with-temp-rackup-home
    (lambda (_tmp-home)
      (ensure-index!)
@@ -143,6 +124,7 @@
        (check-true (string-contains? err source-path))
        (check-true (string-contains? out "rackup uninstalled.")))))
 
+  ;; Corrupt meta test
   (with-temp-rackup-home
    (lambda (_tmp-home)
      (ensure-index!)
