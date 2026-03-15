@@ -714,28 +714,11 @@
 (define current-uninstall-system*-proc
   (make-parameter system*))
 
-(define (uninstall-request-file)
-  (define raw (getenv "RACKUP_UNINSTALL_REQUEST_FILE"))
-  (and raw
-       (not (string-blank? raw))
-       (string->path raw)))
-
-(define (write-uninstall-request! request-path home-path removed-rcs)
-  (write-string-file
-   request-path
-   (string-append
-    (path->string home-path)
-    "\n"
-    (if (null? removed-rcs)
-        ""
-        (string-append
-         (string-join (map path->string removed-rcs) "\n")
-         "\n")))))
-
 (define (normalized-path p)
   (simplify-path (path->complete-path p) #t))
 
 (define (validate-uninstall-home-path! home-path)
+  (ensure-path-without-control-chars! home-path "uninstall target path")
   (define normalized-home (normalized-path home-path))
   (define user-home (normalized-path (find-system-path 'home-dir)))
   (define env-home
@@ -782,24 +765,22 @@
                                           (exn-message e))
                                  null)])
       ((current-remove-shell-init-blocks-proc))))
-  (define request-file (uninstall-request-file))
-  (cond
-    [request-file
-     (write-uninstall-request! request-file home-path removed-rcs)]
-    [else
-     (when (directory-exists? home-path)
-       (delete-rackup-home!/external home-path))
-     (displayln "rackup uninstalled.")
-     (when (pair? removed-rcs)
-       (displayln "Removed rackup shell init blocks from:")
-       (for ([p (in-list removed-rcs)])
-         (printf "  ~a\n" (path->string p))))
-     (displayln "Rackup home deletion completed synchronously.")
-     (displayln
-      "Your current shell may still have rackup-related PATH/env changes until you start a new shell.")]))
+  (displayln "rackup uninstalled.")
+  (when (pair? removed-rcs)
+    (displayln "Removed rackup shell init blocks from:")
+    (for ([p (in-list removed-rcs)])
+      (printf "  ~a\n" (path->string p))))
+  (displayln "Your current shell may still have rackup-related PATH/env changes until you start a new shell.")
+  ;; The actual rm -rf is done by the shell wrapper after this process
+  ;; exits. In source mode, RACKUP_HOME contains the running .rkt/.zo
+  ;; files, so deleting in-process would crash during exit.
+  )
 
 (define (self-upgrade-script-source)
-  (or (getenv "RACKUP_SELF_UPGRADE_INSTALL_SH") "https://samth.github.io/rackup/install.sh"))
+  (define env-override (getenv "RACKUP_SELF_UPGRADE_INSTALL_SH"))
+  (if (and env-override (getenv "RACKUP_TESTING"))
+      env-override
+      "https://samth.github.io/rackup/install.sh"))
 
 (define (url-like? s)
   (and (string? s) (regexp-match? #px"^[a-zA-Z][a-zA-Z0-9+.-]*://" s)))
@@ -822,11 +803,25 @@
   (define opts (parse-self-upgrade-options rest))
   (define mode (hash-ref opts 'mode #f))
   (define source (self-upgrade-script-source))
+(define (parse-sha256-sidecar text)
+    (for/or ([line (in-list (string-split (string-downcase text) "\n"))])
+      (match (regexp-match #px"^([0-9a-f]{64})\\b" (string-trim line))
+        [(list _ sha) sha]
+        [_ #f])))
   (define script-path
     (cond
       [(url-like? source)
+       (define checksum-url (string-append source ".sha256"))
+       (define expected-sha
+         (with-handlers ([exn:fail? (lambda (e)
+                                      (eprintf "rackup: warning: could not fetch checksum from ~a: ~a\n"
+                                               checksum-url (exn-message e))
+                                      #f)])
+           (parse-sha256-sidecar (http-get-string checksum-url))))
        (define p (make-temporary-file "rackup-self-upgrade-~a.sh"))
        (download-url->file source p)
+       (when expected-sha
+         (verify-installer-sha256! p expected-sha))
        (file-or-directory-permissions p #o755)
        p]
       [else (string->path source)]))

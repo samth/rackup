@@ -66,46 +66,6 @@ if [ -x "$CORE_EXE" ]; then
   done
   unset PLTCOLLECTS PLTADDONDIR PLTCOMPILEDROOTS PLTUSERHOME RACKET_XPATCH PLT_COMPILED_FILE_CHECK
 
-  if [ "${1:-}" = "uninstall" ]; then
-    REQUEST_DIR="$(mktemp -d "${TMPDIR:-/tmp}/rackup-uninstall.XXXXXX")"
-    REQUEST_FILE="$REQUEST_DIR/request.txt"
-    # shellcheck disable=SC2317  # invoked via trap
-    cleanup_uninstall_request() {
-      rm -rf "$REQUEST_DIR"
-    }
-    trap cleanup_uninstall_request EXIT INT TERM HUP
-    export RACKUP_UNINSTALL_REQUEST_FILE="$REQUEST_FILE"
-    "$CORE_EXE" "$@"
-    status=$?
-    if [ "$status" -ne 0 ]; then
-      exit "$status"
-    fi
-    unset RACKUP_UNINSTALL_REQUEST_FILE
-    if [ ! -f "$REQUEST_FILE" ]; then
-      echo "rackup: uninstall request was not produced" >&2
-      exit 1
-    fi
-    TARGET_HOME="$(sed -n '1p' "$REQUEST_FILE")"
-    if [ -z "$TARGET_HOME" ]; then
-      echo "rackup: uninstall request did not include a target path" >&2
-      exit 1
-    fi
-    if [ -e "$TARGET_HOME" ]; then
-      rm -rf -- "$TARGET_HOME"
-    fi
-    echo "rackup uninstalled."
-    if [ "$(wc -l <"$REQUEST_FILE")" -gt 1 ]; then
-      echo "Removed rackup shell init blocks from:"
-      sed -n '2,$p' "$REQUEST_FILE" | while IFS= read -r rc_path; do
-        [ -n "$rc_path" ] || continue
-        printf '  %s\n' "$rc_path"
-      done
-    fi
-    echo "Rackup home deletion completed synchronously."
-    echo "Your current shell may still have rackup-related PATH/env changes until you start a new shell."
-    exit 0
-  fi
-
   exec "$CORE_EXE" "$@"
 fi
 # --- End prebuilt binary path ---
@@ -138,43 +98,19 @@ rackup_run_core() {
   fi
 }
 
+# Uninstall: the Racket code handles confirmation and RC cleanup but does
+# NOT delete RACKUP_HOME. The wrapper does the rm -rf after Racket exits,
+# avoiding issues with deleting .zo files the running process needs.
 if [ "${1:-}" = "uninstall" ]; then
-  REQUEST_DIR="$(mktemp -d "${TMPDIR:-/tmp}/rackup-uninstall.XXXXXX")"
-  REQUEST_FILE="$REQUEST_DIR/request.txt"
-  # shellcheck disable=SC2317  # invoked via trap
-  cleanup_uninstall_request() {
-    rm -rf "$REQUEST_DIR"
-  }
-  trap cleanup_uninstall_request EXIT INT TERM HUP
-  export RACKUP_UNINSTALL_REQUEST_FILE="$REQUEST_FILE"
-  "$RACKET_EXE" -y -U -A "$RUNTIME_ADDON_DIR" "$CORE" "$@"
-  status=$?
-  if [ "$status" -ne 0 ]; then
-    exit "$status"
+  _rackup_home="$(rackup_home)"
+  if [ "$USE_Y" -eq 1 ]; then
+    "$RACKET_EXE" -y -U -A "$RUNTIME_ADDON_DIR" "$CORE" "$@"
+  else
+    "$RACKET_EXE" -U -A "$RUNTIME_ADDON_DIR" "$CORE" "$@"
   fi
-  unset RACKUP_UNINSTALL_REQUEST_FILE
-  if [ ! -f "$REQUEST_FILE" ]; then
-    echo "rackup: uninstall request was not produced" >&2
-    exit 1
+  if [ -d "$_rackup_home" ]; then
+    rm -rf -- "$_rackup_home"
   fi
-  TARGET_HOME="$(sed -n '1p' "$REQUEST_FILE")"
-  if [ -z "$TARGET_HOME" ]; then
-    echo "rackup: uninstall request did not include a target path" >&2
-    exit 1
-  fi
-  if [ -e "$TARGET_HOME" ]; then
-    rm -rf -- "$TARGET_HOME"
-  fi
-  echo "rackup uninstalled."
-  if [ "$(wc -l <"$REQUEST_FILE")" -gt 1 ]; then
-    echo "Removed rackup shell init blocks from:"
-    sed -n '2,$p' "$REQUEST_FILE" | while IFS= read -r rc_path; do
-      [ -n "$rc_path" ] || continue
-      printf '  %s\n' "$rc_path"
-    done
-  fi
-  echo "Rackup home deletion completed synchronously."
-  echo "Your current shell may still have rackup-related PATH/env changes until you start a new shell."
   exit 0
 fi
 
