@@ -209,7 +209,7 @@
    (lambda ()
      (system*/check 'hdiutil-attach
                     "/usr/bin/hdiutil" "attach"
-                    "-nobrowse" "-noverify" "-noautoopen"
+                    "-nobrowse" "-noverify" "-noautoopen" "-quiet"
                     "-mountpoint" (path->string* mount-point)
                     (path->string* dmg)))
    (lambda ()
@@ -230,7 +230,8 @@
           mount-point]
          [(= (length top-dirs) 1) (car top-dirs)]
          [else mount-point]))
-     (copy-directory/files src-dir dest #:keep-modify-seconds? #t))
+     (make-directory* dest)
+     (system*/check 'ditto "/usr/bin/ditto" (path->string* src-dir) (path->string* dest)))
    (lambda ()
      (system* "/usr/bin/hdiutil" "detach" (path->string* mount-point) "-quiet")
      (when (directory-exists? mount-point)
