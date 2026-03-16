@@ -404,6 +404,7 @@ fi
 
 # --- Try prebuilt binary before falling back to source ---
 INSTALLED_PREBUILT=0
+INSTALLED_PREBUILT_SHA256=""
 
 if [ -z "$FROM_LOCAL" ] && [ "$FORCE_SOURCE" -eq 0 ]; then
   HOST_ARCH="$(detect_arch)"
@@ -466,18 +467,22 @@ if [ -z "$FROM_LOCAL" ] && [ "$FORCE_SOURCE" -eq 0 ]; then
           cp "$BINARY_DIR/bin/rackup" "$PREFIX/bin/rackup"
           cp "$BINARY_DIR/bin/rackup-core" "$PREFIX/bin/rackup-core"
           chmod +x "$PREFIX/bin/rackup" "$PREFIX/bin/rackup-core"
+          # Remove macOS quarantine flag so Gatekeeper does not kill the binary.
+          if command -v xattr >/dev/null 2>&1; then
+            xattr -dr com.apple.quarantine "$PREFIX/bin" 2>/dev/null || true
+          fi
           if [ -d "$BINARY_DIR/lib" ]; then
             rm -rf "${PREFIX:?}/lib"
             cp -R "$BINARY_DIR/lib" "$PREFIX/lib"
+            if command -v xattr >/dev/null 2>&1; then
+              xattr -dr com.apple.quarantine "$PREFIX/lib" 2>/dev/null || true
+            fi
           fi
           cp "$BINARY_DIR/libexec/rackup-bootstrap.sh" "$PREFIX/libexec/rackup-bootstrap.sh"
           chmod +x "$PREFIX/libexec/rackup-bootstrap.sh"
           ok "Installed prebuilt binary: $PREFIX/bin/rackup"
-          # Store the checksum so self-upgrade can detect no-ops.
-          if [ -n "${expected_bin_sha256:-}" ]; then
-            printf '%s\n' "$expected_bin_sha256" >"$PREFIX/.installed-sha256"
-          fi
           INSTALLED_PREBUILT=1
+          INSTALLED_PREBUILT_SHA256="${expected_bin_sha256:-}"
         else
           if [ "$FORCE_EXE" -eq 1 ]; then
             warn "Error: prebuilt binary archive was invalid."
@@ -576,14 +581,12 @@ if [ "$INSTALLED_PREBUILT" -eq 0 ]; then
   fi
 
   ok "Installed: $PREFIX/bin/rackup"
-  # Store the checksum so self-upgrade can detect no-ops.
+  # Compute the checksum to store after a successful reshim.
+  _INSTALLED_SRC_SHA256=""
   if is_sha256_hex "$EXPECTED_SRC_SHA256"; then
-    printf '%s\n' "$EXPECTED_SRC_SHA256" >"$PREFIX/.installed-sha256"
+    _INSTALLED_SRC_SHA256="$EXPECTED_SRC_SHA256"
   elif [ -f "$TMPDIR_INSTALL/rackup.tar.gz" ]; then
-    _src_sha="$(compute_sha256 "$TMPDIR_INSTALL/rackup.tar.gz")" || true
-    if [ -n "${_src_sha:-}" ]; then
-      printf '%s\n' "$_src_sha" >"$PREFIX/.installed-sha256"
-    fi
+    _INSTALLED_SRC_SHA256="$(compute_sha256 "$TMPDIR_INSTALL/rackup.tar.gz")" || true
   fi
 
   if [ ! -r "$PREFIX/libexec/rackup-bootstrap.sh" ]; then
@@ -601,6 +604,11 @@ if [ "$INSTALLED_PREBUILT" -eq 0 ]; then
   info "Registering/validating hidden runtime..."
   "$PREFIX/bin/rackup" runtime install >/dev/null
   "$PREFIX/bin/rackup" reshim >/dev/null
+  # Store the checksum only after reshim succeeds, so a failed upgrade
+  # can be retried (the up-to-date check compares this hash).
+  if [ -n "${_INSTALLED_SRC_SHA256:-}" ]; then
+    printf '%s\n' "$_INSTALLED_SRC_SHA256" >"$PREFIX/.installed-sha256"
+  fi
 
 fi
 # --- End source/prebuilt branch ---
@@ -619,6 +627,10 @@ if [ "$INSTALLED_PREBUILT" -eq 1 ]; then
     rm -rf "$PREFIX/libexec/rackup" "$PREFIX/libexec/rackup-core.rkt"
   fi
   "$PREFIX/bin/rackup" reshim >/dev/null
+  # Store the checksum only after reshim succeeds.
+  if [ -n "${INSTALLED_PREBUILT_SHA256:-}" ]; then
+    printf '%s\n' "$INSTALLED_PREBUILT_SHA256" >"$PREFIX/.installed-sha256"
+  fi
 fi
 
 default_shell="$(basename "${SHELL:-bash}")"
