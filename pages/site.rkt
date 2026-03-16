@@ -295,7 +295,11 @@
           to install Racket.
           Pass @code{-y} for non-interactive mode:
         }
-        @(shell-block "noninteractive-cmd" "curl -fsSL https://samth.github.io/rackup/install.sh | sh -s -- -y")
+        @div[class: "rackup-install-row"]{
+          @(shell-block "noninteractive-cmd" "curl -fsSL https://samth.github.io/rackup/install.sh | sh -s -- -y")
+          @a[class: "rackup-copy-btn" href: "#" id: "copy-noninteractive-cmd"]{
+            @literal{<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>}}
+        }
         @p[class: "rackup-note"]{
           Or, to verify the install script's checksum before running it:
         }
@@ -403,6 +407,7 @@ sh install.sh && rm install.sh})
           }
         }
         setupCopy("copy-install-cmd", "install-cmd");
+        setupCopy("copy-noninteractive-cmd", "noninteractive-cmd");
         setupCopy("copy-paranoid-cmd", "paranoid-cmd");
       }());
     }}))
