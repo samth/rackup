@@ -114,14 +114,7 @@
 (define (rackup-bin-entry)
   (build-path (rackup-bin-dir) "rackup"))
 (define (rackup-shell-script shell-name)
-  (define home (find-system-path 'home-dir))
-  (cond
-    [(equal? shell-name "bash")
-     (build-path home ".bash_completion.d" "rackup")]
-    [(equal? shell-name "zsh")
-     (build-path home ".zsh" "completions" "_rackup")]
-    [else
-     (build-path (rackup-shell-dir) (format "rackup.~a" shell-name))]))
+  (build-path (rackup-shell-dir) (format "rackup.~a" shell-name)))
 
 (define (rackup-toolchain-dir id)
   (build-path (rackup-toolchains-dir) id))
