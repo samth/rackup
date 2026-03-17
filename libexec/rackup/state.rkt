@@ -70,9 +70,11 @@
   (hash-has-key? (installed-toolchains idx) id))
 
 (define (get-default-toolchain [idx (load-index)])
-  (or (read-string-file (rackup-default-file) #f) (hash-ref idx 'default-toolchain #f)))
+  (define raw (or (read-string-file (rackup-default-file) #f) (hash-ref idx 'default-toolchain #f)))
+  (and raw (valid-toolchain-id? raw) raw))
 
 (define/state-locked (set-default-toolchain! id)
+  (ensure-valid-toolchain-id! id "default toolchain id")
   (ensure-index!)
   (define idx (load-index))
   (unless (toolchain-exists? id idx)
@@ -121,6 +123,7 @@
     (values k (hash-ref meta k #f))))
 
 (define/state-locked (register-toolchain! id meta)
+  (ensure-valid-toolchain-id! id "toolchain id")
   (ensure-index!)
   (write-toolchain-meta! id meta)
   (define idx (load-index))
@@ -130,6 +133,7 @@
     (set-default-toolchain! id)))
 
 (define/state-locked (unregister-toolchain! id)
+  (ensure-valid-toolchain-id! id "toolchain id")
   (ensure-index!)
   (define idx (load-index))
   (define new-installed (hash-remove (installed-toolchains idx) id))

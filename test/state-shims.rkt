@@ -32,12 +32,18 @@
 (define (with-temp-rackup-home proc)
   (define tmp (make-temporary-file "rackup-test~a" 'directory))
   (define old-home (getenv "RACKUP_HOME"))
-  (dynamic-wind (lambda () (putenv "RACKUP_HOME" (path->string tmp)))
+  (define old-testing (getenv "RACKUP_TESTING"))
+  (dynamic-wind (lambda ()
+                  (putenv "RACKUP_HOME" (path->string tmp))
+                  (putenv "RACKUP_TESTING" "1"))
                 (lambda () (proc tmp))
                 (lambda ()
                   (if old-home
                       (putenv "RACKUP_HOME" old-home)
                       (putenv "RACKUP_HOME" ""))
+                  (if old-testing
+                      (putenv "RACKUP_TESTING" old-testing)
+                      (putenv "RACKUP_TESTING" ""))
                   (delete-directory/files tmp #:must-exist? #f))))
 
 (define (run-main args)

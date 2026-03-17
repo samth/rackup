@@ -54,6 +54,10 @@ if [[ -z "$ACTIVE" ]]; then
   echo "Inspect choices with: rackup list | rackup available --limit 20" >&2
   exit 2
 fi
+if [[ ! "$ACTIVE" =~ ^[A-Za-z0-9._-]+$ ]]; then
+  echo "rackup: invalid toolchain ID: $ACTIVE" >&2
+  exit 2
+fi
 BIN_DIR="$HOME_DIR/toolchains/$ACTIVE/bin"
 BIN_REAL="$(cd -P "$BIN_DIR" 2>/dev/null && pwd)" || BIN_REAL="$BIN_DIR"
 TARGET="$BIN_REAL/$SHIM_NAME"
@@ -260,8 +264,11 @@ EOF
 (define (resolve-active-toolchain-id)
   (define env (getenv "RACKUP_TOOLCHAIN"))
   (cond
-    [(and env (not (string-blank? env))) env]
-    [else (get-default-toolchain)]))
+    [(and env (not (string-blank? env)))
+     (ensure-valid-toolchain-id! env "RACKUP_TOOLCHAIN")]
+    [else
+     (define default (get-default-toolchain))
+     (and default (ensure-valid-toolchain-id! default "default-toolchain file"))]))
 
 (define (current-toolchain-source)
   (define env (getenv "RACKUP_TOOLCHAIN"))
