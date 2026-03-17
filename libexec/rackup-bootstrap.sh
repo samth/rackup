@@ -202,6 +202,68 @@ rackup_fail() {
   exit 1
 }
 
+rackup_sha256_of_file() {
+  _file="$1"
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$_file" | cut -d' ' -f1
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$_file" | cut -d' ' -f1
+  elif command -v openssl >/dev/null 2>&1; then
+    openssl dgst -sha256 "$_file" | awk '{print $NF}'
+  else
+    return 1
+  fi
+}
+
+# Look up the expected SHA256 for a runtime installer filename
+# from the RACKUP_RUNTIME_CHECKSUMS variable (set by install.sh).
+# Format: "filename1:sha256hex\nfilename2:sha256hex\n..."
+rackup_lookup_runtime_checksum() {
+  _filename="$1"
+  _checksums="${RACKUP_RUNTIME_CHECKSUMS:-}"
+  if [ -z "$_checksums" ] || [ "$_checksums" = "@@RACKUP_RUNTIME_CHECKSUMS@@" ]; then
+    # Unsubstituted token — only allow in test/dev mode
+    if [ -n "${RACKUP_TESTING:-}" ]; then
+      return 1
+    fi
+    rackup_fail "runtime checksums not available (unsubstituted install.sh); set RACKUP_TESTING=1 for development use"
+  fi
+  # Search for filename in the checksums list (filename:sha256hex per line).
+  # Use a temp file to avoid subshell issues with piped while-read.
+  _checksum_tmp="$(mktemp "${TMPDIR:-/tmp}/rackup-checksum.XXXXXX")"
+  printf '%s\n' "$_checksums" >"$_checksum_tmp"
+  _found_sha=""
+  while IFS=: read -r name sha; do
+    if [ "$name" = "$_filename" ]; then
+      _found_sha="$sha"
+      break
+    fi
+  done <"$_checksum_tmp"
+  rm -f "$_checksum_tmp"
+  if [ -n "$_found_sha" ]; then
+    printf '%s' "$_found_sha"
+    return 0
+  fi
+  return 1
+}
+
+rackup_verify_runtime_installer() {
+  _filename="$1"
+  _filepath="$2"
+  _expected="$(rackup_lookup_runtime_checksum "$_filename")" || return 0
+  if [ -z "$_expected" ]; then
+    rackup_warn "no known checksum for $_filename; skipping verification"
+    return 0
+  fi
+  _actual="$(rackup_sha256_of_file "$_filepath")" || {
+    rackup_warn "no sha256 tool available; skipping verification"
+    return 0
+  }
+  if [ "$_actual" != "$_expected" ]; then
+    rackup_fail "checksum mismatch for $_filename: expected $_expected, got $_actual"
+  fi
+}
+
 rackup_download_to() {
   url="$1"
   out="$2"
@@ -436,9 +498,12 @@ rackup_hidden_runtime_install_if_missing() {
   rm -rf "$tmp_version_dir"
   mkdir -p "$tmp_version_dir"
 
-  if [ ! -f "$installer_cache" ]; then
+  if [ -f "$installer_cache" ]; then
+    rackup_verify_runtime_installer "$filename" "$installer_cache"
+  else
     rackup_warn "downloading hidden runtime installer: $installer_url"
     rackup_download_to "$installer_url" "$installer_cache"
+    rackup_verify_runtime_installer "$filename" "$installer_cache"
     if [ "$runtime_ext" = "sh" ]; then
       chmod 0755 "$installer_cache" || true
     fi
