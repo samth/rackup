@@ -70,7 +70,7 @@
   (usage-line "remove <toolchain>" "Remove an installed or linked toolchain and its addon dir.")
   (usage-line "reshim" "Rebuild executable shims from installed toolchains.")
   (usage-line "init [--shell bash|zsh]" "Install/update shell integration in ~/.bashrc or ~/.zshrc.")
-  (usage-line "uninstall [--yes]"
+  (usage-line "uninstall [--dangerously-delete-without-prompting]"
               "Remove rackup, its toolchains/runtime, and shell init blocks (destructive).")
   (usage-line "self-upgrade [--with-init] [--exe | --source]"
               "Upgrade rackup's code by rerunning the installer into the current RACKUP_HOME.")
@@ -653,7 +653,7 @@
   (command-line #:program "rackup uninstall"
                 #:argv rest
                 #:once-each
-                [("-y" "--yes") "Skip confirmation prompt" (set! yes? #t)]
+                [("--dangerously-delete-without-prompting") "Skip confirmation prompt" (set! yes? #t)]
                 #:args ()
                 (void))
   yes?)
@@ -700,7 +700,7 @@
 (define (confirm-uninstall! home-path yes?)
   (unless yes?
     (unless (terminal-port? (current-input-port))
-      (rackup-error "refusing to uninstall without interactive confirmation (rerun with --yes)"))
+      (rackup-error "refusing to uninstall without interactive confirmation (rerun with --dangerously-delete-without-prompting)"))
     (displayln "")
     (printf "Type DELETE to uninstall rackup and remove ~a: " (path->string home-path))
     (flush-output)

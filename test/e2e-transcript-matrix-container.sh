@@ -184,7 +184,7 @@ RACKUP_SELF_UPGRADE_INSTALL_SH="$RUN_SRC/scripts/install.sh" "$RACKUP_BIN" self-
 
 if [[ "$UNINSTALL_AT_END" == "1" ]]; then
   note "Uninstall"
-  "$RACKUP_BIN" uninstall --yes
+  "$RACKUP_BIN" uninstall --dangerously-delete-without-prompting
   for _ in $(seq 1 30); do
     [[ ! -e "$RACKUP_HOME" ]] && break
     sleep 0.2

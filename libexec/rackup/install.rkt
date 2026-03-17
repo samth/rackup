@@ -626,6 +626,7 @@
 (define (parse-install-options opts)
   (define variant #f)
   (define distribution 'full)
+  (define explicit-distribution? #f)
   (define snapshot-site 'auto)
   (define arch (normalized-host-arch))
   (define set-default? #f)
@@ -636,7 +637,9 @@
   (command-line #:program "rackup install"
                 #:argv opts
                 #:once-each [("--variant") v "VM variant" (set! variant v)]
-                [("--distribution") d "Distribution" (set! distribution d)]
+                [("--distribution") d "Distribution"
+                                    (set! distribution d)
+                                    (set! explicit-distribution? #t)]
                 [("--snapshot-site") s "Snapshot mirror" (set! snapshot-site (string->symbol s))]
                 [("--arch") a "Target architecture" (set! arch (arch-token->normalized a))]
                 [("--set-default") "Set installed toolchain as default" (set! set-default? #t)]
@@ -652,6 +655,8 @@
         variant
         'distribution
         distribution
+        'explicit-distribution?
+        explicit-distribution?
         'snapshot-site
         snapshot-site
         'arch
@@ -815,26 +820,37 @@
                              #:arch (hash-ref parsed-opts 'arch)
                              #:snapshot-site (hash-ref parsed-opts 'snapshot-site)
                              #:installer-ext (hash-ref parsed-opts 'installer-ext #f)))
-  (when (distribution-fallback? (hash-ref request 'distribution)
-                               (if (symbol? requested-distribution)
-                                   requested-distribution
-                                   (string->symbol requested-distribution)))
-    (unless (terminal-port? (current-input-port))
-      (rackup-error
-       (string-append "no ~a installer available for ~a on ~a; "
-                      "rerun with --distribution minimal to install the minimal distribution")
-       requested-distribution
-       (hash-ref request 'arch)
-       (hash-ref request 'platform)))
-    (printf "No ~a installer is available for ~a on ~a.\nInstall minimal distribution instead? [y/N] "
-            requested-distribution
-            (hash-ref request 'arch)
-            (hash-ref request 'platform))
-    (flush-output)
-    (define answer (read-line))
-    (unless (and (string? answer)
-                 (member (string-downcase (string-trim answer)) '("y" "yes")))
-      (rackup-error "install aborted")))
+  (define fell-back-to-minimal?
+    (distribution-fallback? (hash-ref request 'distribution)
+                            (if (symbol? requested-distribution)
+                                requested-distribution
+                                (string->symbol requested-distribution))))
+  (define explicit-distribution? (hash-ref parsed-opts 'explicit-distribution?))
+  (when fell-back-to-minimal?
+    (cond
+      [explicit-distribution?
+       ;; User explicitly requested --distribution full; require confirmation
+       (unless (terminal-port? (current-input-port))
+         (rackup-error
+          (string-append "no ~a installer available for ~a on ~a; "
+                         "rerun with --distribution minimal to install the minimal distribution")
+          requested-distribution
+          (hash-ref request 'arch)
+          (hash-ref request 'platform)))
+       (printf "No ~a installer is available for ~a on ~a.\nInstall minimal distribution instead? [y/N] "
+               requested-distribution
+               (hash-ref request 'arch)
+               (hash-ref request 'platform))
+       (flush-output)
+       (define answer (read-line))
+       (unless (and (string? answer)
+                    (member (string-downcase (string-trim answer)) '("y" "yes")))
+         (rackup-error "install aborted"))]
+      [else
+       ;; Default full was unavailable; proceed with warning
+       (eprintf "WARNING: no full installer available for ~a on ~a; installing minimal instead.\n"
+                (hash-ref request 'arch)
+                (hash-ref request 'platform))]))
   (define id (canonical-id-for-request request))
   (define tc-dir (rackup-toolchain-dir id))
   (define install-root (rackup-toolchain-install-dir id))
@@ -903,6 +919,8 @@
             (set-default-toolchain! id)))
          (install-ok "Installed ~a" id)
          (report-default-change! default-before (get-default-toolchain) id explicit-default?)
+         (when fell-back-to-minimal?
+           (printf "\nTip: to get the full Racket distribution, run:\n  raco pkg install main-distribution\n"))
          id)])))
 
 (define (remove-toolchain! id)

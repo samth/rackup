@@ -431,10 +431,10 @@ instead.
 Remove all rackup-managed data and shell init blocks.  This is
 destructive and cannot be undone.
 
-@shell-block{rackup uninstall [--yes]}
+@shell-block{rackup uninstall [--dangerously-delete-without-prompting]}
 
 @opt-table[
-  @list[@exec{--yes}
+  @list[@exec{--dangerously-delete-without-prompting}
         "Skip the interactive DELETE confirmation prompt."]
 ]
 

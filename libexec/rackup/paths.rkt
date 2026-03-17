@@ -28,7 +28,6 @@
          rackup-index-file
          rackup-config-file
          rackup-default-file
-         rackup-shim-aliases-file
          rackup-shim-dispatcher
          rackup-bin-entry
          rackup-shell-script
@@ -41,11 +40,18 @@
          ensure-rackup-layout!)
 
 ;; True when rackup was installed as a prebuilt raco-exe binary.
-;; Detected by checking for the compiled rackup-core executable next to the
-;; shell wrapper.  When true the hidden runtime is unnecessary (the exe
-;; embeds its own Racket).
+;; Detected once (on first call) by checking for the compiled rackup-core
+;; executable next to the shell wrapper.  The result is cached so that
+;; the mode cannot flip mid-session; self-upgrade exits afterward anyway.
+(define running-as-exe-cache (box 'unset))
 (define (running-as-exe?)
-  (executable-file? (build-path (rackup-bin-dir) "rackup-core")))
+  (define v (unbox running-as-exe-cache))
+  (cond
+    [(eq? v 'unset)
+     (define result (executable-file? (build-path (rackup-bin-dir) "rackup-core")))
+     (set-box! running-as-exe-cache result)
+     result]
+    [else v]))
 
 (define (rackup-home)
   (define env (getenv "RACKUP_HOME"))
@@ -99,18 +105,23 @@
 (define (rackup-index-file)
   (build-path (rackup-state-dir) "index.rktd"))
 (define (rackup-config-file)
-  (build-path (rackup-state-dir) "config.rktd"))
+  (build-path (rackup-state-dir) "config"))
 (define (rackup-default-file)
   (build-path (rackup-state-dir) "default-toolchain"))
-(define (rackup-shim-aliases-file)
-  (build-path (rackup-state-dir) "shim-aliases"))
 
 (define (rackup-shim-dispatcher)
   (build-path (rackup-libexec-dir) "rackup-shim"))
 (define (rackup-bin-entry)
   (build-path (rackup-bin-dir) "rackup"))
 (define (rackup-shell-script shell-name)
-  (build-path (rackup-shell-dir) (format "rackup.~a" shell-name)))
+  (define home (find-system-path 'home-dir))
+  (cond
+    [(equal? shell-name "bash")
+     (build-path home ".bash_completion.d" "rackup")]
+    [(equal? shell-name "zsh")
+     (build-path home ".zsh" "completions" "_rackup")]
+    [else
+     (build-path (rackup-shell-dir) (format "rackup.~a" shell-name))]))
 
 (define (rackup-toolchain-dir id)
   (build-path (rackup-toolchains-dir) id))

@@ -962,6 +962,7 @@
                                   (string-append (path->string fake-bin-dir)
                                                  ":"
                                                  (or (getenv "PATH") "/usr/bin:/bin"))))
+     (environment-variables-set! env #"RACKUP_ALLOW_SYSTEM_RACKET" #"1")
      ;; PLTHOME is not a Racket env var, so bin/rackup does not save/unset it.
      ;; It passes through to the subprocess unchanged.
      (environment-variables-set! env #"PLTHOME" #"poison-plthome")

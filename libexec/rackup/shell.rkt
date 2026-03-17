@@ -120,7 +120,7 @@
    "      COMPREPLY=($(compgen -W \"--shell\" -- \"$cur\"))\n"
    "      ;;\n"
    "    uninstall)\n"
-   "      COMPREPLY=($(compgen -W \"--yes\" -- \"$cur\"))\n"
+   "      COMPREPLY=($(compgen -W \"--dangerously-delete-without-prompting\" -- \"$cur\"))\n"
    "      ;;\n"
    "    self-upgrade)\n"
    "      COMPREPLY=($(compgen -W \"--with-init\" -- \"$cur\"))\n"
@@ -242,7 +242,7 @@
    "      _arguments '--shell[Shell type]:shell:(bash zsh)'\n"
    "      ;;\n"
    "    uninstall)\n"
-   "      _arguments '*:option:(--yes)'\n"
+   "      _arguments '*:option:(--dangerously-delete-without-prompting)'\n"
    "      ;;\n"
    "    self-upgrade)\n"
    "      _arguments '*:option:(--with-init)'\n"
@@ -270,8 +270,11 @@
                    [else ""])))
 
 (define (managed-rc-block shell-name)
-  (define base "${RACKUP_HOME:-$HOME/.rackup}")
-  (define shell-script (format "~a/shell/rackup.~a" base shell-name))
+  (define shell-script
+    (cond
+      [(equal? shell-name "bash") "$HOME/.bash_completion.d/rackup"]
+      [(equal? shell-name "zsh") "$HOME/.zsh/completions/_rackup"]
+      [else (format "${RACKUP_HOME:-$HOME/.rackup}/shell/rackup.~a" shell-name)]))
   (string-append start-marker
                  "\n"
                  "[ -f \""
@@ -390,7 +393,12 @@
       (define-values (updated changed?) (strip-managed-block existing))
       (when changed?
         (write-string-file rc updated)
-        (set! removed (cons rc removed)))))
+        (set! removed (cons rc removed))))
+    ;; Clean up completion scripts in user dirs
+    (define script (rackup-shell-script shell*))
+    (when (file-exists? script)
+      (delete-file script)
+      (set! removed (cons script removed))))
   (reverse removed))
 
 (define (init-shell! [shell-name #f])
@@ -402,6 +410,7 @@
   (ensure-core-rackup-shim!)
   (for ([s '("bash" "zsh")])
     (define p (rackup-shell-script s))
+    (make-parent-directory* p)
     (write-string-file p (shell-helper-script s)))
   (define rc (rc-path shell*))
   (define existing (read-string-file rc ""))
