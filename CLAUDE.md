@@ -53,6 +53,10 @@ test/docker-test-fresh-install.sh \
 
 Run `test/docker-test-fresh-install.sh --help` for all options.
 
+## Plans
+
+Archive all plan documents in `docs/plans/` with dated filenames (e.g., `2026-03-13-feature-name.md`). This includes plans created during brainstorming, implementation plans, research documents, and review documents.
+
 ## Code ownership
 
 We own the entire project. There is no public API. Feel free to change any module's exports, signatures, or internal structure as needed — no backwards-compatibility workarounds required.
