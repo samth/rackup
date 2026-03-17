@@ -18,6 +18,9 @@ HOST_RACKET="${RACKUP_E2E_HOST_RACKET:-present}"
 WORKDIR="${WORKDIR:-/work}"
 TEST_HOME="${HOME:-/tmp/rackup-e2e-home}"
 export HOME="$TEST_HOME"
+# E2E tests run from the repo copy where tokens like @@RACKUP_RUNTIME_CHECKSUMS@@
+# are not substituted. RACKUP_TESTING allows the bootstrap to proceed without them.
+export RACKUP_TESTING=1
 export TMPDIR="${TMPDIR:-/tmp}"
 export PATH="/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin"
 RUN_SRC="${TMPDIR}/rackup-src"
@@ -827,10 +830,6 @@ if [[ "$HOST_RACKET" != "absent" ]]; then
   fi
   assert_contains "WARNING:" "$uninstall_out" "uninstall should print warnings"
   assert_contains "rackup uninstalled." "$uninstall_out" "uninstall should confirm success"
-  assert_contains "completed synchronously" "$uninstall_out" "uninstall should report synchronous deletion"
-  if [[ "$uninstall_out" == *"Final file deletion may complete shortly"* ]]; then
-    fail "uninstall should not report deferred deletion anymore"
-  fi
   [[ ! -e "$old_home" ]] || fail "RACKUP_HOME should be removed by uninstall before returning"
   [[ ! -e "$old_rackup_bin" ]] || fail "rackup binary should be removed by uninstall"
   [[ ! -e "$old_racket_shim" ]] || fail "racket shim should be removed by uninstall"

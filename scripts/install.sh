@@ -12,8 +12,11 @@ NO_INIT=0
 do_init=0
 BOOTSTRAP_MODE="${RACKUP_BOOTSTRAP_MODE:-install}"
 EXPECTED_SRC_SHA256="@@RACKUP_SRC_SHA256@@"
+RACKUP_RUNTIME_CHECKSUMS="@@RACKUP_RUNTIME_CHECKSUMS@@"
+export RACKUP_RUNTIME_CHECKSUMS
 FORCE_SOURCE="${RACKUP_FORCE_SOURCE:-0}"
 FORCE_EXE="${RACKUP_FORCE_EXE:-0}"
+ALLOW_UNSAFE_PREFIX=0
 PAGES_BASE_URL="${RACKUP_PAGES_BASE_URL:-}"
 
 is_tty_stdout() {
@@ -55,7 +58,7 @@ usage() {
 rackup bootstrap installer
 
 Usage:
-  install.sh [-y] [--no-init] [--prefix DIR] [--repo owner/name] [--ref REF] [--archive-url URL] [--shell bash|zsh] [--from-local PATH] [--source | --exe]
+  install.sh [-y] [--no-init] [--prefix DIR] [--repo owner/name] [--ref REF] [--archive-url URL] [--shell bash|zsh] [--from-local PATH] [--source | --exe] [--allow-unsafe-prefix]
 
 Behavior:
   - Prompts before editing shell config by default.
@@ -66,6 +69,7 @@ Behavior:
   - Falls back to source distribution + hidden runtime if no binary is available.
   - Use --source to skip the prebuilt binary and install from source directly.
   - Use --exe to require a prebuilt binary (error if unavailable for this platform).
+  - Use --allow-unsafe-prefix to override the safety check that rejects system directories.
   - Internal: set RACKUP_BOOTSTRAP_MODE=self-upgrade for upgrade-oriented completion messaging.
 
 Examples:
@@ -116,6 +120,10 @@ while [ "$#" -gt 0 ]; do
       FORCE_EXE=1
       shift
       ;;
+    --allow-unsafe-prefix)
+      ALLOW_UNSAFE_PREFIX=1
+      shift
+      ;;
     -h | --help)
       usage
       exit 0
@@ -144,6 +152,82 @@ fi
 if [ "$FORCE_EXE" -eq 1 ] && [ -n "$FROM_LOCAL" ]; then
   warn "Error: --exe and --from-local are mutually exclusive."
   exit 2
+fi
+
+# Resolve PREFIX to an absolute path and reject dangerous values.
+case "$PREFIX" in
+  /*) ;;
+  *) PREFIX="$(cd "$(dirname "$PREFIX")" 2>/dev/null && pwd)/$(basename "$PREFIX")" ;;
+esac
+
+# Return 0 if the string contains control characters (bytes 0x00-0x1f, 0x7f).
+string_has_control_chars() {
+  case "$1" in
+    *[[:cntrl:]]*)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+# Validate that PREFIX is safe to install into.
+# Sets _prefix_error on failure.
+validate_safe_prefix() {
+  _p="$1"
+  _prefix_error=""
+
+  if string_has_control_chars "$_p"; then
+    _prefix_error="prefix contains control characters"
+    return 1
+  fi
+
+  if [ -z "$_p" ]; then
+    _prefix_error="prefix is empty"
+    return 1
+  fi
+
+  case "$_p" in
+    /*) ;;
+    *)
+      _prefix_error="prefix is not an absolute path: $_p"
+      return 1
+      ;;
+  esac
+
+  _cwd="$(pwd -P)"
+  case "$_p" in
+    /)
+      _prefix_error="refusing to install to /"
+      return 1
+      ;;
+    "$HOME")
+      _prefix_error="refusing to install directly to your home directory"
+      return 1
+      ;;
+    "$_cwd")
+      _prefix_error="refusing to install to current directory ($_cwd)"
+      return 1
+      ;;
+    /Applications | /bin | /boot | /dev | /etc | /home | \
+      /lib | /lib64 | /opt | /private | /proc | /root | /sbin | \
+      /srv | /sys | /tmp | /usr | /usr/bin | /usr/local | \
+      /usr/local/bin | /usr/local/lib | /var | /var/tmp)
+      _prefix_error="refusing to install to system directory $_p"
+      return 1
+      ;;
+  esac
+
+  return 0
+}
+
+if ! validate_safe_prefix "$PREFIX"; then
+  if [ "$ALLOW_UNSAFE_PREFIX" -eq 1 ]; then
+    warn "Warning: $_prefix_error (continuing due to --allow-unsafe-prefix)"
+  else
+    warn "Error: $_prefix_error"
+    warn "Use --allow-unsafe-prefix to override this check."
+    exit 2
+  fi
 fi
 
 TMPDIR_INSTALL="$(mktemp -d "${TMPDIR:-/tmp}/rackup-install.XXXXXX")"
@@ -198,6 +282,17 @@ download_file() {
 
 # Compute SHA-256 of a file, printing the hex digest to stdout.
 # Returns 1 if no hash tool is available.
+is_sha256_hex() {
+  case "$1" in
+    [0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F])
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
 compute_sha256() {
   file="$1"
   if command -v sha256sum >/dev/null 2>&1; then
@@ -429,9 +524,13 @@ if [ "$INSTALLED_PREBUILT" -eq 0 ]; then
       warn "Error: need curl or wget to download rackup sources."
       exit 1
     fi
-    if [ "$EXPECTED_SRC_SHA256" != "@@RACKUP_SRC_SHA256@@" ]; then
+    if is_sha256_hex "$EXPECTED_SRC_SHA256"; then
       info "Verifying source download (SHA-256)..."
       verify_sha256 "$TMPDIR_INSTALL/rackup.tar.gz" "$EXPECTED_SRC_SHA256" "rackup-src.tar.gz"
+    elif [ "$FORCE_SOURCE" -eq 1 ] && [ -z "$FROM_LOCAL" ] && [ -z "$ARCHIVE_URL_OVERRIDE" ]; then
+      warn "Error: source checksum is not available in this copy of install.sh."
+      warn "This is expected when running the repo copy directly. Use --from-local or --archive-url instead."
+      exit 1
     fi
     mkdir -p "$TMPDIR_INSTALL/src"
     # Use -m so future mtimes in the archive do not produce noisy warnings on skewed clocks.
@@ -478,7 +577,7 @@ if [ "$INSTALLED_PREBUILT" -eq 0 ]; then
 
   ok "Installed: $PREFIX/bin/rackup"
   # Store the checksum so self-upgrade can detect no-ops.
-  if [ "$EXPECTED_SRC_SHA256" != "@@RACKUP_SRC_SHA256@@" ]; then
+  if is_sha256_hex "$EXPECTED_SRC_SHA256"; then
     printf '%s\n' "$EXPECTED_SRC_SHA256" >"$PREFIX/.installed-sha256"
   elif [ -f "$TMPDIR_INSTALL/rackup.tar.gz" ]; then
     _src_sha="$(compute_sha256 "$TMPDIR_INSTALL/rackup.tar.gz")" || true
