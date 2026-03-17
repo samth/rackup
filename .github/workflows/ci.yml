@@ -522,6 +522,8 @@ jobs:
     name: "macOS E2E (${{ matrix.runner }})"
     needs: [unit-tests]
     runs-on: ${{ matrix.runner }}
+    env:
+      RACKUP_ALLOW_SYSTEM_RACKET: "1"
     strategy:
       fail-fast: false
       matrix:

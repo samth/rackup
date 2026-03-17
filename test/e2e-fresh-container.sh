@@ -361,7 +361,7 @@ test -z "\${RACKUP_TOOLCHAIN:-}"
 test -z "\${PLTADDONDIR:-}"
 EOF
   )
-  env -i HOME="$HOME" RACKUP_HOME="$RACKUP_HOME" PATH="/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin" \
+  env -i HOME="$HOME" RACKUP_HOME="$RACKUP_HOME" PATH="/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin" ${RACKUP_ALLOW_SYSTEM_RACKET:+RACKUP_ALLOW_SYSTEM_RACKET="$RACKUP_ALLOW_SYSTEM_RACKET"} \
     "$shell_bin" -lc "$cmd"
 }
 
@@ -402,7 +402,7 @@ rackup switch --unset
 test -z "\${RACKUP_TOOLCHAIN:-}"
 EOF
   )
-  env -i HOME="$HOME" RACKUP_HOME="$RACKUP_HOME" PATH="/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin" \
+  env -i HOME="$HOME" RACKUP_HOME="$RACKUP_HOME" PATH="/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin" ${RACKUP_ALLOW_SYSTEM_RACKET:+RACKUP_ALLOW_SYSTEM_RACKET="$RACKUP_ALLOW_SYSTEM_RACKET"} \
     "$shell_bin" -lc "$cmd"
 }
 
@@ -598,7 +598,7 @@ echo
 echo "== Missing toolchain switch fails fast without a tty =="
 missing_switch_err="$(
   # shellcheck disable=SC2016  # single quotes intentional: code runs in subshell
-  env -i HOME="$HOME" RACKUP_HOME="$RACKUP_HOME" PATH="/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin" \
+  env -i HOME="$HOME" RACKUP_HOME="$RACKUP_HOME" PATH="/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin" ${RACKUP_ALLOW_SYSTEM_RACKET:+RACKUP_ALLOW_SYSTEM_RACKET="$RACKUP_ALLOW_SYSTEM_RACKET"} \
     bash -lc '
       set -euo pipefail
       source "$RACKUP_HOME/shell/rackup.bash"
