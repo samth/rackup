@@ -14,6 +14,23 @@ package-lock.json
 # Build artifacts
 build-version.txt
 
+# Generated sites
+_site/
+pages/_site/
+www/
+
+# Rendered docs
+rackup.txt
+
+# Claude Code
+.claude/
+
+# Local CI testing
+.github/workflows/act-test.yml
+
+# Scratch/test files
+pages/test-resource*.rkt
+
 # Misc
 .DS_Store
 *~
