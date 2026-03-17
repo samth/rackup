@@ -40,7 +40,7 @@
      (let-values ([(out err)
                    (parameterize ([current-remove-shell-init-blocks-proc (lambda () null)]
                                   [current-uninstall-system*-proc (lambda _args #t)])
-                     (capture-output/split (lambda () (cmd-uninstall '("--yes")))))])
+                     (capture-output/split (lambda () (cmd-uninstall '("--dangerously-delete-without-prompting")))))])
        ;; The poisoned file should NOT have been written
        (check-false (file-exists? (string->path "/tmp/evil-sink"))))))
 
@@ -91,7 +91,7 @@
                                      (list (build-path tmp-home "dummy.rc")))]
                                   [current-uninstall-system*-proc
                                    (lambda _args #t)])
-                     (capture-output/split (lambda () (cmd-uninstall '("--yes")))))])
+                     (capture-output/split (lambda () (cmd-uninstall '("--dangerously-delete-without-prompting")))))])
        (check-true (string-contains? out "rackup uninstalled."))
        (check-true (string-contains? out "dummy.rc"))
        (check-true (string-contains? err "WARNING:")))))
@@ -119,7 +119,7 @@
      (let-values ([(out err)
                    (parameterize ([current-remove-shell-init-blocks-proc (lambda () null)]
                                   [current-uninstall-system*-proc (lambda _args #t)])
-                     (capture-output/split (lambda () (cmd-uninstall '("--yes")))))])
+                     (capture-output/split (lambda () (cmd-uninstall '("--dangerously-delete-without-prompting")))))])
        (check-true (string-contains? err "Linked local source trees will NOT be deleted"))
        (check-true (string-contains? err source-path))
        (check-true (string-contains? out "rackup uninstalled.")))))

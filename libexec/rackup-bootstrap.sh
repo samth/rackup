@@ -605,20 +605,24 @@ rackup_select_runtime_racket_or_fail() {
     rackup_runtime_current_racket
     return 0
   fi
-  if sys="$(rackup_find_system_racket 2>/dev/null)"; then
-    printf '%s\n' "$sys"
-    return 0
+  if [ "${RACKUP_ALLOW_SYSTEM_RACKET:-}" = "1" ]; then
+    if sys="$(rackup_find_system_racket 2>/dev/null)"; then
+      printf '%s\n' "$sys"
+      return 0
+    fi
   fi
   cat >&2 <<'EOF'
 rackup: no Racket runtime available.
 
-`rackup` uses an internal hidden runtime. It appears to be missing, and no system
-`racket` was found on PATH.
+`rackup` uses an internal hidden runtime. It appears to be missing.
 
 Recovery:
   curl -fsSL https://samth.github.io/rackup/install.sh | sh
   # or, from a checkout:
   sh scripts/install.sh
+
+To use a system `racket` from PATH instead (for development/testing):
+  RACKUP_ALLOW_SYSTEM_RACKET=1 rackup ...
 EOF
   return 1
 }

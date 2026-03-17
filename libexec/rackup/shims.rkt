@@ -339,14 +339,13 @@ EOF
 (define shim-alias-pairs '(("r" . "racket") ("dr" . "drracket")))
 
 (define (shim-aliases-installed?)
-  (file-exists? (rackup-shim-aliases-file)))
+  (and (config-flag-set? "short-aliases") #t))
 
 (define/state-locked (install-shim-aliases!)
-  (write-string-file (rackup-shim-aliases-file) ""))
+  (set-config-flag! "short-aliases"))
 
 (define/state-locked (remove-shim-aliases!)
-  (when (file-exists? (rackup-shim-aliases-file))
-    (delete-file (rackup-shim-aliases-file))))
+  (clear-config-flag! "short-aliases"))
 
 (define (write-env-file! id env-vars)
   (define p (rackup-toolchain-env-file id))

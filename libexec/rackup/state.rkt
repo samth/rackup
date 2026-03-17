@@ -26,7 +26,10 @@
          unregister-toolchain!
          find-local-toolchain
          toolchain-short-names
-         ensure-toolchain-addon-dir!)
+         ensure-toolchain-addon-dir!
+         config-flag-set?
+         set-config-flag!
+         clear-config-flag!)
 
 (define (empty-index)
   (hash 'installed-toolchains (hash) 'aliases (hash) 'default-toolchain #f))
@@ -56,8 +59,18 @@
   (ensure-rackup-layout!)
   (unless (file-exists? (rackup-index-file))
     (save-index! (empty-index)))
+  ;; Migrate old config.rktd to plain text config if needed
+  (define old-config (build-path (rackup-state-dir) "config.rktd"))
+  (when (and (file-exists? old-config) (not (file-exists? (rackup-config-file))))
+    (write-string-file (rackup-config-file) "")
+    (delete-file old-config))
+  ;; Migrate old shim-aliases marker to config flag
+  (define old-aliases (build-path (rackup-state-dir) "shim-aliases"))
+  (when (file-exists? old-aliases)
+    (set-config-flag! "short-aliases")
+    (delete-file old-aliases))
   (unless (file-exists? (rackup-config-file))
-    (write-rktd-file (rackup-config-file) (hash)))
+    (write-string-file (rackup-config-file) ""))
   (load-index))
 
 (define (installed-toolchains [idx (load-index)])
@@ -266,3 +279,25 @@
 
 (define (ensure-toolchain-addon-dir! id)
   (ensure-directory* (rackup-addon-dir id)))
+
+;; Plain-text config file: one flag name per line.
+(define (read-config-flags)
+  (if (file-exists? (rackup-config-file))
+      (filter (lambda (s) (not (string-blank? s)))
+              (map string-trim (file->lines (rackup-config-file))))
+      null))
+
+(define (config-flag-set? flag)
+  (member flag (read-config-flags)))
+
+(define (set-config-flag! flag)
+  (define flags (read-config-flags))
+  (unless (member flag flags)
+    (write-string-file (rackup-config-file)
+                       (string-join (append flags (list flag)) "\n"))))
+
+(define (clear-config-flag! flag)
+  (define flags (read-config-flags))
+  (when (member flag flags)
+    (write-string-file (rackup-config-file)
+                       (string-join (remove flag flags) "\n"))))
