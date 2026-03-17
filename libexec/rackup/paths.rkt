@@ -49,9 +49,12 @@
 
 (define (rackup-home)
   (define env (getenv "RACKUP_HOME"))
-  (if (and env (not (string-blank? env)))
-      (string->path env)
-      (build-path (find-system-path 'home-dir) ".rackup")))
+  (define home
+    (if (and env (not (string-blank? env)))
+        (string->path env)
+        (build-path (find-system-path 'home-dir) ".rackup")))
+  (ensure-path-without-control-chars! home "RACKUP_HOME")
+  home)
 
 (define (rackup-bin-dir)
   (build-path (rackup-home) "bin"))
