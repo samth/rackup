@@ -845,6 +845,10 @@
       (delete-directory/files tc-dir)
       (when (directory-exists? tc-dir)
         (rackup-error "failed to remove existing toolchain before reinstall: ~a" id)))
+    ;; A directory without an index entry is a ghost from a prior interrupted
+    ;; install.  Clean it up so the install can proceed.
+    (when (and (directory-exists? tc-dir) (not (toolchain-exists? id)))
+      (delete-directory/files tc-dir))
     (cond
       [(directory-exists? tc-dir)
        (install-ok "Already installed: ~a" id)
@@ -866,7 +870,8 @@
                     'installer-filename
                     (path-basename-string (string->path (path->string* installer-path))))))
        (preflight-request-install! request installer-ext)
-       (with-handlers ([exn:fail? (lambda (e)
+       (with-handlers ([(lambda (e) (or (exn:fail? e) (exn:break? e)))
+                        (lambda (e)
                                     (when (directory-exists? tc-dir)
                                       (delete-directory/files tc-dir))
                                     (raise e))])
