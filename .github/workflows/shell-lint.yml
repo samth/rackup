@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Collect shell scripts
         shell: bash
@@ -31,7 +31,7 @@ jobs:
           xargs shellcheck --severity=warning < /tmp/shell-scripts.txt
 
       - name: Install shfmt
-        uses: mfinelli/setup-shfmt@v2
+        uses: mfinelli/setup-shfmt@8ec8aa2cfd83a7d20a6fb746c638aae1bc181ce9 # v2
 
       - name: shfmt (formatting check)
         shell: bash
@@ -64,6 +64,54 @@ jobs:
             exit 1
           fi
           echo "install.sh self-upgrade smoke OK (exit=$rc)"
+
+      - name: Check workflow action pinning
+        shell: bash
+        run: |
+          bad_refs="$(git ls-files '.github/workflows/*.yml' |
+            xargs grep -HnE '^\s*uses:\s*[^@[:space:]]+@[^[:space:]]+' |
+            grep -Ev '^\s*uses:\s*\./|@[0-9a-f]{40}(\s|$)' || true)"
+          if [ -n "$bad_refs" ]; then
+            echo "Unpinned workflow actions detected:"
+            echo "$bad_refs"
+            exit 1
+          fi
+
+      - name: Check workflow permissions scope
+        shell: bash
+        run: |
+          # Verify that write permissions only appear in pages.yml deploy job.
+          # We check every workflow file for lines containing "write" in a
+          # permissions context and ensure they are scoped correctly.
+          rc=0
+          for f in .github/workflows/*.yml; do
+            base="$(basename "$f")"
+            # Skip the lint file itself (contains "write" in error messages)
+            [ "$base" != "shell-lint.yml" ] || continue
+            # Use awk to find "write" inside permissions blocks
+            # For pages.yml we allow write only inside the deploy job
+            while IFS=: read -r lineno line; do
+              # Skip comments
+              stripped="${line#"${line%%[! ]*}"}"
+              case "$stripped" in '#'*) continue ;; esac
+              if [ "$base" = "pages.yml" ]; then
+                # We need to check this write is inside the deploy job permissions
+                # Read context: lines before this to find the job
+                job="$(head -n "$lineno" "$f" | grep -E '^\s{2}\S+:' | tail -1 | sed 's/:.*//' | tr -d ' ')"
+                if [ "$job" != "deploy" ]; then
+                  echo "$f:$lineno: write permission outside deploy job (in $job): $line"
+                  rc=1
+                fi
+              else
+                echo "$f:$lineno: write permission not allowed: $line"
+                rc=1
+              fi
+            done < <(grep -nE ':\s*write\b' "$f" | grep -v '^\s*#' || true)
+          done
+          if [ "$rc" -ne 0 ]; then
+            echo "Write permissions must only appear in pages.yml deploy job"
+          fi
+          exit "$rc"
 
       - name: checkbashisms (POSIX portability)
         shell: bash

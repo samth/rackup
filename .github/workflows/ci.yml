@@ -14,9 +14,9 @@ jobs:
       - build-exe
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Setup Racket
-        uses: Bogdanp/setup-racket@v1.14
+        uses: Bogdanp/setup-racket@fda0f4d167468421766cea8a36140bd2c3c3450d # v1.14
         with:
           architecture: x64
           distribution: full
@@ -26,7 +26,7 @@ jobs:
         shell: bash
         run: raco pkg install --auto plt-web
       - name: Download all exe artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           pattern: rackup-exe-*
           path: /tmp/exe-artifacts
@@ -66,7 +66,7 @@ jobs:
           done
           tar -C /tmp/rackup-pages-site -czf /tmp/pages-site-ci.tar.gz .
       - name: Upload Pages site artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: pages-site-ci
           path: /tmp/pages-site-ci.tar.gz
@@ -136,7 +136,7 @@ jobs:
             install_flags: "--source"
     steps:
       - name: Download pages site
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: pages-site-ci
           path: /tmp/pages-artifact
@@ -148,7 +148,7 @@ jobs:
           ls -la /tmp/pages-site/rackup-*.tar.gz /tmp/pages-site/install.sh
       - name: Set up QEMU
         if: matrix.docker_platform == 'linux/arm/v7' || matrix.docker_platform == 'linux/386'
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
         with:
           platforms: arm,386
       - name: Start local HTTP server
@@ -282,9 +282,9 @@ jobs:
             setup_racket_arch: arm64
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Setup Racket
-        uses: Bogdanp/setup-racket@v1.14
+        uses: Bogdanp/setup-racket@fda0f4d167468421766cea8a36140bd2c3c3450d # v1.14
         with:
           architecture: ${{ matrix.setup_racket_arch }}
           distribution: full
@@ -302,6 +302,7 @@ jobs:
 
   docker-e2e-linux-distros:
     name: "Docker E2E (native ${{ matrix.arch_name }} / ${{ matrix.base_image }})"
+    needs: [unit-tests]
     runs-on: ${{ matrix.runs_on }}
     strategy:
       fail-fast: false
@@ -317,8 +318,8 @@ jobs:
             base_image: "ubuntu:24.04"
     timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
       - name: Docker bootstrap install smoke on distro
         run: |
           test/docker-test-fresh-install.sh \
@@ -350,9 +351,9 @@ jobs:
             base_image: debian:13
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
         with:
           platforms: arm,386,riscv64,ppc64le
       - name: Probe arch/platform detection
@@ -365,11 +366,12 @@ jobs:
 
   docker-e2e-direct:
     name: Docker E2E (direct, stable + older + local link)
+    needs: [unit-tests]
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
       - name: Docker fresh-container installs and local-link smoke
         run: |
           test/docker-test-fresh-install.sh \
@@ -379,11 +381,12 @@ jobs:
 
   docker-e2e-legacy-6_0:
     name: Docker E2E (legacy 6.0 install smoke)
+    needs: [unit-tests]
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
       - name: Docker legacy 6.0 install smoke
         run: |
           test/docker-test-fresh-install.sh \
@@ -392,11 +395,12 @@ jobs:
 
   docker-e2e-prerelease:
     name: Docker E2E (pre-release.racket-lang.org)
+    needs: [unit-tests]
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
       - name: Docker pre-release fresh-container install
         run: |
           test/docker-test-fresh-install.sh \
@@ -404,22 +408,23 @@ jobs:
 
   native-i386-vm-103p1:
     name: Native i386 VM (103p1 smoke)
+    needs: [unit-tests]
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Install QEMU VM dependencies
         shell: bash
         run: |
           sudo apt-get update
           sudo apt-get install -y qemu-system-x86 qemu-utils xorriso cpio gzip curl
       - name: Restore native i386 VM downloads cache
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: .ci-cache/native-i386-vm/downloads
           key: native-i386-vm-downloads-${{ hashFiles('test/native-i386-vm-test.sh') }}
       - name: Restore native i386 VM guest disk cache
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: .ci-cache/native-i386-vm/debian-i386.qcow2
           key: native-i386-vm-disk-v1-${{ hashFiles('test/native-i386-vm-test.sh', 'test/ci-native-i386-vm-smoke.sh', 'test/vm/native-i386-firstboot.sh', 'test/vm/native-i386-firstboot.service') }}
@@ -430,7 +435,7 @@ jobs:
           test/ci-native-i386-vm-smoke.sh
       - name: Upload native i386 VM artifacts on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: native-i386-vm-103p1
           path: |
@@ -441,11 +446,12 @@ jobs:
 
   docker-e2e-bootstrap:
     name: Docker E2E (bootstrap + local link)
+    needs: [unit-tests]
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
       - name: Docker bootstrap fresh-container install and local-link smoke
         run: |
           test/docker-test-fresh-install.sh \
@@ -454,11 +460,12 @@ jobs:
 
   docker-e2e-upgrade-path:
     name: Docker E2E (upgrade 9.0 -> stable + snapshot sites)
+    needs: [unit-tests]
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
       - name: Docker upgrade path and snapshot site smoke
         run: |
           test/docker-test-fresh-install.sh \
@@ -467,11 +474,12 @@ jobs:
 
   docker-e2e-snapshot-utah:
     name: Docker E2E (snapshot:utah explicit)
+    needs: [unit-tests]
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
       - name: Docker snapshot install from Utah
         run: |
           test/docker-test-fresh-install.sh \
@@ -480,11 +488,12 @@ jobs:
 
   docker-e2e-snapshot-northwestern:
     name: Docker E2E (snapshot:northwestern explicit)
+    needs: [unit-tests]
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
       - name: Docker snapshot install from Northwestern
         run: |
           test/docker-test-fresh-install.sh \
@@ -493,11 +502,12 @@ jobs:
 
   docker-e2e-source-build-link:
     name: Docker E2E (real source build local link)
+    needs: [unit-tests]
     runs-on: ubuntu-latest
     timeout-minutes: 180
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
       - name: Docker source-build local-link smoke
         run: |
           test/docker-test-fresh-install.sh \
@@ -510,6 +520,7 @@ jobs:
 
   macos-e2e:
     name: "macOS E2E (${{ matrix.runner }})"
+    needs: [unit-tests]
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -521,9 +532,9 @@ jobs:
             setup_racket_arch: arm64
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Setup Racket
-        uses: Bogdanp/setup-racket@v1.14
+        uses: Bogdanp/setup-racket@fda0f4d167468421766cea8a36140bd2c3c3450d # v1.14
         with:
           architecture: ${{ matrix.setup_racket_arch }}
           distribution: full
@@ -579,6 +590,7 @@ jobs:
 
   macos-e2e-bootstrap:
     name: "macOS E2E Bootstrap (${{ matrix.runner }})"
+    needs: [unit-tests]
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -588,11 +600,12 @@ jobs:
           - runner: macos-15       # Apple Silicon arm64
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Bootstrap install (no system racket)
         shell: bash
         run: |
           export RACKUP_HOME="$(mktemp -d)/rackup-bootstrap"
+          export RACKUP_TESTING=1
           sh scripts/install.sh -y --from-local . --prefix "$RACKUP_HOME"
           "$RACKUP_HOME/bin/rackup" install stable --set-default
           "$RACKUP_HOME/shims/racket" -e '(displayln "bootstrap ok")'
