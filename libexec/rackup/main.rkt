@@ -26,7 +26,8 @@
          "versioning.rkt")
 
 (provide main
-         cmd-version)
+         cmd-version
+         cmd-upgrade)
 
 (define-syntax (bake-version stx)
   (define here (let-values ([(dir _n _d) (split-path (syntax-source stx))]) dir))
@@ -67,6 +68,7 @@
               "Run a command using a specific toolchain without changing defaults.")
   (usage-line "prompt [--long|--short|--raw|--source]"
               "Print fast prompt info for PS1 (default: compact label).")
+  (usage-line "upgrade [spec] [--force]" "Upgrade channel-based toolchains to latest version.")
   (usage-line "remove <toolchain>" "Remove an installed or linked toolchain and its addon dir.")
   (usage-line "reshim" "Rebuild executable shims from installed toolchains.")
   (usage-line "init [--shell bash|zsh]" "Install/update shell integration in ~/.bashrc or ~/.zshrc.")
@@ -433,6 +435,47 @@
       (parameterize ([current-environment-variables env])
         (if (apply system* exe cmd-args) 0 1)))]
     [_ (rackup-error "usage: rackup run <toolchain> -- <command> [args...]")]))
+
+(define (cmd-upgrade rest)
+  (ensure-index!)
+  (define force? #f)
+  (define no-cache? #f)
+  (define spec-arg
+    (command-line #:program "rackup upgrade"
+                  #:argv (reorder-args rest)
+                  #:once-each
+                  [("--force") "Reinstall even if already up to date" (set! force? #t)]
+                  [("--no-cache") "Re-download installer instead of using cache" (set! no-cache? #t)]
+                  #:args maybe-spec
+                  (match maybe-spec
+                    ['() #f]
+                    [(list s) s]
+                    [_ (rackup-error "usage: rackup upgrade [spec] [--force] [--no-cache]")])))
+  (define targets (upgradeable-toolchains spec-arg))
+  (when (null? targets)
+    (if spec-arg
+        (rackup-error "no upgradeable toolchain matching '~a' found.\nOnly channel-based toolchains (stable, pre-release, snapshot) can be upgraded."
+                      spec-arg)
+        (rackup-error "no upgradeable toolchains installed.\nInstall a channel-based toolchain first, e.g.: rackup install stable")))
+  (define upgraded 0)
+  (for ([pair (in-list targets)])
+    (define id (car pair))
+    (define meta (cdr pair))
+    (define new-id
+      (with-handlers ([exn:fail? (lambda (e)
+                                   (eprintf "rackup: failed to upgrade ~a: ~a\n"
+                                            id (exn-message e))
+                                   #f)])
+        (upgrade-toolchain! id meta
+                            #:force? force?
+                            #:no-cache? no-cache?)))
+    (when new-id
+      (set! upgraded (add1 upgraded))))
+  (when (> (length targets) 1)
+    (printf "\nUpgraded ~a of ~a toolchain~a.\n"
+            upgraded
+            (length targets)
+            (if (= (length targets) 1) "" "s"))))
 
 (define (cmd-remove rest)
   (define spec
@@ -912,6 +955,7 @@
     [(list "switch" rest ...) (cmd-switch rest)]
     [(list "shell" rest ...) (cmd-shell rest)]
     [(list "run" rest ...) (cmd-run rest)]
+    [(list "upgrade" rest ...) (cmd-upgrade rest)]
     [(list "remove" rest ...) (cmd-remove rest)]
     [(list "reshim" rest ...) (cmd-reshim rest)]
     [(list "init" rest ...) (cmd-init rest)]

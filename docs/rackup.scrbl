@@ -315,6 +315,68 @@ by interrupted installs.
 
 @; ────────────────────────────────────────────────────────────────────
 
+@section[#:tag "upgrade" #:style 'unnumbered]{@tt{rackup upgrade}}
+
+Upgrade channel-based toolchains to the latest available version.
+Only toolchains installed via a channel (@tt{stable}, @tt{pre-release},
+or @tt{snapshot}) are eligible.  Version-pinned installs (e.g.
+@tt{rackup install 8.18}) are never upgraded.
+
+@shell-block{rackup upgrade [<spec>] [--force] [--no-cache]}
+
+With no arguments, upgrades all channel-based toolchains.  When
+@tt{<spec>} is given, only toolchains matching that channel are
+upgraded.  Valid specs are @tt{stable}, @tt{pre-release},
+@tt{snapshot}, and @tt{pre}.
+
+@subsection[#:tag "upgrade-flags" #:style sub-style]{Flags}
+
+@opt-table[
+  @list[@exec{--force}
+        "Reinstall even if the installed version matches the latest."]
+  @list[@exec{--no-cache}
+        "Re-download the installer instead of using the cache."]
+]
+
+@subsection[#:tag "upgrade-how" #:style sub-style]{How upgrade works}
+
+For each upgradeable toolchain, rackup:
+
+@itemlist[#:style 'ordered
+  @item{Resolves the latest available version for the toolchain's
+        channel, using the same variant, distribution, and architecture
+        as the existing installation.}
+  @item{Compares the installed version against the latest.  For stable
+        and pre-release toolchains, this uses numeric version
+        comparison.  For snapshots, it compares the snapshot timestamp.}
+  @item{If a newer version is available (or @exec{--force} is set),
+        installs the new version as a new toolchain.  Because canonical
+        IDs include the version number (e.g.
+        @tt{release-9.1-cs-x86_64-linux-full}), the new version gets a
+        different ID from the old one.}
+  @item{Migrates user-scoped packages from the old toolchain to the new
+        one.  This lists packages via @tt{raco pkg show --user} on the
+        old toolchain and installs them via @tt{raco pkg install} on the
+        new one.  If package migration fails, a warning is printed but
+        the upgrade proceeds.}
+  @item{If the old toolchain was the global default, transfers default
+        status to the new toolchain.}
+  @item{Removes the old toolchain and its addon directory.}
+]
+
+If the install step fails, the old toolchain is left untouched.
+
+@subsection[#:tag "upgrade-examples" #:style sub-style]{Examples}
+
+@shell-block|{
+rackup upgrade                # upgrade all channels
+rackup upgrade stable         # upgrade only stable
+rackup upgrade snapshot       # upgrade only snapshot
+rackup upgrade --force        # reinstall even if up to date
+}|
+
+@; ────────────────────────────────────────────────────────────────────
+
 @section[#:tag "prompt" #:style 'unnumbered]{@tt{rackup prompt}}
 
 Print prompt/status information for the active toolchain.  Designed to
