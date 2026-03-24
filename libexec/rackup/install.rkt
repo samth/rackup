@@ -22,6 +22,7 @@
 (provide install-toolchain!
          link-toolchain!
          remove-toolchain!
+         upgrade-toolchain!
          run-linux-installer!
          run-tgz-installer!
          run-macos-dmg-installer!
@@ -937,6 +938,172 @@
    (unregister-toolchain! id))
   (displayln (format "Removed ~a" id)))
 
+;; ---------------------------------------------------------------------------
+;; Upgrade
+
+;; Build the environment variable alist for running a toolchain's raco.
+(define (toolchain-runtime-env id)
+  (append (toolchain-env-vars id)
+          (list (cons "PLTADDONDIR"
+                      (path->string (rackup-addon-dir id))))))
+
+;; Run raco with the correct env for a toolchain.  Returns stdout as a
+;; string on success, #f on failure.
+(define (capture-raco-output id . raco-args)
+  (define bin (rackup-toolchain-bin-link id))
+  (define raco-exe (build-path bin "raco"))
+  (apply capture-program-output
+         #:env (toolchain-runtime-env id)
+         raco-exe
+         raco-args))
+
+;; Parse the output of `raco pkg show --user` into a list of package
+;; names.  The format is a header line ("Package  Checksum  Source")
+;; followed by one line per package, where the first whitespace-delimited
+;; field is the package name.  A line containing "[none]" means no
+;; packages.
+(define (parse-pkg-show-output text)
+  (if (or (not text) (string-blank? text))
+      null
+      (let ([lines (string-split text "\n")])
+        (for/list ([line (in-list lines)]
+                   #:when (not (or (string-blank? line)
+                                   (regexp-match? #px"^\\s*Package\\b" line)
+                                   (regexp-match? #px"\\[none\\]" line))))
+          (car (string-split (string-trim line)))))))
+
+;; Migrate user-scoped packages from old-id to new-id by listing
+;; packages from the old toolchain and installing them in the new one.
+(define (migrate-user-packages! old-id new-id)
+  (install-info "Checking for user packages to migrate...")
+  (define show-output (capture-raco-output old-id "pkg" "show" "--user"))
+  (define pkgs (parse-pkg-show-output show-output))
+  (cond
+    [(null? pkgs)
+     (install-info "No user packages to migrate.")]
+    [else
+     (install-info "Migrating ~a user package~a: ~a"
+                   (length pkgs)
+                   (if (= (length pkgs) 1) "" "s")
+                   (string-join pkgs " "))
+     (define bin (rackup-toolchain-bin-link new-id))
+     (define raco-exe (build-path bin "raco"))
+     (define env (environment-variables-copy (current-environment-variables)))
+     (for ([kv (in-list (toolchain-runtime-env new-id))])
+       (environment-variables-set! env
+                                   (string->bytes/utf-8 (car kv))
+                                   (string->bytes/utf-8 (cdr kv))))
+     (define ok?
+       (parameterize ([current-environment-variables env])
+         (apply system* raco-exe "pkg" "install" "--auto" "--skip-installed" pkgs)))
+     (if ok?
+         (install-ok "Migrated ~a package~a."
+                     (length pkgs)
+                     (if (= (length pkgs) 1) "" "s"))
+         (install-warn "Package migration had errors. Some packages may not have been migrated."))]))
+
+;; Determine the install spec to use when resolving the latest version
+;; for a toolchain's channel.
+(define (meta->upgrade-spec meta)
+  (define kind (hash-ref meta 'kind))
+  (match kind
+    ['stable "stable"]
+    ['pre-release "pre-release"]
+    ['snapshot
+     (define site (hash-ref meta 'snapshot-site #f))
+     (if (and site (not (eq? site 'auto)))
+         (format "snapshot:~a" site)
+         "snapshot")]
+    [_ #f]))
+
+;; Check whether a newer version is available for the given toolchain.
+;; Returns (values newer? request) where request is the resolved
+;; install request for the latest version, or #f if resolution fails.
+(define (check-upgrade-available meta)
+  (define spec (meta->upgrade-spec meta))
+  (unless spec
+    (rackup-error "cannot determine upgrade spec for toolchain kind: ~a"
+                  (hash-ref meta 'kind)))
+  (define kind (hash-ref meta 'kind))
+  (define variant (let ([v (hash-ref meta 'variant #f)])
+                    (and v (format "~a" v))))
+  (define distribution (let ([d (hash-ref meta 'distribution #f)])
+                         (if (symbol? d) d
+                             (and d (string->symbol d)))))
+  (define arch (hash-ref meta 'arch #f))
+  (define snapshot-site
+    (let ([s (hash-ref meta 'snapshot-site #f)])
+      (cond [(not s) 'auto]
+            [(symbol? s) s]
+            [else (string->symbol s)])))
+  (define request
+    (resolve-install-request spec
+                             #:variant variant
+                             #:distribution distribution
+                             #:arch arch
+                             #:snapshot-site snapshot-site))
+  (define current-version (hash-ref meta 'resolved-version #f))
+  (define latest-version (hash-ref request 'resolved-version))
+  (define newer?
+    (cond
+      [(eq? kind 'snapshot)
+       (define current-stamp (hash-ref meta 'snapshot-stamp #f))
+       (define latest-stamp (hash-ref request 'snapshot-stamp #f))
+       (or (not current-stamp)
+           (not latest-stamp)
+           (string>? latest-stamp current-stamp))]
+      [else
+       (and current-version
+            latest-version
+            (> (cmp-versions latest-version current-version) 0))]))
+  (values newer? request))
+
+;; Upgrade a single toolchain.  Returns the new toolchain ID on
+;; success, or #f if already up to date.
+(define (upgrade-toolchain! id meta
+                            #:force? [force? #f]
+                            #:no-cache? [no-cache? #f])
+  (ensure-rackup-layout!)
+  (ensure-index!)
+  (define kind (hash-ref meta 'kind))
+  (define current-version (hash-ref meta 'resolved-version "?"))
+  (install-info "Checking ~a (~a)..." id current-version)
+  (define-values (newer? request) (check-upgrade-available meta))
+  (define latest-version (hash-ref request 'resolved-version))
+  (cond
+    [(or newer? force?)
+     (when newer?
+       (install-info "  ~a -> ~a available" current-version latest-version))
+     (when (and force? (not newer?))
+       (install-info "  Forcing reinstall of ~a" current-version))
+     (define was-default? (equal? id (get-default-toolchain)))
+     ;; Build install opts from current toolchain's settings
+     (define install-opts
+       (append
+        (let ([v (hash-ref meta 'variant #f)])
+          (if v (list "--variant" (format "~a" v)) null))
+        (let ([d (hash-ref meta 'distribution #f)])
+          (if d (list "--distribution" (format "~a" d)) null))
+        (let ([s (hash-ref meta 'snapshot-site #f)])
+          (if (and s (not (eq? s 'auto)))
+              (list "--snapshot-site" (format "~a" s))
+              null))
+        (if force? (list "--force") null)
+        (if no-cache? (list "--no-cache") null)))
+     (define spec (meta->upgrade-spec meta))
+     (define new-id (install-toolchain! spec install-opts))
+     (when (and (not (equal? new-id id)) (toolchain-exists? id))
+       (migrate-user-packages! id new-id)
+       (when was-default?
+         (commit-state-change!
+          (set-default-toolchain! new-id))
+         (install-info "Default toolchain updated to ~a" new-id))
+       (remove-toolchain! id))
+     new-id]
+    [else
+     (install-ok "  ~a is up to date (~a)" id current-version)
+     #f]))
+
 (define (doctor-report)
   (ensure-rackup-layout!)
   (ensure-index!)
@@ -983,4 +1150,6 @@
 (module+ for-testing
   (provide detect-bin-dir
            installed-toolchain-env-vars
-           ensure-installer-cached!))
+           ensure-installer-cached!
+           parse-pkg-show-output
+           meta->upgrade-spec))

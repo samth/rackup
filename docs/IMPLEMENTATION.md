@@ -46,6 +46,30 @@ Short aliases (`r` for `racket`, `dr` for `drracket`) are opt-in, enabled via `r
 
 The dispatcher detects 32-bit ELF binaries (by reading the first 5 bytes with `od`) and provides diagnostic messages when the host lacks 32-bit loader support. If `od` is not available (checked via `command -v`), the detection silently skips. It also detects qemu-i386 binfmt_misc configurations and warns about ASLR-sensitive ancient PLT Scheme releases (053, 103, 103p1) that cannot run under QEMU user-mode emulation.
 
+## Upgrade
+
+`rackup upgrade` upgrades channel-based toolchains (stable, pre-release, snapshot) to the latest available version. Version-pinned installs (e.g., `rackup install 8.18`, which has kind `release`) are never upgraded.
+
+**Invocation.** `rackup upgrade` with no arguments upgrades all channel-based toolchains. `rackup upgrade stable` upgrades only stable. `--force` reinstalls even if the currently installed version matches the latest. `--no-cache` re-downloads the installer.
+
+**Channel detection.** `upgradeable-toolchains` in `state.rkt` iterates installed toolchains and filters to those whose `kind` metadata field is `stable`, `pre-release`, or `snapshot`. An optional filter spec restricts to a single channel.
+
+**Version comparison.** For stable and pre-release toolchains, `check-upgrade-available` in `install.rkt` resolves the latest version via `resolve-install-request` (using the same spec, variant, distribution, and architecture as the installed toolchain) and compares resolved versions using `cmp-versions`. For snapshots, the comparison uses the `snapshot-stamp` string (a date-based identifier), since snapshot versions may not change monotonically.
+
+**Upgrade sequence.** When a newer version is available (or `--force` is set), `upgrade-toolchain!` performs the following steps in order:
+
+1. Records whether the old toolchain is the current default.
+2. Installs the new toolchain via `install-toolchain!` with options reconstructed from the old toolchain's metadata (variant, distribution, snapshot-site). This produces a new canonical ID because the version component changes (e.g., `release-9.1-cs-x86_64-linux-full` to `release-9.2-cs-x86_64-linux-full`).
+3. Migrates user-scoped packages from the old toolchain to the new one.
+4. If the old toolchain was the default, sets the new toolchain as default.
+5. Removes the old toolchain and its addon directory.
+
+If the install step fails, the old toolchain is untouched.
+
+**Package migration.** `migrate-user-packages!` lists user-scoped packages from the old toolchain by running `raco pkg show --user` with `PLTADDONDIR` pointing to the old addon directory, parses the output to extract package names, then installs them in the new toolchain by running `raco pkg install --auto --skip-installed` with `PLTADDONDIR` pointing to the new addon directory. This is the same logic as `raco pkg migrate` but adapted to rackup's per-toolchain addon directory layout, where the standard `raco pkg migrate <version>` cannot locate the old packages. If package installation fails, a warning is printed but the upgrade proceeds; the new toolchain remains functional.
+
+**Limitations of the current package migration.** Standard `raco pkg migrate <version>` preserves whether each package was explicitly installed vs. auto-installed as a dependency. The list+reinstall approach used here does not preserve this distinction. See `docs/raco-pkg-migrate-improvements.md` for a proposal to add `--from-dir` to `raco pkg migrate`, which would let rackup use the official migration tool and preserve this metadata.
+
 ## File-based locking with compile-time enforcement
 
 Concurrent rackup processes (e.g., two shells running `rackup install` simultaneously) must not corrupt shared state. The lock mechanism uses `make-directory` as an atomic mutex: directory creation is atomic on both POSIX and Windows, so exactly one of two racing processes will succeed and the other will get `exn:fail:filesystem?`.
@@ -199,7 +223,7 @@ Cross-compiled binaries are smoke-tested via QEMU user-mode emulation: a Docker 
 
 ## Testing
 
-**Unit tests** (`test/all.rkt`) cover version parsing, installer filename matching, HTTP resolution, shell script generation, state management, and shim logic. The state/shims integration tests (`test/state-shims.rkt`) use `recspecs` for shell-transcript-style testing and import private functions via explicit `for-testing` submodules. The lock tests (`test/lock.rkt`) use `eval` on namespaces to verify that compile-time lock enforcement triggers correctly.
+**Unit tests** (`test/all.rkt`) cover version parsing, installer filename matching, HTTP resolution, shell script generation, state management, shim logic, and upgrade logic (channel filtering, package show output parsing, upgrade spec derivation). The state/shims integration tests (`test/state-shims.rkt`) use `recspecs` for shell-transcript-style testing and import private functions via explicit `for-testing` submodules. The lock tests (`test/lock.rkt`) use `eval` on namespaces to verify that compile-time lock enforcement triggers correctly.
 
 **Docker E2E tests** (`test/docker-test-fresh-install.sh`) build a Docker image and run full install/smoke tests in a disposable container. Modes include `direct` (system Racket pre-installed), `bootstrap` (install from local source checkout), and `bootstrap-curl` (install via `curl | sh` from a served pages site). The `--host-racket` flag independently controls whether the container has a system Racket (`present` or `absent`), and `--mode` controls the installation method.
 
