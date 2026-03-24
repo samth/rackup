@@ -52,7 +52,7 @@ The dispatcher detects 32-bit ELF binaries (by reading the first 5 bytes with `o
 
 **Invocation.** `rackup upgrade` with no arguments upgrades all channel-based toolchains. `rackup upgrade stable` upgrades only stable. `--force` reinstalls even if the currently installed version matches the latest. `--no-cache` re-downloads the installer.
 
-**Channel detection.** `upgradeable-toolchains` in `state.rkt` iterates installed toolchains and filters to those whose `kind` metadata field is `stable`, `pre-release`, or `snapshot`. An optional filter spec restricts to a single channel.
+**Channel detection.** `upgradeable-toolchains` in `state.rkt` iterates installed toolchains and filters to those that are channel-based. The `kind` metadata field cannot distinguish stable from version-pinned installs because `release-request-hash` in `remote.rkt` hardcodes `kind` to `'release` for all release-type requests. Instead, `upgradeable-meta?` checks the `requested-spec` field (e.g., `"stable"`, `"pre-release"`, `"snapshot"`) which records the original user request. The `kind` field is still used as a fallback for pre-release and snapshot toolchains (where `kind` is `'pre-release` or `'snapshot`). An optional filter spec restricts to a single channel.
 
 **Version comparison.** For stable and pre-release toolchains, `check-upgrade-available` in `install.rkt` resolves the latest version via `resolve-install-request` (using the same spec, variant, distribution, and architecture as the installed toolchain) and compares resolved versions using `cmp-versions`. For snapshots, the comparison uses the `snapshot-stamp` string (a date-based identifier), since snapshot versions may not change monotonically.
 
