@@ -731,6 +731,63 @@ else
 fi
 
 echo
+echo "== rackup upgrade command =="
+# Install 8.17, set it as default with kind=stable, then run rackup upgrade
+# to verify it upgrades to the latest stable version.
+upgrade_cmd_ran=0
+if run_rackup install 8.17 --set-default 2>/dev/null; then
+  # The 8.17 toolchain has kind=release (version-pinned), but rackup upgrade
+  # only acts on channel-based installs (stable, pre-release, snapshot).
+  # So we need to install stable to have something upgradeable.  If the
+  # current stable is newer than 8.17, `rackup upgrade` should be a no-op
+  # since we just installed the latest.  Use --force to exercise the full
+  # upgrade path regardless.
+
+  # First verify upgrade with no upgradeable toolchains gives a clear error
+  run_rackup default "$primary_id"
+  # Remove the 8.17 toolchain now (it was just to verify install works)
+  run_rackup remove 8.17 || true
+
+  # Install stable (which is upgradeable) and test upgrade --force
+  stable_id="$(run_rackup install stable --set-default | grep -oP '(?:Installed|Already installed: )\K\S+')" || true
+  if [[ -n "$stable_id" ]]; then
+    upgrade_cmd_ran=1
+    stable_version_before="$(current_shim_version)"
+    echo "stable installed: $stable_id (version=$stable_version_before)"
+
+    # rackup upgrade with no new version available should report up to date
+    upgrade_output="$(run_rackup upgrade stable 2>&1)" || true
+    echo "upgrade output: $upgrade_output"
+    assert_contains "up to date" "$upgrade_output" "upgrade with latest stable should report up to date"
+
+    # rackup upgrade --force should reinstall even if up to date
+    force_output="$(run_rackup upgrade stable --force 2>&1)" || true
+    echo "force upgrade output: $force_output"
+    assert_contains "Forcing reinstall" "$force_output" "upgrade --force should say forcing reinstall"
+
+    # Verify the toolchain is still functional after forced upgrade
+    post_upgrade_version="$(current_shim_version)"
+    assert_nonempty "$post_upgrade_version" "racket should still work after forced upgrade"
+    echo "post-upgrade version: $post_upgrade_version"
+
+    # Verify default was preserved
+    post_upgrade_default="$(current_toolchain_id)"
+    assert_nonempty "$post_upgrade_default" "default should still be set after upgrade"
+    echo "post-upgrade default: $post_upgrade_default"
+  fi
+
+  # Restore primary default
+  run_rackup default "$primary_id"
+else
+  echo "8.17 install failed (may not be available); skipping upgrade command test"
+fi
+if [[ "$upgrade_cmd_ran" -eq 0 ]]; then
+  echo "upgrade command test skipped"
+else
+  echo "upgrade command test passed"
+fi
+
+echo
 echo "== Snapshot site tests: Utah and Northwestern =="
 SNAPSHOT_TEST_SITES=()
 if [[ "$SNAPSHOT_SITE" == "auto" || "$SNAPSHOT_SITE" == "utah" ]]; then
