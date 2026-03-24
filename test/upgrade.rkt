@@ -35,18 +35,24 @@
   ;; ---------------------------------------------------------------------------
   ;; meta->upgrade-spec
 
-  (check-equal? (meta->upgrade-spec (hash 'kind 'stable)) "stable")
-  (check-equal? (meta->upgrade-spec (hash 'kind 'pre-release)) "pre-release")
-  (check-equal? (meta->upgrade-spec (hash 'kind 'snapshot 'snapshot-site #f))
+  ;; meta->upgrade-spec uses requested-spec (not kind) since kind is
+  ;; always 'release for both stable and version-pinned installs.
+  (check-equal? (meta->upgrade-spec (hash 'kind 'release 'requested-spec "stable"))
+                "stable")
+  (check-equal? (meta->upgrade-spec (hash 'kind 'release 'requested-spec "pre-release"))
+                "pre-release")
+  (check-equal? (meta->upgrade-spec (hash 'kind 'pre-release 'requested-spec "pre-release"))
+                "pre-release")
+  (check-equal? (meta->upgrade-spec (hash 'kind 'snapshot 'requested-spec "snapshot" 'snapshot-site #f))
                 "snapshot")
-  (check-equal? (meta->upgrade-spec (hash 'kind 'snapshot 'snapshot-site 'auto))
+  (check-equal? (meta->upgrade-spec (hash 'kind 'snapshot 'requested-spec "snapshot" 'snapshot-site 'auto))
                 "snapshot")
-  (check-equal? (meta->upgrade-spec (hash 'kind 'snapshot 'snapshot-site 'utah))
+  (check-equal? (meta->upgrade-spec (hash 'kind 'snapshot 'requested-spec "snapshot" 'snapshot-site 'utah))
                 "snapshot:utah")
-  (check-equal? (meta->upgrade-spec (hash 'kind 'snapshot 'snapshot-site 'northwestern))
+  (check-equal? (meta->upgrade-spec (hash 'kind 'snapshot 'requested-spec "snapshot:northwestern" 'snapshot-site 'northwestern))
                 "snapshot:northwestern")
-  (check-equal? (meta->upgrade-spec (hash 'kind 'release)) #f)
-  (check-equal? (meta->upgrade-spec (hash 'kind 'local)) #f)
+  (check-equal? (meta->upgrade-spec (hash 'kind 'release 'requested-spec "8.18")) #f)
+  (check-equal? (meta->upgrade-spec (hash 'kind 'local 'requested-spec "dev")) #f)
 
   ;; ---------------------------------------------------------------------------
   ;; upgradeable-toolchains filtering
@@ -107,8 +113,10 @@
      (define pre-id "pre-9.2-cs-x86_64-linux-full")
      (define snap-id "snapshot-utah-20260301-abc-9.2.0.1-cs-x86_64-linux-full")
 
+     ;; Stable installs have kind='release in practice (release-request-hash
+     ;; always sets kind to 'release); they are distinguished by requested-spec.
      (fake-toolchain! stable-id
-                      (make-meta stable-id 'stable
+                      (make-meta stable-id 'release
                                  #:requested-spec "stable"
                                  #:version "9.1"))
      (fake-toolchain! release-id

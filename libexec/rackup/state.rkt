@@ -278,31 +278,47 @@
   (filter (lambda (name) (equal? id (resolve-name-with-meta name ids aliases all-meta)))
           (remove-duplicates (append alias-names candidates))))
 
-(define upgradeable-kinds '(stable pre-release snapshot))
+;; Determine whether a toolchain's metadata indicates it is
+;; channel-based (upgradeable).  The kind field is 'release for both
+;; stable and version-pinned installs, so we check requested-spec.
+(define (upgradeable-meta? m)
+  (and (hash? m)
+       (let ([spec (hash-ref m 'requested-spec #f)]
+             [kind (hash-ref m 'kind #f)])
+         (or (equal? spec "stable")
+             (equal? spec "pre-release")
+             (equal? spec "pre")
+             (and (string? spec) (string-prefix? spec "snapshot"))
+             (eq? kind 'pre-release)
+             (eq? kind 'snapshot)))))
 
-;; Return a list of (cons id meta) for toolchains whose kind is
-;; upgradeable (stable, pre-release, or snapshot).  When filter-spec is
-;; non-#f, further restrict to toolchains whose kind or requested-spec
-;; matches the given string.
+;; Return a list of (cons id meta) for toolchains that are
+;; channel-based (upgradeable).  When filter-spec is non-#f, further
+;; restrict to toolchains matching that channel.
 (define (upgradeable-toolchains [filter-spec #f])
   (define idx (load-index))
   (define ids (installed-toolchain-ids idx))
-  (define filter-kind
+  (define filter-channel
     (and filter-spec
          (match filter-spec
-           ["stable" 'stable]
-           ["pre-release" 'pre-release]
-           ["pre" 'pre-release]
-           ["snapshot" 'snapshot]
-           [(regexp #px"^snapshot:") 'snapshot]
-           [_ 'unknown])))
+           ["stable" "stable"]
+           ["pre-release" "pre-release"]
+           ["pre" "pre-release"]
+           ["snapshot" "snapshot"]
+           [(regexp #px"^snapshot:") "snapshot"]
+           [_ "unknown"])))
   (for/list ([id (in-list ids)]
              #:when (let ([m (read-toolchain-meta id)])
-                      (and (hash? m)
-                           (let ([k (hash-ref m 'kind #f)])
-                             (and (memq k upgradeable-kinds)
-                                  (or (not filter-kind)
-                                      (eq? k filter-kind)))))))
+                      (and (upgradeable-meta? m)
+                           (or (not filter-channel)
+                               (let ([spec (hash-ref m 'requested-spec #f)])
+                                 (cond
+                                   [(equal? filter-channel "snapshot")
+                                    (and (string? spec)
+                                         (or (equal? spec "snapshot")
+                                             (string-prefix? spec "snapshot:")))]
+                                   [else
+                                    (equal? spec filter-channel)]))))))
     (cons id (read-toolchain-meta id))))
 
 (define (ensure-toolchain-addon-dir! id)
