@@ -1003,18 +1003,24 @@
          (install-warn "Package migration had errors. Some packages may not have been migrated."))]))
 
 ;; Determine the install spec to use when resolving the latest version
-;; for a toolchain's channel.
+;; for a toolchain's channel.  The kind field is 'release for both
+;; stable and version-pinned installs, so we use requested-spec.
 (define (meta->upgrade-spec meta)
-  (define kind (hash-ref meta 'kind))
-  (match kind
-    ['stable "stable"]
-    ['pre-release "pre-release"]
-    ['snapshot
+  (define spec (hash-ref meta 'requested-spec #f))
+  (define kind (hash-ref meta 'kind #f))
+  (cond
+    [(equal? spec "stable") "stable"]
+    [(or (equal? spec "pre-release") (equal? spec "pre")
+         (eq? kind 'pre-release))
+     "pre-release"]
+    [(or (equal? spec "snapshot")
+         (and (string? spec) (string-prefix? spec "snapshot:"))
+         (eq? kind 'snapshot))
      (define site (hash-ref meta 'snapshot-site #f))
      (if (and site (not (eq? site 'auto)))
          (format "snapshot:~a" site)
          "snapshot")]
-    [_ #f]))
+    [else #f]))
 
 ;; Check whether a newer version is available for the given toolchain.
 ;; Returns (values newer? request) where request is the resolved
@@ -1024,7 +1030,6 @@
   (unless spec
     (rackup-error "cannot determine upgrade spec for toolchain kind: ~a"
                   (hash-ref meta 'kind)))
-  (define kind (hash-ref meta 'kind))
   (define variant (let ([v (hash-ref meta 'variant #f)])
                     (and v (format "~a" v))))
   (define distribution (let ([d (hash-ref meta 'distribution #f)])
@@ -1044,9 +1049,12 @@
                              #:snapshot-site snapshot-site))
   (define current-version (hash-ref meta 'resolved-version #f))
   (define latest-version (hash-ref request 'resolved-version))
+  (define snapshot-channel?
+    (and (string? spec) (or (equal? spec "snapshot")
+                            (string-prefix? spec "snapshot:"))))
   (define newer?
     (cond
-      [(eq? kind 'snapshot)
+      [snapshot-channel?
        (define current-stamp (hash-ref meta 'snapshot-stamp #f))
        (define latest-stamp (hash-ref request 'snapshot-stamp #f))
        (or (not current-stamp)

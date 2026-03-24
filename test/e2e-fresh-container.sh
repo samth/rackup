@@ -749,11 +749,18 @@ if run_rackup install 8.17 --set-default 2>/dev/null; then
   run_rackup remove 8.17 || true
 
   # Install stable (which is upgradeable) and test upgrade --force
-  stable_id="$(run_rackup install stable --set-default | grep -oP '(?:Installed|Already installed: )\K\S+')" || true
+  run_rackup install stable --set-default || true
+  stable_id="$(current_toolchain_id)"
   if [[ -n "$stable_id" ]]; then
     upgrade_cmd_ran=1
     stable_version_before="$(current_shim_version)"
     echo "stable installed: $stable_id (version=$stable_version_before)"
+
+    # Show installed toolchains and metadata for debugging
+    echo "installed toolchains before upgrade:"
+    run_rackup list
+    echo "meta.rktd for $stable_id:"
+    cat "$RACKUP_HOME/toolchains/$stable_id/meta.rktd" 2>/dev/null | head -5 || echo "(meta.rktd not found)"
 
     # rackup upgrade with no new version available should report up to date
     upgrade_output="$(run_rackup upgrade stable 2>&1)" || true
