@@ -39,7 +39,9 @@ jobs:
           xargs shfmt -d -i 2 -ci < /tmp/shell-scripts.txt
 
       - name: Install checkbashisms
-        run: sudo apt-get install -y -qq devscripts
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq devscripts
 
       - name: install.sh smoke (self-upgrade code path)
         shell: bash
