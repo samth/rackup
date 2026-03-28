@@ -242,6 +242,31 @@
               margin-bottom: 0.3rem;
             }
 
+            /* Persona quick-start cards */
+            .rackup-personas {
+              display: grid;
+              gap: 1.5rem;
+              grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+              margin-top: 1rem;
+            }
+            .rackup-persona {
+              background: #fafafa;
+              border: 1px solid #e0e0e0;
+              border-radius: 8px;
+              padding: 1.2rem 1.2rem 0.8rem;
+            }
+            .rackup-persona h3 {
+              color: #0679a7;
+              font-size: 1.05rem;
+              font-weight: 600;
+              margin: 0 0 0.3rem;
+            }
+            .rackup-persona > p {
+              color: #555;
+              font-size: 0.95rem;
+              margin: 0 0 0.8rem;
+            }
+
             /* Command reference */
             .rackup-cmd-table {
               border: none !important;
@@ -363,6 +388,37 @@ sh install.sh && rm install.sh})
               toolchain you install becomes the default automatically.
             }}
           @div{@(shell-block "workflow-cmd" "$ rackup install stable\n$ rackup install pre-release\n$ rackup default stable\n$ racket -e '(displayln (version))'\n$ raco pkg install gregor")}}}
+
+      @div[class: "rackup-section"]{
+        @h2{Quick start by use case}
+        @p{
+          Pick the guide that matches your situation.
+        }
+        @div[class: "rackup-personas"]{
+          @div[class: "rackup-persona"]{
+            @h3{New to Racket}
+            @p{Get up and running from scratch.}
+            @(shell-block "persona-new" "curl -fsSL https://samth.github.io/rackup/install.sh | sh\nrackup install stable\nrackup init --shell bash   # or zsh\nracket")
+          }
+          @div[class: "rackup-persona"]{
+            @h3{Existing Racket user}
+            @p{Manage multiple Racket versions side by side.}
+            @(shell-block "persona-existing" "curl -fsSL https://samth.github.io/rackup/install.sh | sh\nrackup install 8.18\nrackup install stable\nrackup default stable\nrackup switch 8.18          # switch in current shell")
+          }
+          @div[class: "rackup-persona"]{
+            @h3{Racket developer (source builds)}
+            @p{Link your local source tree alongside release builds.}
+            @(shell-block "persona-dev" "curl -fsSL https://samth.github.io/rackup/install.sh | sh\nrackup link dev ~/src/racket\nrackup install stable\nrackup default dev\nrackup switch stable         # try a release build\nrackup switch dev            # back to your source tree")
+          }
+          @div[class: "rackup-persona"]{
+            @h3{Package developer}
+            @p{Test your package across multiple Racket versions.}
+            @(shell-block "persona-pkg" "rackup install stable\nrackup install pre-release\nrackup install 8.15\nrackup run stable -- raco test .\nrackup run pre-release -- raco test .\nrackup run 8.15 -- raco test .")
+          }
+          @div[class: "rackup-persona"]{
+            @h3{CI / Docker / automation}
+            @p{Non-interactive setup for scripts and containers.}
+            @(shell-block "persona-ci" "curl -fsSL https://samth.github.io/rackup/install.sh | sh -s -- -y\nrackup install stable --quiet\nrackup run stable -- raco test .")}}}
 
       @div[class: "rackup-section"]{
         @h2{Commands}

@@ -542,6 +542,142 @@ Print rackup version information (git commit hash and date).
 @shell-block{rackup version}
 
 @; ════════════════════════════════════════════════════════════════════
+@;  QUICK START GUIDES
+@; ════════════════════════════════════════════════════════════════════
+
+@section[#:tag "quick-start" #:style 'unnumbered]{Quick start guides}
+
+Pick the guide that matches your situation.
+
+@subsection[#:tag "qs-new-user" #:style sub-style]{New to Racket}
+
+If you have never used Racket before, start here.
+
+@shell-block|{
+# 1. Install rackup
+curl -fsSL https://samth.github.io/rackup/install.sh | sh
+
+# 2. Install the latest stable Racket release
+rackup install stable
+
+# 3. Set up your shell so "racket" and "raco" are on PATH
+rackup init --shell bash   # or zsh
+
+# 4. Start a new shell (or source your rc file), then:
+racket                     # interactive REPL
+raco pkg install gregor    # install a package
+}|
+
+@subsection[#:tag "qs-existing-user" #:style sub-style]{Existing Racket user}
+
+You already have Racket installed and want to manage multiple versions.
+
+@shell-block|{
+# 1. Install rackup
+curl -fsSL https://samth.github.io/rackup/install.sh | sh
+rackup init --shell bash   # or zsh
+
+# 2. Install versions you need
+rackup install 8.18
+rackup install stable
+
+# 3. Set a global default
+rackup default stable
+
+# 4. Switch in the current shell when needed
+rackup switch 8.18
+racket --version           # → 8.18
+rackup switch stable
+racket --version           # → latest stable
+}|
+
+Your existing system Racket is not affected.  Once the shims directory
+is on your @tt{PATH}, the shimmed @tt{racket} takes precedence.  To
+go back to your system Racket, run @tt{rackup default clear} and
+remove the rackup init block from your shell rc.
+
+@subsection[#:tag "qs-racket-dev" #:style sub-style]{Racket developer (source builds)}
+
+You build Racket from source and want to switch between your
+development tree and release builds.
+
+@shell-block|{
+# 1. Install rackup
+curl -fsSL https://samth.github.io/rackup/install.sh | sh
+rackup init --shell bash   # or zsh
+
+# 2. Link your local source tree
+rackup link dev ~/src/racket
+
+# 3. Optionally install a release for comparison
+rackup install stable
+
+# 4. Switch between them
+rackup default dev
+rackup switch stable       # test against a release
+rackup switch dev          # back to your build
+}|
+
+The linked directory is not copied — rackup creates a symlink and
+metadata so shims and @tt{rackup switch} work with it.  After
+editing your source tree, the changes are visible immediately
+(no re-link needed).
+
+If you previously used
+@hyperlink["https://github.com/takikawa/racket-dev-goodies"]{racket-dev-goodies},
+including the @tt{plt-bin} shell script, see @secref["migration"] for migration steps.
+
+@subsection[#:tag "qs-pkg-dev" #:style sub-style]{Package developer}
+
+You develop Racket packages and need to test against multiple Racket
+versions.
+
+@shell-block|{
+# Install the versions you want to test against
+rackup install stable
+rackup install pre-release
+rackup install 8.15
+
+# Run your test suite under each version
+rackup run stable -- raco test .
+rackup run pre-release -- raco test .
+rackup run 8.15 -- raco test .
+}|
+
+@tt{rackup run} sets @tt{PLTADDONDIR} and @tt{PATH}
+for the subprocess only — your shell's active toolchain is unchanged.
+Each toolchain gets its own addon directory, so installed packages
+don't collide between versions.
+
+@subsection[#:tag "qs-ci" #:style sub-style]{CI / Docker / automation}
+
+Use non-interactive mode for scripts, CI pipelines, and containers.
+
+@shell-block|{
+# Non-interactive install (no prompts)
+curl -fsSL https://samth.github.io/rackup/install.sh | sh -s -- -y
+
+# Install a toolchain quietly
+rackup install stable --quiet
+
+# Run commands without shell integration
+rackup run stable -- raco test .
+rackup run stable -- raco pkg install --auto gregor
+}|
+
+In a Dockerfile:
+
+@shell-block|{
+RUN curl -fsSL https://samth.github.io/rackup/install.sh | sh -s -- -y \
+ && ~/.rackup/bin/rackup install stable --quiet
+ENV PATH="/root/.rackup/shims:/root/.rackup/bin:${PATH}"
+}|
+
+For scripting, @tt{rackup list --ids} prints one toolchain ID per
+line and @tt{rackup current id} prints just the active ID — both are
+easy to parse.
+
+@; ════════════════════════════════════════════════════════════════════
 @;  GUIDE SECTIONS
 @; ════════════════════════════════════════════════════════════════════
 
