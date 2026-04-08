@@ -1470,6 +1470,55 @@
             (putenv "RACKUP_SELF_UPGRADE_INSTALL_SH" old-override)
             (putenv "RACKUP_SELF_UPGRADE_INSTALL_SH" ""))))))
 
+  ;; self-upgrade invokes `rackup reshim` on the freshly-installed
+  ;; binary after a successful update, so any migrations of
+  ;; per-toolchain env vars (e.g., backfilling PLTCOMPILEDROOTS) run
+  ;; with the new code.  The subprocess invocation is verified by
+  ;; placing a fake rackup binary at rackup-bin-entry that logs its
+  ;; arguments and checking the log after the upgrade.
+  (with-temp-rackup-home
+   (lambda (tmp)
+     (ensure-index!)
+     (define reshim-log (build-path tmp "self-upgrade-reshim-args.log"))
+     ;; Fake rackup binary at ~/.rackup/bin/rackup that logs invocations
+     (make-directory* (build-path tmp "bin"))
+     (define fake-rackup (build-path tmp "bin" "rackup"))
+     (write-string-file
+      fake-rackup
+      (format
+       "#!/bin/sh\nprintf '%s\\n' \"$@\" >> ~s\nexit 0\n"
+       (path->string reshim-log)))
+     (file-or-directory-permissions fake-rackup #o755)
+
+     (define fake-installer (build-path tmp "fake-install-reshim.sh"))
+     (define sha-file (build-path tmp ".installed-sha256"))
+     (write-string-file sha-file "old-sha")
+     (write-string-file
+      fake-installer
+      (format
+       "#!/bin/sh\nset -eu\nprintf 'new-sha' > ~s\nexit 0\n"
+       (path->string sha-file)))
+     (file-or-directory-permissions fake-installer #o755)
+     (define old-override (getenv "RACKUP_SELF_UPGRADE_INSTALL_SH"))
+     (dynamic-wind
+      (lambda () (putenv "RACKUP_SELF_UPGRADE_INSTALL_SH" (path->string fake-installer)))
+      (lambda ()
+        (run-main '("self-upgrade"))
+        ;; The fake rackup binary should have been invoked with "reshim"
+        (check-true (file-exists? reshim-log)
+                    "self-upgrade invoked the new rackup binary")
+        (when (file-exists? reshim-log)
+          (define lines
+            (call-with-input-file reshim-log
+              (lambda (in) (filter (lambda (s) (not (string=? s "")))
+                                   (port->lines in)))))
+          (check-equal? lines '("reshim")
+                        "self-upgrade invoked the new rackup with 'reshim'")))
+      (lambda ()
+        (if old-override
+            (putenv "RACKUP_SELF_UPGRADE_INSTALL_SH" old-override)
+            (putenv "RACKUP_SELF_UPGRADE_INSTALL_SH" ""))))))
+
   ;; self-upgrade --exe forwards to install.sh
   (with-temp-rackup-home
    (lambda (tmp)

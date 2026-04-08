@@ -141,6 +141,10 @@ The shim dispatcher sources a per-toolchain `env.sh` file if present. For linked
 
 The env file exports only `PLTADDONDIR` when a value can be computed. Neither `PLTHOME` nor `PLTCOLLECTS` is set — the Racket binary finds its own collections via compiled-in relative paths, and `PLTHOME` is not a Racket environment variable. The one exception is old PLT Scheme installations (version <= 4.x) where the parent directory is named `plt`: these set `PLTHOME` because PLT Scheme's `bin/mzscheme` shell wrapper uses it to locate the real binary under `.bin/<archsys>/`. If `PLTADDONDIR` is still unset after sourcing (or if no env file exists), the dispatcher synthesizes a fallback value (`~/.rackup/addons/<id>`).
 
+## Post-self-upgrade reshim
+
+`cmd-self-upgrade` invokes `rackup reshim` in a subprocess after a successful update, so the freshly-installed rackup code drives the reshim. Running reshim in-process would use the old in-memory code and miss any new migration logic introduced by the upgrade.
+
 ## Shell integration
 
 `rackup init` writes a managed block into `~/.bashrc` or `~/.zshrc` delimited by marker comments (`# >>> rackup initialize >>>`). The managed block:
