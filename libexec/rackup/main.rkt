@@ -898,7 +898,19 @@
   (define sha-after
     (and (file-exists? sha-file) (file->string sha-file)))
   (when (not (equal? sha-before sha-after))
-    (displayln "rackup code upgrade complete.")))
+    (displayln "rackup code upgrade complete.")
+    ;; Run `rackup reshim` in a subprocess so the just-installed rackup
+    ;; code (not the old in-memory code) drives reshim!.  This ensures
+    ;; any migrations of per-toolchain env vars (e.g., backfilling
+    ;; PLTCOMPILEDROOTS) run with the new logic.
+    (define new-rackup (rackup-bin-entry))
+    (when (file-exists? new-rackup)
+      (with-handlers ([exn:fail?
+                       (lambda (e)
+                         (eprintf "rackup: warning: post-upgrade reshim failed: ~a\n"
+                                  (exn-message e)))])
+        (unless (system* (path->string new-rackup) "reshim")
+          (eprintf "rackup: warning: post-upgrade reshim reported failure\n"))))))
 
 (define (cmd-version rest)
   (command-line #:program "rackup version"
