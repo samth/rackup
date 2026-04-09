@@ -886,9 +886,9 @@
            [else
             (define checksum-url (string-append source ".sha256"))
             (with-handlers ([exn:fail? (lambda (e)
-                                         (eprintf "rackup: warning: could not fetch checksum from ~a: ~a\n"
-                                                  checksum-url (exn-message e))
-                                         #f)])
+                                         (rackup-error
+                                          "could not verify install script integrity.\nChecksum fetch failed: ~a\nTo skip verification, use: rackup self-upgrade --ref <ref>"
+                                          (exn-message e)))])
               (parse-sha256-sidecar (http-get-string checksum-url)))]))
        (define p (make-temporary-file "rackup-self-upgrade-~a.sh"))
        (download-url->file source p)

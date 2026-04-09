@@ -94,6 +94,15 @@
      (call-with-output-file p (lambda (out) (display install-content out)) #:exists 'truncate/replace)
      (file-or-directory-permissions p #o755))
 
+   ;; Write install.sh.sha256 sidecar so `rackup self-upgrade` can
+   ;; verify the downloaded install script.
+   (define install-sh-sha256
+     (bytes->hex-string
+      (call-with-input-file (build-path out-dir "install.sh") sha256-bytes)))
+   (call-with-output-file (build-path out-dir "install.sh.sha256")
+     (lambda (out) (fprintf out "~a  install.sh\n" install-sh-sha256))
+     #:exists 'truncate/replace)
+
    ;; Generate HTML; Racket computes the install.sh checksum itself
    (make-directory* plt-web-stage)
    (run (find-executable-path "racket")
