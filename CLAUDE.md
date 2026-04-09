@@ -57,6 +57,16 @@ Run `test/docker-test-fresh-install.sh --help` for all options.
 
 Archive all plan documents in `docs/plans/` with dated filenames (e.g., `2026-03-13-feature-name.md`). This includes plans created during brainstorming, implementation plans, research documents, and review documents.
 
+## Verification and generation
+
+When adding code that verifies, validates, or consumes a generated
+artifact (checksums, sidecar files, metadata files, etc.), always
+verify that the artifact is actually produced by the build/deploy
+pipeline. Check the Pages build (`pages/build-pages-site.rkt`), CI
+workflows (`.github/workflows/`), and install scripts
+(`scripts/install.sh`) for the corresponding generation step. If it
+doesn't exist, add it in the same commit.
+
 ## Code ownership
 
 We own the entire project. There is no public API. Feel free to change any module's exports, signatures, or internal structure as needed — no backwards-compatibility workarounds required.
