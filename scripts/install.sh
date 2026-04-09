@@ -423,10 +423,75 @@ if [ -z "$FROM_LOCAL" ] && [ "$FORCE_SOURCE" -eq 0 ]; then
     BINARY_BASE_URL=""
   fi
 
+  # When installing from a non-default ref/repo and no published binary
+  # URL is available, try downloading the CI-built binary artifact via
+  # the GitHub CLI (`gh`).  This lets `rackup self-upgrade --ref <branch>`
+  # install a prebuilt binary from the branch's CI run.
+  GH_BINARY_DOWNLOADED=0
+  if [ -z "$BINARY_BASE_URL" ] && [ "$REF" != "main" ] &&
+    has_prebuilt_binary "$HOST_TARGET" &&
+    command -v gh >/dev/null 2>&1; then
+    GH_ARTIFACT_NAME="rackup-exe-${BINARY_TARGET}"
+    info "Looking for CI-built binary for $BINARY_TARGET on ref '$REF'..."
+    GH_RUN_ID=""
+    GH_RUN_ID=$(gh run list \
+      --repo "$REPO" \
+      --branch "$REF" \
+      --workflow ci.yml \
+      --status completed \
+      --json databaseId,conclusion \
+      --jq '[.[] | select(.conclusion=="success")][0].databaseId' 2>/dev/null || true)
+    if [ -n "$GH_RUN_ID" ]; then
+      GH_TMPDIR="$(mktemp -d)"
+      if gh run download "$GH_RUN_ID" \
+        --repo "$REPO" \
+        --name "$GH_ARTIFACT_NAME" \
+        --dir "$GH_TMPDIR" 2>/dev/null; then
+        GH_TARBALL="$GH_TMPDIR/$BINARY_NAME"
+        if [ -f "$GH_TARBALL" ]; then
+          info "Downloaded CI binary artifact for $BINARY_TARGET."
+          mkdir -p "$TMPDIR_INSTALL/binary"
+          tar -xzmf "$GH_TARBALL" -C "$TMPDIR_INSTALL/binary"
+          BINARY_DIR="$(find "$TMPDIR_INSTALL/binary" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
+          if [ -n "$BINARY_DIR" ] && [ -x "$BINARY_DIR/bin/rackup-core" ]; then
+            mkdir -p "$PREFIX"
+            mkdir -p "$PREFIX/bin" "$PREFIX/libexec"
+            cp "$BINARY_DIR/bin/rackup" "$PREFIX/bin/rackup"
+            cp "$BINARY_DIR/bin/rackup-core" "$PREFIX/bin/rackup-core"
+            chmod +x "$PREFIX/bin/rackup" "$PREFIX/bin/rackup-core"
+            if command -v xattr >/dev/null 2>&1; then
+              xattr -dr com.apple.quarantine "$PREFIX/bin" 2>/dev/null || true
+            fi
+            if [ -d "$BINARY_DIR/lib" ]; then
+              rm -rf "${PREFIX:?}/lib"
+              cp -R "$BINARY_DIR/lib" "$PREFIX/lib"
+              if command -v xattr >/dev/null 2>&1; then
+                xattr -dr com.apple.quarantine "$PREFIX/lib" 2>/dev/null || true
+              fi
+            fi
+            cp "$BINARY_DIR/libexec/rackup-bootstrap.sh" "$PREFIX/libexec/rackup-bootstrap.sh"
+            chmod +x "$PREFIX/libexec/rackup-bootstrap.sh"
+            ok "Installed prebuilt binary from CI (run $GH_RUN_ID): $PREFIX/bin/rackup"
+            INSTALLED_PREBUILT=1
+            GH_BINARY_DOWNLOADED=1
+          else
+            warn "CI binary artifact was invalid; will try other methods."
+          fi
+        fi
+      else
+        info "Could not download CI artifact; will try other methods."
+      fi
+      rm -rf "$GH_TMPDIR"
+    else
+      info "No successful CI run found for ref '$REF'; will try other methods."
+    fi
+  fi
+
   # With --exe, the binary must be available; otherwise we try and fall back.
-  if [ "$FORCE_EXE" -eq 1 ] && [ -z "$BINARY_BASE_URL" ]; then
-    warn "Error: --exe requires the default repo (samth/rackup, main branch)."
+  if [ "$FORCE_EXE" -eq 1 ] && [ -z "$BINARY_BASE_URL" ] && [ "$GH_BINARY_DOWNLOADED" -eq 0 ]; then
+    warn "Error: --exe requires a published binary or a successful CI run with 'gh' installed."
     warn "Custom --repo, --ref, or --archive-url installs do not publish prebuilt binaries."
+    warn "Either install 'gh' (GitHub CLI) to download from CI, or use --source."
     exit 1
   fi
   if [ "$FORCE_EXE" -eq 1 ] && ! has_prebuilt_binary "$HOST_TARGET"; then
@@ -435,7 +500,7 @@ if [ -z "$FROM_LOCAL" ] && [ "$FORCE_SOURCE" -eq 0 ]; then
     exit 1
   fi
 
-  if [ -n "$BINARY_BASE_URL" ] && has_prebuilt_binary "$HOST_TARGET"; then
+  if [ -n "$BINARY_BASE_URL" ] && has_prebuilt_binary "$HOST_TARGET" && [ "$GH_BINARY_DOWNLOADED" -eq 0 ]; then
     BINARY_URL="$BINARY_BASE_URL/$BINARY_NAME"
     CHECKSUM_URL="${BINARY_URL}.sha256"
     info "Downloading prebuilt binary for $HOST_TARGET..."
