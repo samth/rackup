@@ -1553,6 +1553,50 @@
             (putenv "RACKUP_SELF_UPGRADE_INSTALL_SH" old-override)
             (putenv "RACKUP_SELF_UPGRADE_INSTALL_SH" ""))))))
 
+  ;; self-upgrade --ref/--repo forwards flags to install.sh
+  (with-temp-rackup-home
+   (lambda (tmp)
+     (ensure-index!)
+     (define fake-installer (build-path tmp "fake-install-ref.sh"))
+     (define args-log (build-path tmp "self-upgrade-ref-args.log"))
+     (write-string-file
+      fake-installer
+      (format
+       "#!/bin/sh\nset -eu\n: > ~s\nfor a in \"$@\"; do printf '%s\\n' \"$a\" >> ~s; done\nexit 0\n"
+       (path->string args-log)
+       (path->string args-log)))
+     (file-or-directory-permissions fake-installer #o755)
+     (define old-override (getenv "RACKUP_SELF_UPGRADE_INSTALL_SH"))
+     (dynamic-wind
+      (lambda () (putenv "RACKUP_SELF_UPGRADE_INSTALL_SH" (path->string fake-installer)))
+      (lambda ()
+        ;; --ref only
+        (run-main '("self-upgrade" "--ref" "mybranch"))
+        (check-equal?
+         (call-with-input-file args-log
+           (lambda (in) (filter (lambda (s) (not (string=? s ""))) (port->lines in))))
+         (list "-y" "--no-init" "--ref" "mybranch" "--prefix" (path->string (rackup-home)))
+         "--ref forwarded to install.sh")
+        ;; --ref + --repo
+        (run-main '("self-upgrade" "--ref" "mybranch" "--repo" "otheruser/rackup"))
+        (check-equal?
+         (call-with-input-file args-log
+           (lambda (in) (filter (lambda (s) (not (string=? s ""))) (port->lines in))))
+         (list "-y" "--no-init" "--ref" "mybranch" "--repo" "otheruser/rackup"
+               "--prefix" (path->string (rackup-home)))
+         "--ref and --repo forwarded to install.sh")
+        ;; --ref + --source (mode flag still works)
+        (run-main '("self-upgrade" "--source" "--ref" "mybranch"))
+        (check-equal?
+         (call-with-input-file args-log
+           (lambda (in) (filter (lambda (s) (not (string=? s ""))) (port->lines in))))
+         (list "-y" "--no-init" "--source" "--ref" "mybranch" "--prefix" (path->string (rackup-home)))
+         "--ref combines with --source"))
+      (lambda ()
+        (if old-override
+            (putenv "RACKUP_SELF_UPGRADE_INSTALL_SH" old-override)
+            (putenv "RACKUP_SELF_UPGRADE_INSTALL_SH" ""))))))
+
   ;; Metadata-parts matching: "9.0-minimal" should resolve when both full and minimal exist
   (with-temp-rackup-home
    (lambda (tmp)

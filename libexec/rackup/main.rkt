@@ -74,7 +74,7 @@
   (usage-line "init [--shell bash|zsh]" "Install/update shell integration in ~/.bashrc or ~/.zshrc.")
   (usage-line "uninstall [--dangerously-delete-without-prompting]"
               "Remove rackup, its toolchains/runtime, and shell init blocks (destructive).")
-  (usage-line "self-upgrade [--with-init] [--exe | --source]"
+  (usage-line "self-upgrade [--with-init] [--exe | --source] [--ref <ref>] [--repo <owner/repo>]"
               "Upgrade rackup's code by rerunning the installer into the current RACKUP_HOME.")
   (usage-line "runtime status|install|upgrade"
               "Manage rackup's hidden internal runtime used to run rackup itself.")
@@ -819,11 +819,22 @@
   ;; files, so deleting in-process would crash during exit.
   )
 
-(define (self-upgrade-script-source)
+(define default-rackup-repo "samth/rackup")
+
+;; Decide which install.sh URL to fetch.  When a custom --ref or --repo
+;; is specified (e.g., to test a branch/PR), fetch install.sh directly
+;; from the target branch's raw GitHub URL so any install.sh changes on
+;; the branch are exercised too.  Otherwise use the published URL.
+(define (self-upgrade-script-source #:ref [ref #f] #:repo [repo #f])
   (define env-override (getenv "RACKUP_SELF_UPGRADE_INSTALL_SH"))
-  (if (and env-override (getenv "RACKUP_TESTING"))
-      env-override
-      "https://samth.github.io/rackup/install.sh"))
+  (cond
+    [(and env-override (getenv "RACKUP_TESTING"))
+     env-override]
+    [(or ref repo)
+     (format "https://raw.githubusercontent.com/~a/~a/scripts/install.sh"
+             (or repo default-rackup-repo)
+             (or ref "main"))]
+    [else "https://samth.github.io/rackup/install.sh"]))
 
 (define (url-like? s)
   (and (string? s) (regexp-match? #px"^[a-zA-Z][a-zA-Z0-9+.-]*://" s)))
@@ -831,21 +842,32 @@
 (define (parse-self-upgrade-options rest)
   (define with-init? #f)
   (define mode #f) ; #f = auto, 'exe, 'source
+  (define ref #f)
+  (define repo #f)
   (command-line #:program "rackup self-upgrade"
                 #:argv rest
                 #:once-each
                 [("--with-init") "Also update shell init" (set! with-init? #t)]
+                [("--ref") r
+                 "Install rackup from git <ref> (branch, tag, or commit) for testing"
+                 (set! ref r)]
+                [("--repo") r
+                 "Install rackup from GitHub <owner>/<repo> (defaults to samth/rackup)"
+                 (set! repo r)]
                 #:once-any
                 [("--exe") "Require prebuilt binary" (set! mode 'exe)]
                 [("--source") "Install from source" (set! mode 'source)]
                 #:args ()
                 (void))
-  (hash 'with-init? with-init? 'mode mode))
+  (hash 'with-init? with-init? 'mode mode 'ref ref 'repo repo))
 
 (define (cmd-self-upgrade rest)
   (define opts (parse-self-upgrade-options rest))
   (define mode (hash-ref opts 'mode #f))
-  (define source (self-upgrade-script-source))
+  (define ref (hash-ref opts 'ref #f))
+  (define repo (hash-ref opts 'repo #f))
+  (define custom-source? (or ref repo))
+  (define source (self-upgrade-script-source #:ref ref #:repo repo))
 (define (parse-sha256-sidecar text)
     (for/or ([line (in-list (string-split (string-downcase text) "\n"))])
       (match (regexp-match #px"^([0-9a-f]{64})\\b" (string-trim line))
@@ -854,13 +876,20 @@
   (define script-path
     (cond
       [(url-like? source)
-       (define checksum-url (string-append source ".sha256"))
+       ;; Only attempt checksum verification for the default published
+       ;; install.sh.  Custom --ref/--repo sources fetch from raw GitHub
+       ;; and do not publish a .sha256 sidecar; skipping avoids a
+       ;; misleading warning and unnecessary HTTP round-trip.
        (define expected-sha
-         (with-handlers ([exn:fail? (lambda (e)
-                                      (eprintf "rackup: warning: could not fetch checksum from ~a: ~a\n"
-                                               checksum-url (exn-message e))
-                                      #f)])
-           (parse-sha256-sidecar (http-get-string checksum-url))))
+         (cond
+           [custom-source? #f]
+           [else
+            (define checksum-url (string-append source ".sha256"))
+            (with-handlers ([exn:fail? (lambda (e)
+                                         (eprintf "rackup: warning: could not fetch checksum from ~a: ~a\n"
+                                                  checksum-url (exn-message e))
+                                         #f)])
+              (parse-sha256-sidecar (http-get-string checksum-url)))]))
        (define p (make-temporary-file "rackup-self-upgrade-~a.sh"))
        (download-url->file source p)
        (when expected-sha
@@ -884,6 +913,8 @@
               [(eq? mode 'exe)    (list "--exe")]
               [(eq? mode 'source) (list "--source")]
               [else               null])
+            (if ref (list "--ref" ref) null)
+            (if repo (list "--repo" repo) null)
             (list "--prefix" home-str)))
   (define env (environment-variables-copy (current-environment-variables)))
   (environment-variables-set! env #"RACKUP_BOOTSTRAP_MODE" #"self-upgrade")
