@@ -443,7 +443,7 @@ keeps your current shell config unchanged.  The installer picks the
 best mode automatically (prebuilt binary if available for the current
 platform, otherwise source).
 
-@shell-block{rackup self-upgrade [--with-init] [--exe | --source]}
+@shell-block{rackup self-upgrade [--with-init] [--exe | --source] [--ref <ref> [--repo <owner>/<repo>]]}
 
 @opt-table[
   @list[@exec{--with-init}
@@ -452,12 +452,42 @@ platform, otherwise source).
         "Require a prebuilt binary (error if unavailable for this platform)."]
   @list[@exec{--source}
         "Force source installation, even if a prebuilt binary is available."]
+  @list[@exec{--ref <ref>}
+        @elem{Install rackup from the given git ref (branch, tag, or commit)
+              instead of the published release.  Useful for testing a
+              development branch or pull request.  Fetches @tt{install.sh}
+              from the target ref so any installer changes on the branch
+              are exercised too.  Custom refs do not publish prebuilt
+              binaries, so the installer falls back to source.}]
+  @list[@exec{--repo <owner>/<repo>}
+        @elem{Install rackup from a different GitHub repository (default:
+              @tt{samth/rackup}).  Combine with @tt{--ref} to test a PR
+              from a fork.}]
 ]
+
+@subsection[#:style sub-style]{Examples}
+
+@shell-block|{
+# Test the current branch of an open PR in samth/rackup
+rackup self-upgrade --ref pltcompiledroots
+
+# Test a PR from a fork
+rackup self-upgrade --repo someuser/rackup --ref my-feature
+
+# Pin to a specific commit
+rackup self-upgrade --ref a1b2c3d
+}|
+
+After a successful update, rackup automatically runs @tt{rackup reshim}
+in a subprocess so any per-toolchain migrations introduced by the new
+version (e.g., backfilling @tt{PLTCOMPILEDROOTS}) take effect for
+existing toolchains.
 
 @subsection[#:style sub-style]{Advanced}
 
 Set @tt{RACKUP_SELF_UPGRADE_INSTALL_SH} to a path or URL to override
-the install script source (useful for testing dev branches).
+the install script source (useful for local-only testing of an
+unpushed branch).
 
 @; ────────────────────────────────────────────────────────────────────
 
