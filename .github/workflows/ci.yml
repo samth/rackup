@@ -423,11 +423,15 @@ jobs:
         with:
           path: .ci-cache/native-i386-vm/downloads
           key: native-i386-vm-downloads-${{ hashFiles('test/native-i386-vm-test.sh') }}
+          restore-keys: |
+            native-i386-vm-downloads-
       - name: Restore native i386 VM guest disk cache
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: .ci-cache/native-i386-vm/debian-i386.qcow2
           key: native-i386-vm-disk-v1-${{ hashFiles('test/native-i386-vm-test.sh', 'test/ci-native-i386-vm-smoke.sh', 'test/vm/native-i386-firstboot.sh', 'test/vm/native-i386-firstboot.service') }}
+          restore-keys: |
+            native-i386-vm-disk-v1-
       - name: Native i386 103p1 smoke
         shell: bash
         run: |
