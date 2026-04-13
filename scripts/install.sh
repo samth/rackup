@@ -594,9 +594,11 @@ if [ "$INSTALLED_PREBUILT" -eq 0 ]; then
       warn "Error: need curl or wget to download rackup sources."
       exit 1
     fi
-    if is_sha256_hex "$EXPECTED_SRC_SHA256"; then
+    if is_sha256_hex "$EXPECTED_SRC_SHA256" && [ "$REF" = "main" ]; then
       info "Verifying source download (SHA-256)..."
       verify_sha256 "$TMPDIR_INSTALL/rackup.tar.gz" "$EXPECTED_SRC_SHA256" "rackup-src.tar.gz"
+    elif [ "$REF" != "main" ]; then
+      info "Skipping source checksum for custom ref '$REF'."
     elif [ "$FORCE_SOURCE" -eq 1 ] && [ -z "$FROM_LOCAL" ] && [ -z "$ARCHIVE_URL_OVERRIDE" ]; then
       warn "Error: source checksum is not available in this copy of install.sh."
       warn "This is expected when running the repo copy directly. Use --from-local or --archive-url instead."
