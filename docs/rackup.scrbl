@@ -308,10 +308,26 @@ directory.  For linked toolchains, only the rackup metadata and symlink
 are removed; the original source tree is untouched.  Shims are rebuilt
 automatically afterward.
 
-@shell-block{rackup remove <toolchain>}
+@shell-block{rackup remove [--clean-compiled] <toolchain>}
 
 Also removes orphan/partial toolchain directories that were left behind
 by interrupted installs.
+
+@subsection[#:tag "remove-flags" #:style sub-style]{Flags}
+
+@opt-table[
+  @list[@exec{--clean-compiled}
+        @elem{Before removing the toolchain, delete any
+              @tt{compiled/<version>-<variant>/} subdirectories found in
+              the source trees of user-scope and linked packages.  This
+              cleans up stale @tt{.zo} files written under rackup's
+              per-toolchain @tt{PLTCOMPILEDROOTS} (see
+              @secref["environment-variables"]) that would otherwise persist after
+              the toolchain is removed.  Requires the toolchain's
+              @tt{racket} to be operational, since package source
+              directories are enumerated via the toolchain's own
+              @tt{pkg/lib}.}]
+]
 
 @; ────────────────────────────────────────────────────────────────────
 
@@ -754,12 +770,19 @@ can remove it cleanly.
         "Override the active toolchain for the current shell session. Set by rackup switch; can also be set manually."]
 ]
 
-@subsection[#:style sub-style]{Set by rackup when activating a toolchain}
+@subsection[#:style sub-style]{Set by rackup switch (in user's shell)}
 
 @opt-table[
-  @list[@tt{PLTHOME}     "Root of the active Racket installation."]
-  @list[@tt{PLTADDONDIR} "Per-toolchain addon directory (packages, compiled files)."]
-  @list[@tt{PATH}        "Prepended with the shims directory."]
+  @list[@tt{RACKUP_TOOLCHAIN}  "The active toolchain ID."]
+  @list[@tt{PATH}              "Prepended with the shims directory."]
+]
+
+@subsection[#:style sub-style]{Set internally by the shim dispatcher (per invocation)}
+
+@opt-table[
+  @list[@tt{PLTHOME}           "Root of the active Racket installation (old PLT Scheme only)."]
+  @list[@tt{PLTADDONDIR}       "Per-toolchain addon directory (packages, compiled files)."]
+  @list[@tt{PLTCOMPILEDROOTS}  @elem{Version-variant-specific compiled root (e.g., @tt{compiled/9.1-cs:.}) so different toolchains do not share @tt{.zo} files.}]
 ]
 
 Rackup saves and restores any user-set values of @tt{PLTHOME},
@@ -767,6 +790,104 @@ Rackup saves and restores any user-set values of @tt{PLTHOME},
 @tt{PLTUSERHOME}, @tt{RACKET_XPATCH}, and @tt{PLT_COMPILED_FILE_CHECK}
 before overriding them, so @tt{rackup run} passes through your original
 settings to the subprocess.
+
+@; ────────────────────────────────────────────────────────────────────
+
+@section[#:tag "compiled-files" #:style 'unnumbered]{Per-toolchain compiled files}
+
+Different Racket versions, and the Chez-based (@tt{cs}) and bytecode
+(@tt{bc}) VMs within a single version, produce incompatible @tt{.zo}
+files.  Without per-toolchain separation, compiling a collection under
+Racket 9.1-cs and then switching to 8.18-bc would leave behind
+@tt{.zo} files that the new toolchain cannot load, forcing a manual
+@tt{raco setup} or a @tt{rm -rf compiled/} dance.
+
+Rackup avoids this by setting @tt{PLTCOMPILEDROOTS} per toolchain so
+each version+variant writes its compiled output to its own
+subdirectory, while preserving the toolchain's existing compiled-file
+roots so pre-existing @tt{.zo} files are still found.
+
+At install or link time, rackup reads the toolchain's
+@tt{config.rktd} to discover its existing @tt{compiled-file-roots}
+and constructs a @tt{PLTCOMPILEDROOTS} value that prepends the
+versioned root:
+
+@shell-block|{
+# In-place layout (rackup's default --in-place installs):
+PLTCOMPILEDROOTS=compiled/9.1-cs:.
+
+# FHS layout (e.g., system-packaged Racket):
+PLTCOMPILEDROOTS=compiled/9.1-cs:/usr/lib/racket/compiled:.
+}|
+
+The first entry (@tt{compiled/9.1-cs}) is where new @tt{.zo} files
+are written.  The remaining entries are the toolchain's native
+compiled-file roots (preserved from its @tt{config.rktd}), plus
+@tt{.} which resolves to the source directory itself so that user
+code's @tt{compiled/} directories are always found.
+
+For example, if you install Racket from a full installer (which ships
+with pre-compiled @tt{.zo} files) and manage it via rackup, those
+pre-compiled files are found through the fallback roots without
+recompiling.  New compilations go into @tt{compiled/9.1-cs/}.
+
+@subsection[#:style sub-style]{How the key is chosen}
+
+The subdirectory name is @tt{<resolved-version>-<variant>}.  Full and
+minimal distributions of the same version+variant share a directory
+(they run the same compiler, so their @tt{.zo} files are compatible),
+while CS and BC are separated because their bytecode formats are
+incompatible.  Snapshots and development builds get their own keys
+based on the probed version (e.g., @tt{9.1.0.3-cs}), which naturally
+separates them from release builds.
+
+For linked toolchains whose version or variant cannot be probed,
+@tt{PLTCOMPILEDROOTS} is left unset so the toolchain uses the default
+@tt{compiled/} directory.
+
+Toolchains installed by an older version of rackup are migrated
+automatically: the next time any rackup state-changing command runs
+(e.g., @tt{rackup reshim}, @tt{rackup install}, @tt{rackup upgrade}),
+any installed toolchain whose @tt{meta.rktd} predates per-toolchain
+@tt{PLTCOMPILEDROOTS} has the entry backfilled in place.  No
+reinstallation is required.
+
+@subsection[#:style sub-style]{Environment scoping}
+
+Racket-specific env vars (@tt{PLTCOMPILEDROOTS}, @tt{PLTADDONDIR},
+@tt{PLTHOME}) are set internally by the shim dispatcher via
+per-toolchain @tt{env.sh} files, scoped to each subprocess
+invocation.  @tt{rackup switch} only sets @tt{RACKUP_TOOLCHAIN} and
+@tt{PATH} in the user's shell.  This prevents rackup's env vars from
+leaking into non-rackup commands (e.g., @tt{make install} in a
+Racket source checkout).
+
+For @tt{rackup run}, if the user had @tt{PLTCOMPILEDROOTS} set before
+invoking rackup, the saved value is restored and takes precedence
+over the toolchain's default.
+
+@subsection[#:style sub-style]{Cleaning up}
+
+New @tt{.zo} files written by a toolchain can end up outside
+rackup's own state directories — specifically, in the source trees of
+packages installed with @tt{raco pkg install --link}, or in any
+directory where you run @tt{raco make} manually.  When you
+@tt{rackup remove} a toolchain, the toolchain's own @tt{collects/}
+and addon directory are deleted, but these user directories are not.
+
+Passing @tt{--clean-compiled} to @tt{rackup remove} walks the source
+directories of every user-scope package (catalog and linked) and
+removes any @tt{compiled/<key>/} subdirectories before the toolchain
+itself is removed:
+
+@shell-block{rackup remove 9.1 --clean-compiled}
+
+This enumerates packages via the toolchain's own @tt{racket} and
+@tt{pkg/lib}, so it needs the outgoing toolchain to still be
+operational.  Package source directories outside of rackup's
+knowledge (projects you work on directly, collections under
+@tt{raco link}, etc.) are not touched — you can clean those up
+manually with @tt{rm -rf compiled/9.1-cs} in each directory.
 
 @; ────────────────────────────────────────────────────────────────────
 
