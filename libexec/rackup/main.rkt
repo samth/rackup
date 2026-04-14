@@ -340,6 +340,13 @@
         (eprintf "rackup: executable not found: ~a\n" exe)
         (exit 1))))
 
+(define (warn-no-shell-integration! cmd-name)
+  (when (terminal-port? (current-output-port))
+    (eprintf "rackup: shell integration is not set up.\n")
+    (eprintf "Run `rackup init` first, then restart your shell.\n")
+    (eprintf "After that, `rackup ~a` will work correctly.\n" cmd-name)
+    (exit 1)))
+
 (define (cmd-shell rest)
   (ensure-index!)
   (define deactivate? #f)
@@ -350,6 +357,7 @@
                   [("--deactivate") "Deactivate shell toolchain" (set! deactivate? #t)]
                   #:args args
                   args))
+  (warn-no-shell-integration! "shell")
   (cond
     [deactivate? (display (emit-shell-deactivation))]
     [(= (length args) 1)
@@ -367,6 +375,7 @@
                   [("--unset") "Deactivate shell toolchain" (set! unset? #t)]
                   #:args args
                   args))
+  (warn-no-shell-integration! "switch")
   (cond
     [unset? (display (emit-shell-deactivation))]
     [(= (length args) 1)
