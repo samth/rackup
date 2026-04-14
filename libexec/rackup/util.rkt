@@ -34,6 +34,7 @@
          ensure-string-without-control-chars!
          ensure-path-without-control-chars!
          sh-single-quote
+         env-var-export-line
          color-enabled?
          ansi
          sanitized-racket-env-vars
@@ -228,6 +229,12 @@
 (define (sh-single-quote s)
   (define str (format "~a" s))
   (string-append "'" (regexp-replace* #px"'" str "'\"'\"'") "'"))
+
+;; Produce a shell `export` line for an env-var pair.
+;; env.sh is sourced by the shim dispatcher, scoped to each invocation.
+;; All variables are exported unconditionally.
+(define (env-var-export-line key value)
+  (format "export ~a=~a\n" key (sh-single-quote value)))
 
 ;; Racket env vars that bin/rackup saves as _RACKUP_ORIG_* and clears
 ;; so the hidden runtime is not affected. restore-saved-racket-env-vars!

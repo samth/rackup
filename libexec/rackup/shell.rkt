@@ -288,26 +288,19 @@
 (define (emit-env-exports vars)
   (apply string-append
          (for/list ([kv (in-list vars)])
-           (define k (car kv))
-           (define v (cdr kv))
-           (format "export ~a=~a\n" k (sh-single-quote v)))))
+           (env-var-export-line (car kv) (cdr kv)))))
 
 (define (emit-shell-activation toolchain-id)
   (unless (toolchain-exists? toolchain-id)
     (rackup-error "toolchain not installed: ~a" toolchain-id))
-  (define extra-env (toolchain-env-vars toolchain-id))
-  (define addon (path->string* (rackup-addon-dir toolchain-id)))
-  (define has-addon? (assoc "PLTADDONDIR" extra-env))
+  ;; Only set RACKUP_TOOLCHAIN and PATH.  Racket-specific env vars
+  ;; (PLTCOMPILEDROOTS, PLTADDONDIR, PLTHOME) are set internally by the
+  ;; shim dispatcher via env.sh, scoped to each invocation — not exported
+  ;; into the user's shell where they would leak into non-rackup commands.
   (string-append (emit-path-prepend)
-                 (emit-env-exports extra-env)
                  "export RACKUP_TOOLCHAIN="
                  (sh-single-quote toolchain-id)
-                 "\n"
-                 (if has-addon?
-                     ""
-                     (string-append "export PLTADDONDIR="
-                                    (sh-single-quote addon)
-                                    "\n"))))
+                 "\n"))
 
 (define (deactivation-extra-vars)
   (define active (getenv "RACKUP_TOOLCHAIN"))
@@ -319,12 +312,16 @@
 
 (define (emit-shell-deactivation)
   (define extra-vars (remove-duplicates (deactivation-extra-vars)))
+  ;; Unset RACKUP_TOOLCHAIN and any Racket env vars that might be
+  ;; lingering from prior sessions (backwards compatibility).
   (string-append (emit-path-prepend)
                  (apply string-append
                         (for/list ([k (in-list extra-vars)])
                           (format "unset ~a\n" k)))
                  "unset RACKUP_TOOLCHAIN\n"
-                 "unset PLTADDONDIR\n"))
+                 "unset PLTADDONDIR\n"
+                 "unset PLTCOMPILEDROOTS\n"
+                 "unset PLTHOME\n"))
 
 (define (guess-shell)
   (define sh (or (getenv "SHELL") ""))

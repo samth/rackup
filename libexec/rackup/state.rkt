@@ -22,6 +22,9 @@
          read-toolchain-meta
          write-toolchain-meta!
          toolchain-env-vars
+         meta->env-vars
+         compiled-roots-value
+         read-toolchain-compiled-file-roots
          register-toolchain!
          unregister-toolchain!
          find-local-toolchain
@@ -109,8 +112,7 @@
 (define (write-toolchain-meta! id meta)
   (write-rktd-file (rackup-toolchain-meta-file id) meta))
 
-(define (toolchain-env-vars id)
-  (define m (read-toolchain-meta id))
+(define (meta->env-vars m)
   (define raw (and (hash? m) (hash-ref m 'env-vars #f)))
   (cond
     [(hash? raw)
@@ -121,6 +123,80 @@
                 #:when (and (list? entry) (= (length entry) 2)))
        (cons (format "~a" (car entry)) (format "~a" (cadr entry))))]
     [else null]))
+
+(define (toolchain-env-vars id)
+  (meta->env-vars (read-toolchain-meta id)))
+
+;; Read the compiled-file-roots from a toolchain's config.rktd.
+;; Returns a list like (same) or ("/usr/lib/racket/compiled"), or
+;; (same) as default if the file is missing or has no entry.
+(define (read-toolchain-compiled-file-roots real-bin-dir)
+  (define parent
+    (and real-bin-dir
+         (let-values ([(d _ __) (split-path (if (path? real-bin-dir)
+                                                real-bin-dir
+                                                (string->path (format "~a" real-bin-dir))))])
+           d)))
+  (define candidates
+    (if parent
+        (list (build-path parent "etc" "config.rktd")
+              (build-path parent "etc" "racket" "config.rktd"))
+        null))
+  (define config
+    (for/or ([p (in-list candidates)])
+      (and (file-exists? p)
+           (with-handlers ([exn:fail? (lambda (_) #f)])
+             (call-with-input-file p read)))))
+  (cond
+    [(and (hash? config) (list? (hash-ref config 'compiled-file-roots #f)))
+     (hash-ref config 'compiled-file-roots)]
+    [else '(same)]))
+
+;; Serialize a compiled-file-roots entry (as found in config.rktd or
+;; returned by find-compiled-file-roots) into a string suitable for a
+;; colon-separated PLTCOMPILEDROOTS value.  'same cannot be represented
+;; directly, but "." is a relative path that resolves equivalently.
+(define (serialize-compiled-root r)
+  (cond
+    [(eq? r 'same) "."]
+    [(path? r) (path->string r)]
+    [(string? r) r]
+    [else (format "~a" r)]))
+
+;; Compute a PLTCOMPILEDROOTS value that prepends a version-variant-
+;; specific subdirectory to the toolchain's existing compiled-file
+;; roots.  `existing-roots` is a list as found in config.rktd's
+;; 'compiled-file-roots key (e.g., (same) for in-place installs, or
+;; ("/usr/lib/racket/compiled") for FHS installs).  When not provided,
+;; defaults to (same).
+;;
+;; Returns a string like "compiled/9.1-cs:." or
+;; "compiled/9.1-cs:/usr/lib/racket/compiled", or #f when the
+;; version/variant are too incomplete to form a stable key.
+(define (compiled-roots-value version variant [existing-roots '(same)])
+  (define variant-str
+    (cond
+      [(symbol? variant) (and (not (eq? variant 'unknown)) (symbol->string variant))]
+      [(string? variant) (and (not (string-blank? variant)) variant)]
+      [else #f]))
+  (define version-str
+    (cond
+      [(and (string? version) (not (string-blank? version)) (not (equal? version "local")))
+       version]
+      [else #f]))
+  (cond
+    [(and version-str variant-str)
+     (define key (format "compiled/~a-~a" version-str variant-str))
+     ;; Always include 'same (serialized as ".") so that user code's
+     ;; compiled/ directories are found, even on FHS installs where the
+     ;; existing roots only contain absolute reroot paths for system
+     ;; collections.
+     (define roots-with-same
+       (let ([roots (if (null? existing-roots) '(same) existing-roots)])
+         (if (memq 'same roots) roots (append roots '(same)))))
+     (define fallbacks (map serialize-compiled-root roots-with-same))
+     (string-join (cons key fallbacks) ":")]
+    [else #f]))
 
 (define (meta-summary meta)
   (for/hash ([k '(id kind

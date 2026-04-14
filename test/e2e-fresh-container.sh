@@ -242,6 +242,11 @@ create_fake_local_source_tree() {
 set -euo pipefail
 default_addon_dir="$(cd "$(dirname "$0")/../.." && pwd)/add-on/development"
 if [[ "$#" -ge 2 && "$1" == "-e" ]]; then
+  # Combined probe: all three queries in one -e call
+  if [[ "$2" == *"(version)"*"system-type"*"find-system-path"* ]]; then
+    printf '9.99-local\nchez-scheme\n%s' "${PLTADDONDIR:-$default_addon_dir}"
+    exit 0
+  fi
   case "$2" in
     *"(version)"*) printf '9.99-local'; exit 0 ;;
     *"system-type 'vm"*) printf 'cs'; exit 0 ;;
@@ -350,7 +355,10 @@ shell_eval_snippet_test() {
 set -euo pipefail
 eval "\$("$RACKUP_BIN" switch "$toolchain_id")"
 test "\${RACKUP_TOOLCHAIN}" = "$toolchain_id"
-test "\${PLTADDONDIR}" = "$RACKUP_HOME/addons/$toolchain_id"
+# PLTADDONDIR is set internally by the shim dispatcher, not exported
+# to the shell.  Verify it reaches the toolchain's racket via the shim.
+addon="\$(racket -e '(display (getenv "PLTADDONDIR"))' 2>&1)" || { echo "racket addon probe failed: \$addon" >&2; exit 1; }
+test "\$addon" = "$RACKUP_HOME/addons/$toolchain_id" || { echo "addon mismatch: got='\$addon' expected='$RACKUP_HOME/addons/$toolchain_id'" >&2; exit 1; }
 v="\$(racket -e '(display (version))')"
 case "\$v" in
   ${expected_prefix}*) ;;

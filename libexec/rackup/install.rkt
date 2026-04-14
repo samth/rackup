@@ -322,7 +322,7 @@
                    "# rackup managed toolchain environment\n"
                    (apply string-append
                           (for/list ([kv (in-list env-vars)])
-                            (format "export ~a=~a\n" (car kv) (sh-single-quote (cdr kv)))))))
+                            (env-var-export-line (car kv) (cdr kv))))))
   (write-string-file p body)
   (file-or-directory-permissions p #o644)
   p)
@@ -518,7 +518,7 @@
               'pkgs-dir
               (and (directory-exists? pkgs) (path-complete-string pkgs)))])]))
 
-(define (local-layout-env-vars layout [addon-dir #f])
+(define (local-layout-env-vars layout [addon-dir #f] [version #f] [variant #f])
   (define source-root (hash-ref layout 'source-root #f))
   ;; For source checkouts, default PLTADDONDIR to <checkout>/add-on
   ;; (matching the plt-bin convention).
@@ -526,31 +526,51 @@
     (or addon-dir
         (and source-root
              (path->string* (build-path (string->path source-root) "add-on")))))
-  (if (and (string? effective-addon-dir) (not (string-blank? effective-addon-dir)))
-      (list (cons "PLTADDONDIR" effective-addon-dir))
-      null))
+  (define addon-entry
+    (if (and (string? effective-addon-dir) (not (string-blank? effective-addon-dir)))
+        (list (cons "PLTADDONDIR" effective-addon-dir))
+        null))
+  (define bin-dir-str (hash-ref layout 'bin-dir #f))
+  (define existing-roots
+    (if bin-dir-str
+        (read-toolchain-compiled-file-roots (string->path bin-dir-str))
+        '(same)))
+  (define compiled-roots-entry
+    (cond
+      [(compiled-roots-value version variant existing-roots)
+       =>
+       (lambda (v) (list (cons "PLTCOMPILEDROOTS" v)))]
+      [else null]))
+  (append addon-entry compiled-roots-entry))
 
 (define (probe-local-racket-version+variant+addon-dir bin-dir env-vars)
   (define racket-exe (build-path (string->path bin-dir) "racket"))
-  (define version-out (capture-program-output #:env env-vars racket-exe "-e" "(display (version))"))
-  (define variant-out
+  ;; Combine all three queries into a single racket invocation to avoid
+  ;; paying startup cost three times.
+  (define combined-out
     (capture-program-output
      #:env env-vars
      racket-exe
      "-e"
-     "(display (let ([v (system-type 'vm)]) (if (symbol? v) (symbol->string v) (format \"~a\" v))))"))
-  (define addon-out
-    (capture-program-output
-     #:env env-vars
-     racket-exe
-     "-e"
-     "(display (find-system-path 'addon-dir))"))
+     (string-append
+      "(displayln (version))"
+      "(displayln (let ([v (system-type 'vm)])"
+      "  (if (symbol? v) (symbol->string v) (format \"~a\" v))))"
+      "(display (find-system-path 'addon-dir))")))
   (define (normalize-vm-name s)
     (and s (not (string-blank? s))
          (match (string-downcase s)
            ["chez-scheme" "cs"]
            ["racket" "bc"]
            [v v])))
+  (define-values (version-out variant-out addon-out)
+    (if combined-out
+        (let ([lines (string-split combined-out "\n")])
+          (if (>= (length lines) 3)
+              (values (first lines) (second lines)
+                      (string-join (drop lines 2) "\n"))
+              (values #f #f #f)))
+        (values #f #f #f)))
   (values (and version-out (not (string-blank? version-out)) version-out)
           (normalize-vm-name variant-out)
           (and addon-out (not (string-blank? addon-out)) addon-out)))
@@ -558,7 +578,7 @@
 ;; Old PLT Scheme installations (version <= 4.x) have a shell wrapper at
 ;; plt/bin/mzscheme that uses $PLTHOME to locate the real binary under
 ;; plt/.bin/<archsys>/. Set PLTHOME for these so the wrapper works.
-(define (installed-toolchain-env-vars real-bin-dir)
+(define (installed-toolchain-env-vars real-bin-dir [request #f])
   (define plthome (maybe-parent real-bin-dir))
   (define-values (plthome-base plthome-leaf _plthome-dir?)
     (if plthome
@@ -568,10 +588,21 @@
     (and (path? plthome-leaf) (path->string plthome-leaf)))
   (define plthome-normalized
     (and plthome-base (path? plthome-leaf) (build-path plthome-base plthome-leaf)))
-  (cond
-    [(and plthome-normalized (equal? plthome-name "plt"))
-     (list (cons "PLTHOME" (path->string* plthome-normalized)))]
-    [else null]))
+  (define plthome-entry
+    (cond
+      [(and plthome-normalized (equal? plthome-name "plt"))
+       (list (cons "PLTHOME" (path->string* plthome-normalized)))]
+      [else null]))
+  (define compiled-roots-entry
+    (cond
+      [(and (hash? request)
+            (compiled-roots-value (hash-ref request 'resolved-version #f)
+                                  (hash-ref request 'variant #f)
+                                  (read-toolchain-compiled-file-roots real-bin-dir)))
+       =>
+       (lambda (v) (list (cons "PLTCOMPILEDROOTS" v)))]
+      [else null]))
+  (append plthome-entry compiled-roots-entry))
 
 (define (toolchain-meta request id real-bin-dir executables [env-vars null])
   (hash 'id
@@ -767,9 +798,17 @@
        (make-directory* tc-dir)
        (define extra-exes (find-local-chez-extra-executables layout))
        (define base-env-vars (local-layout-env-vars layout))
+       ;; Restore user's saved PLTCOMPILEDROOTS (if any) for the probe.
+       ;; bin/rackup saves it as _RACKUP_ORIG_PLTCOMPILEDROOTS before
+       ;; unsetting it for the rackup-core runtime.
+       (define saved-compiled-roots (getenv "_RACKUP_ORIG_PLTCOMPILEDROOTS"))
+       (define probe-env-vars
+         (if saved-compiled-roots
+             (cons (cons "PLTCOMPILEDROOTS" saved-compiled-roots) base-env-vars)
+             base-env-vars))
        (define-values (version* variant* addon-dir*)
-         (probe-local-racket-version+variant+addon-dir (path->string* real-bin-dir) base-env-vars))
-       (define env-vars (local-layout-env-vars layout addon-dir*))
+         (probe-local-racket-version+variant+addon-dir (path->string* real-bin-dir) probe-env-vars))
+       (define env-vars (local-layout-env-vars layout addon-dir* version* variant*))
        (make-bin-overlay! id real-bin-dir extra-exes)
        (maybe-wrap-local-chez-extra-executables! id extra-exes layout)
        (if (pair? env-vars)
@@ -907,7 +946,7 @@
          (define real-bin-dir (detect-bin-dir install-root))
          (maybe-modernize-legacy-archsys! real-bin-dir)
          (make-bin-link! id real-bin-dir)
-         (define env-vars (installed-toolchain-env-vars real-bin-dir))
+         (define env-vars (installed-toolchain-env-vars real-bin-dir request))
          (if (pair? env-vars)
              (write-toolchain-env-file! id env-vars)
              (delete-toolchain-env-file! id))
@@ -924,10 +963,12 @@
            (printf "\nTip: to get the full Racket distribution, run:\n  raco pkg install main-distribution\n"))
          id)])))
 
-(define (remove-toolchain! id)
+(define (remove-toolchain! id #:clean-compiled? [clean-compiled? #f])
   (ensure-index!)
   (unless (toolchain-exists? id)
     (rackup-error "toolchain not installed: ~a" id))
+  (when clean-compiled?
+    (clean-toolchain-compiled-dirs! id))
   (define tc-dir (rackup-toolchain-dir id))
   (define addon (rackup-addon-dir id))
   (when (directory-exists? tc-dir)
@@ -956,6 +997,117 @@
          #:env (toolchain-runtime-env id)
          raco-exe
          raco-args))
+
+;; Run racket -e with the correct env for a toolchain.  Returns stdout
+;; as a string on success, #f on failure.
+(define (capture-racket-eval-output id expr-text)
+  (define bin (rackup-toolchain-bin-link id))
+  (define racket-exe (build-path bin "racket"))
+  (capture-program-output
+   #:env (toolchain-runtime-env id)
+   racket-exe
+   "-e"
+   expr-text))
+
+;; A small Racket program that prints the absolute source directory of
+;; every user-scope package, one per line.  Covers both catalog
+;; installs and `raco pkg install --link` installs.
+(define list-pkg-dirs-program
+  (string-join
+   '("(begin"
+     " (require pkg/lib racket/path)"
+     " (parameterize ([current-pkg-scope 'user])"
+     "  (with-pkg-lock/read-only"
+     "   (define cache (make-hash))"
+     "   (for ([name (in-list (sort (hash-keys (installed-pkg-table)) string<?))])"
+     "    (define dir (pkg-directory name #:cache cache))"
+     "    (when dir"
+     "     (displayln"
+     "      (path->string"
+     "       (simplify-path (path->complete-path dir)))))))))")
+   " "))
+
+;; Query the toolchain for absolute source directories of all
+;; user-scope packages (catalog and linked).  Returns a list of strings,
+;; or #f if the toolchain's racket cannot be invoked.
+(define (toolchain-user-package-dirs id)
+  (define out
+    (with-handlers ([exn:fail? (lambda (_) #f)])
+      (capture-racket-eval-output id list-pkg-dirs-program)))
+  (cond
+    [(or (not out) (string-blank? out)) null]
+    [else
+     (for/list ([line (in-list (string-split out "\n"))]
+                #:when (not (string-blank? line)))
+       (string-trim line))]))
+
+;; Recursively find directories named `target` (a string) under `root`
+;; and call `proc` on each one.  Does not descend into the matched
+;; directories.  Skips symlinks to avoid escaping the root or looping.
+(define (for-each-named-subdir root target proc)
+  (define (walk dir)
+    (when (and (directory-exists? dir) (not (link-exists? dir)))
+      (for ([entry (in-list (with-handlers ([exn:fail? (lambda (_) null)])
+                              (directory-list dir #:build? #t)))])
+        (cond
+          [(link-exists? entry) (void)]
+          [(directory-exists? entry)
+           (cond
+             [(equal? (path-basename-string entry) target)
+              (proc entry)]
+             [else (walk entry)])]))))
+  (walk root))
+
+;; Walk the package source directories of toolchain `id` and remove any
+;; `compiled/<key>/` subdirectories, where `<key>` is derived from the
+;; toolchain's version+variant.  Reports what was removed.
+(define (clean-toolchain-compiled-dirs! id)
+  (define meta (read-toolchain-meta id))
+  (unless (hash? meta)
+    (install-warn "Cannot clean compiled dirs: missing metadata for ~a" id)
+    (set! meta (hash)))
+  (define key-value
+    (compiled-roots-value (hash-ref meta 'resolved-version #f)
+                          (hash-ref meta 'variant #f)))
+  (cond
+    [(not key-value)
+     (install-warn
+      "Cannot clean compiled dirs for ~a: no usable version+variant in metadata"
+      id)]
+    [else
+     ;; key-value is "compiled/<key>:." -- extract just <key>.
+     (define key
+       (let* ([before-colon (car (string-split key-value ":"))]
+              [after-slash (cadr (string-split before-colon "/"))])
+         after-slash))
+     (install-info "Scanning user packages for compiled/~a directories..." key)
+     (define dirs (toolchain-user-package-dirs id))
+     (cond
+       [(null? dirs)
+        (install-info "No user packages with source directories found.")]
+       [else
+        (define removed 0)
+        (define addon (path->string* (rackup-addon-dir id)))
+        (for ([d (in-list dirs)])
+          (define d-path (string->path d))
+          (when (directory-exists? d-path)
+            (for-each-named-subdir
+             d-path
+             "compiled"
+             (lambda (compiled-dir)
+               (define versioned (build-path compiled-dir key))
+               (when (and (directory-exists? versioned) (not (link-exists? versioned)))
+                 (with-handlers ([exn:fail?
+                                  (lambda (e)
+                                    (install-warn "Failed to remove ~a: ~a"
+                                                  (path->string* versioned)
+                                                  (exn-message e)))])
+                   (delete-directory/files versioned)
+                   (set! removed (+ removed 1))))))))
+        (install-ok "Cleaned ~a compiled/~a director~a"
+                    removed
+                    key
+                    (if (= removed 1) "y" "ies"))])]))
 
 ;; Parse the output of `raco pkg show --user` into a list of package
 ;; names.  The format is a header line ("Package  Checksum  Source")
@@ -1160,4 +1312,6 @@
            installed-toolchain-env-vars
            ensure-installer-cached!
            parse-pkg-show-output
-           meta->upgrade-spec))
+           meta->upgrade-spec
+           write-toolchain-env-file!
+           clean-toolchain-compiled-dirs!))

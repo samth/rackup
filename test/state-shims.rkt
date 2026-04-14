@@ -24,7 +24,8 @@
          "../libexec/rackup/util.rkt"
          "../libexec/rackup/versioning.rkt"
          (only-in (submod "../libexec/rackup/install.rkt" for-testing)
-                  detect-bin-dir installed-toolchain-env-vars)
+                  detect-bin-dir installed-toolchain-env-vars
+                  write-toolchain-env-file! clean-toolchain-compiled-dirs!)
          (only-in (submod "../libexec/rackup/runtime.rkt" for-testing)
                   hidden-runtime-invocation-prefix)
          (submod "../libexec/rackup/shell.rkt" for-testing))
@@ -528,6 +529,10 @@
                 @~a{#!/usr/bin/env bash
                     set -euo pipefail
                     if [[ "$#" -ge 2 && "$1" == "-e" ]]; then
+                      if [[ "$2" == *"(version)"*"system-type"*"find-system-path"* ]]; then
+                        printf '9.99-local\nchez-scheme\n@|addon-dir|'
+                        exit 0
+                      fi
                       case "$2" in
                         *"(version)"*) printf '9.99-local'; exit 0 ;;
                         *"system-type 'vm"*) printf 'cs'; exit 0 ;;
@@ -571,6 +576,11 @@
                 @~a{#!/usr/bin/env bash
                     set -euo pipefail
                     if [[ "$#" -ge 2 && "$1" == "-e" ]]; then
+                      # Combined probe: all three queries in one -e call
+                      if [[ "$2" == *"(version)"*"system-type"*"find-system-path"* ]]; then
+                        printf '9.98-local\nchez-scheme\n@|addon-dir|'
+                        exit 0
+                      fi
                       case "$2" in
                         *"(version)"*) printf '9.98-local'; exit 0 ;;
                         *"system-type 'vm"*) printf 'cs'; exit 0 ;;
@@ -610,7 +620,8 @@
      (check-true (regexp-match?
                   (regexp (regexp-quote (format "PLTADDONDIR=~a"
                                                 (path->string addon-dir))))
-                  shim-out))
+                  shim-out)
+                 "shim dispatcher sets PLTADDONDIR")
 
      (define scheme-out
        (capture-output
@@ -625,9 +636,13 @@
                                                       (path->string petite-boot))))
 
      (define activation (emit-shell-activation linked-id))
+     ;; Shell activation should only set RACKUP_TOOLCHAIN and PATH.
+     ;; Racket env vars are set internally by the shim dispatcher.
      (check-false (string-contains? activation "export PLTHOME="))
      (check-false (string-contains? activation "export PLTCOLLECTS="))
-     (check-true (string-contains? activation (format "export PLTADDONDIR='~a'" (path->string addon-dir))))
+     (check-false (string-contains? activation "export PLTADDONDIR="))
+     (check-false (string-contains? activation "export PLTCOMPILEDROOTS="))
+     (check-true (string-contains? activation "export RACKUP_TOOLCHAIN="))
      (expect (run-main (list "switch" "devsrc")) activation)
      @expect[(run-main '("prompt"))]{devsrc
 }
@@ -641,8 +656,12 @@
 }
      (void (putenv "RACKUP_TOOLCHAIN" linked-id))
      (define deactivation (emit-shell-deactivation))
-     (check-false (string-contains? deactivation "unset PLTHOME"))
-     (check-false (string-contains? deactivation "unset PLTCOLLECTS"))
+     ;; Deactivation unsets RACKUP_TOOLCHAIN and Racket env vars
+     ;; (for backwards compatibility with sessions that have them set).
+     (check-true (string-contains? deactivation "unset RACKUP_TOOLCHAIN"))
+     (check-true (string-contains? deactivation "unset PLTADDONDIR"))
+     (check-true (string-contains? deactivation "unset PLTCOMPILEDROOTS"))
+     (check-true (string-contains? deactivation "unset PLTHOME"))
      (expect (run-main '("switch" "--unset")) deactivation)
      (void (putenv "RACKUP_TOOLCHAIN" ""))))
 
@@ -717,6 +736,10 @@
                     @~a{#!/usr/bin/env bash
                         set -euo pipefail
                         if [[ "$#" -ge 2 && "$1" == "-e" ]]; then
+                          if [[ "$2" == *"(version)"*"system-type"*"find-system-path"* ]]; then
+                            printf '8.18-installed\nchez-scheme\n@|addon-dir|'
+                            exit 0
+                          fi
                           case "$2" in
                             *"(version)"*) printf '8.18-installed'; exit 0 ;;
                             *"system-type 'vm"*) printf 'cs'; exit 0 ;;
@@ -794,6 +817,10 @@
                         @~a{#!/usr/bin/env bash
                             set -euo pipefail
                             if [[ "$#" -ge 2 && "$1" == "-e" ]]; then
+                              if [[ "$2" == *"(version)"*"system-type"*"find-system-path"* ]]; then
+                                printf '9.90-local\nchez-scheme\n'
+                                exit 0
+                              fi
                               case "$2" in
                                 *"(version)"*) printf '9.90-local'; exit 0 ;;
                                 *"system-type 'vm"*) printf 'cs'; exit 0 ;;
@@ -2102,3 +2129,417 @@
         (if old-cr
             (putenv "PLTCOMPILEDROOTS" old-cr)
             (putenv "PLTCOMPILEDROOTS" ""))))))
+
+  ;; Unit tests: compiled-roots-value
+  (check-equal? (compiled-roots-value "9.1" 'cs) "compiled/9.1-cs:."
+                "default roots (same) => . fallback")
+  (check-equal? (compiled-roots-value "9.1.0.3" 'bc) "compiled/9.1.0.3-bc:."
+                "multi-component version")
+  (check-equal? (compiled-roots-value "9.1" "cs") "compiled/9.1-cs:."
+                "string version + string variant")
+  (check-equal? (compiled-roots-value "9.1" 'cs '("/usr/lib/racket/compiled"))
+                "compiled/9.1-cs:/usr/lib/racket/compiled:."
+                "FHS layout: absolute reroot path + . for user code")
+  (check-equal? (compiled-roots-value "9.1" 'cs '("/abs/root" same))
+                "compiled/9.1-cs:/abs/root:."
+                "mixed roots: absolute + same (no duplicate .)")
+  (check-false (compiled-roots-value "9.1" 'unknown) "variant 'unknown disables")
+  (check-false (compiled-roots-value "local" 'cs) "\"local\" version disables")
+  (check-false (compiled-roots-value #f 'cs) "#f version disables")
+  (check-false (compiled-roots-value "9.1" #f) "#f variant disables")
+  (check-false (compiled-roots-value "" 'cs) "blank version disables")
+
+  ;; Unit tests: env-var-export-line — all vars exported unconditionally
+  (check-equal? (env-var-export-line "PLTADDONDIR" "/foo/bar")
+                "export PLTADDONDIR='/foo/bar'\n"
+                "PLTADDONDIR is exported unconditionally")
+  (check-equal? (env-var-export-line "PLTCOMPILEDROOTS" "compiled/9.1-cs:.")
+                "export PLTCOMPILEDROOTS='compiled/9.1-cs:.'\n"
+                "PLTCOMPILEDROOTS is exported unconditionally")
+
+  ;; Integration test: installed toolchain metadata includes PLTCOMPILEDROOTS
+  ;; and the dispatcher/env.sh honors the user's existing value
+  (with-temp-rackup-home
+   (lambda (tmp)
+     (ensure-index!)
+     (setup-hidden-runtime! tmp)
+     (define id "release-9.1-cs-x86_64-linux-full")
+     (define install-root (rackup-toolchain-install-dir id))
+     (define real-bin (build-path install-root "bin"))
+     (make-directory* real-bin)
+     (write-string-file (build-path real-bin "racket")
+                        "#!/usr/bin/env bash\necho test\n")
+     (file-or-directory-permissions (build-path real-bin "racket") #o755)
+     (define print-cr (build-path real-bin "print-compiled-roots"))
+     (write-string-file print-cr
+                        "#!/usr/bin/env bash\nprintf 'PLTCOMPILEDROOTS=%s\\n' \"${PLTCOMPILEDROOTS:-}\"\n")
+     (file-or-directory-permissions print-cr #o755)
+     (make-file-or-directory-link real-bin (rackup-toolchain-bin-link id))
+
+     ;; Simulate install-time env-var computation
+     (define env-vars (installed-toolchain-env-vars real-bin
+                                                    (hash 'resolved-version "9.1"
+                                                          'variant 'cs)))
+     (check-not-false (assoc "PLTCOMPILEDROOTS" env-vars)
+                      "installed-toolchain-env-vars returns PLTCOMPILEDROOTS entry")
+     (check-equal? (cdr (assoc "PLTCOMPILEDROOTS" env-vars)) "compiled/9.1-cs:."
+                   "PLTCOMPILEDROOTS value matches compiled-roots-value")
+
+     (with-state-lock
+       (register-toolchain! id
+                            (hash 'id id 'kind 'release 'requested-spec "9.1"
+                                  'resolved-version "9.1" 'variant 'cs 'distribution 'full
+                                  'arch "x86_64" 'platform "linux"
+                                  'env-vars (for/list ([kv (in-list env-vars)])
+                                              (list (car kv) (cdr kv)))
+                                  'executables '("racket" "print-compiled-roots")
+                                  'installed-at "2026-03-01T00:00:00Z")))
+     ;; Write the env.sh as the install flow would
+     (write-toolchain-env-file! id env-vars)
+
+     ;; env.sh should contain an unconditional export for PLTCOMPILEDROOTS
+     (define env-sh-content
+       (file->string (rackup-toolchain-env-file id)))
+     (check-true (string-contains? env-sh-content "export PLTCOMPILEDROOTS='compiled/9.1-cs:.'")
+                 "env.sh contains unconditional PLTCOMPILEDROOTS export")
+     (check-false (regexp-match? #px"if \\[ -z \"\\$\\{PLTCOMPILEDROOTS:-\\}\" \\];"
+                                 env-sh-content)
+                  "env.sh does NOT use conditional guard")
+
+     ;; Verify rackup run respects user-set PLTCOMPILEDROOTS
+     (define old-cr (getenv "PLTCOMPILEDROOTS"))
+     (dynamic-wind
+      (lambda ()
+        (putenv "PLTCOMPILEDROOTS" "user-override"))
+      (lambda ()
+        (expect (begin (apply system* rackup-bin (list "run" id "--" "print-compiled-roots")) (void))
+                "PLTCOMPILEDROOTS=user-override" #:match 'contains))
+      (lambda ()
+        (if old-cr
+            (putenv "PLTCOMPILEDROOTS" old-cr)
+            (putenv "PLTCOMPILEDROOTS" ""))))
+
+     ;; And when user has no PLTCOMPILEDROOTS, rackup run sets the toolchain default
+     (dynamic-wind
+      (lambda () (putenv "PLTCOMPILEDROOTS" ""))
+      (lambda ()
+        (expect (begin (apply system* rackup-bin (list "run" id "--" "print-compiled-roots")) (void))
+                "PLTCOMPILEDROOTS=compiled/9.1-cs:." #:match 'contains))
+      (lambda ()
+        (if old-cr
+            (putenv "PLTCOMPILEDROOTS" old-cr)
+            (putenv "PLTCOMPILEDROOTS" ""))))))
+
+  ;; Integration test: clean-toolchain-compiled-dirs! walks linked package
+  ;; directories (reported by the toolchain's racket) and removes
+  ;; compiled/<key>/ subdirs.
+  (with-temp-rackup-home
+   (lambda (tmp)
+     (ensure-index!)
+     (define id "release-9.1-cs-x86_64-linux-full")
+     (define install-root (rackup-toolchain-install-dir id))
+     (define real-bin (build-path install-root "bin"))
+     (make-directory* real-bin)
+
+     ;; Build a fake package source tree with compiled/<key>/ dirs at two
+     ;; nesting levels and an unrelated compiled/other/ dir that must
+     ;; NOT be removed.
+     (define pkg-dir (build-path tmp "fake-pkg"))
+     (make-directory* (build-path pkg-dir "compiled" "9.1-cs"))
+     (make-directory* (build-path pkg-dir "compiled" "other"))
+     (make-directory* (build-path pkg-dir "sub" "compiled" "9.1-cs"))
+     (write-string-file (build-path pkg-dir "compiled" "9.1-cs" "foo.zo") "zo")
+     (write-string-file (build-path pkg-dir "compiled" "other" "foo.zo") "zo")
+     (write-string-file (build-path pkg-dir "sub" "compiled" "9.1-cs" "bar.zo") "zo")
+
+     ;; Fake racket prints the package source directory, mimicking the
+     ;; Racket program that uses pkg/lib.  Only -e invocations matter;
+     ;; ignore other raco subcommands for this test.
+     (define racket-exe (build-path real-bin "racket"))
+     (write-string-file racket-exe
+                        (string-append
+                         "#!/usr/bin/env bash\n"
+                         "if [ \"${1:-}\" = \"-e\" ]; then\n"
+                         "  printf '%s\\n' " (sh-single-quote (path->string pkg-dir)) "\n"
+                         "  exit 0\n"
+                         "fi\n"
+                         "exit 0\n"))
+     (file-or-directory-permissions racket-exe #o755)
+     (make-file-or-directory-link real-bin (rackup-toolchain-bin-link id))
+
+     (with-state-lock
+       (register-toolchain! id
+                            (hash 'id id 'kind 'release 'requested-spec "9.1"
+                                  'resolved-version "9.1" 'variant 'cs 'distribution 'full
+                                  'arch "x86_64" 'platform "linux"
+                                  'executables '("racket")
+                                  'installed-at "2026-03-01T00:00:00Z")))
+
+     ;; Sanity: all three compiled dirs exist up front
+     (check-true (directory-exists? (build-path pkg-dir "compiled" "9.1-cs")))
+     (check-true (directory-exists? (build-path pkg-dir "compiled" "other")))
+     (check-true (directory-exists? (build-path pkg-dir "sub" "compiled" "9.1-cs")))
+
+     (clean-toolchain-compiled-dirs! id)
+
+     ;; The version-specific dirs should be removed, the unrelated one kept
+     (check-false (directory-exists? (build-path pkg-dir "compiled" "9.1-cs"))
+                  "top-level compiled/9.1-cs removed")
+     (check-false (directory-exists? (build-path pkg-dir "sub" "compiled" "9.1-cs"))
+                  "nested compiled/9.1-cs removed")
+     (check-true (directory-exists? (build-path pkg-dir "compiled" "other"))
+                 "compiled/other preserved")
+     (check-true (file-exists? (build-path pkg-dir "compiled" "other" "foo.zo"))
+                 "compiled/other contents preserved")))
+
+  ;; End-to-end integration test: after the shell-activation pipeline has
+  ;; established PLTCOMPILEDROOTS, `raco make` compiles into the
+  ;; version-variant subdirectory rather than the default `compiled`
+  ;; directory.  Uses the real system racket/raco via symlinks into a
+  ;; fake toolchain bin dir so that compilation actually happens.
+  (let ()
+    (define real-racket
+      (simplify-path (resolve-path (find-system-path 'exec-file)) #t))
+    (define real-bin-dir (let-values ([(d _ __) (split-path real-racket)]) d))
+    (define real-raco
+      (and real-bin-dir (build-path real-bin-dir "raco")))
+    (when (and real-bin-dir (file-exists? (or real-raco "")))
+      (with-temp-rackup-home
+       (lambda (tmp)
+         (ensure-index!)
+         (setup-hidden-runtime! tmp)
+         (define id "release-test-cs-x86_64-linux-full")
+         (define install-root (rackup-toolchain-install-dir id))
+         (define tc-bin (build-path install-root "bin"))
+         (make-directory* tc-bin)
+         ;; Symlink every executable from the real bin dir so raco can
+         ;; find racket, and any helper tools it needs, in the same dir.
+         (for ([entry (in-list (directory-list real-bin-dir))])
+           (define src (build-path real-bin-dir entry))
+           (define dst (build-path tc-bin entry))
+           (when (and (file-exists? src) (not (directory-exists? src)))
+             (make-file-or-directory-link src dst)))
+         (make-file-or-directory-link tc-bin (rackup-toolchain-bin-link id))
+
+         ;; Use the real bin dir to read config.rktd (the temp dir has no
+         ;; etc/ alongside it).  This mirrors what rackup install does:
+         ;; the real-bin-dir points at the actual installation.
+         (define existing-roots
+           (read-toolchain-compiled-file-roots real-bin-dir))
+         (define env-vars
+           (list (cons "PLTCOMPILEDROOTS"
+                       (compiled-roots-value "test" "cs" existing-roots))))
+         (check-not-false (assoc "PLTCOMPILEDROOTS" env-vars)
+                          "end-to-end: PLTCOMPILEDROOTS is computed")
+
+         (with-state-lock
+           (register-toolchain! id
+                                (hash 'id id 'kind 'release 'requested-spec "test"
+                                      'resolved-version "test" 'variant 'cs
+                                      'distribution 'full 'arch "x86_64"
+                                      'platform "linux"
+                                      'env-vars (for/list ([kv (in-list env-vars)])
+                                                  (list (car kv) (cdr kv)))
+                                      'executables '("racket" "raco")
+                                      'installed-at "2026-04-01T00:00:00Z"))
+           (set-default-toolchain! id)
+           (reshim!))
+         ;; Write env.sh so the shim dispatcher picks up PLTCOMPILEDROOTS
+         (write-toolchain-env-file! id env-vars)
+
+         ;; Create a trivial source file in a scratch directory
+         (define work-dir (build-path tmp "work"))
+         (make-directory* work-dir)
+         (define src-file (build-path work-dir "hello.rkt"))
+         (write-string-file src-file "#lang racket/base\n(define x 42)\n(provide x)\n")
+
+         ;; Simulate `rackup switch <id>` by exporting RACKUP_TOOLCHAIN
+         ;; and invoking `raco make` through the rackup shim.
+         (define old-toolchain (getenv "RACKUP_TOOLCHAIN"))
+         (define old-pltcr (getenv "PLTCOMPILEDROOTS"))
+         (define old-pltaddon (getenv "PLTADDONDIR"))
+         (define old-pltcollects (getenv "PLTCOLLECTS"))
+         (dynamic-wind
+          (lambda ()
+            (putenv "RACKUP_TOOLCHAIN" id)
+            (putenv "PLTCOMPILEDROOTS" "")
+            (putenv "PLTADDONDIR" "")
+            (putenv "PLTCOLLECTS" ""))
+          (lambda ()
+            (define raco-shim (build-path (rackup-shims-dir) "raco"))
+            (check-true (link-exists? raco-shim) "raco shim exists after reshim")
+            (define-values (proc stdout stdin stderr)
+              (subprocess #f #f #f
+                          raco-shim "make" (path->string src-file)))
+            (close-output-port stdin)
+            (subprocess-wait proc)
+            (define out-str (port->string stdout))
+            (define err-str (port->string stderr))
+            (close-input-port stdout)
+            (close-input-port stderr)
+            (check-equal? (subprocess-status proc) 0
+                          (format "raco make succeeded; stdout=~a stderr=~a"
+                                  out-str err-str))
+            ;; The versioned compiled dir must exist with the .zo inside.
+            ;; On CS the machine-specific .zo lives under a machine-type
+            ;; subdir (e.g., compiled/test-cs/ta6le/), so search for any
+            ;; hello_rkt.zo beneath compiled/test-cs/.
+            (define versioned-dir (build-path work-dir "compiled" "test-cs"))
+            (check-true (directory-exists? versioned-dir)
+                        (format "compiled/test-cs exists; stderr=~a" err-str))
+            (define found-zo
+              (for/or ([p (in-directory versioned-dir)])
+                (and (equal? (path-basename-string p) "hello_rkt.zo") p)))
+            (check-not-false found-zo
+                             (format "hello_rkt.zo exists under compiled/test-cs (listing=~a)"
+                                     (with-handlers ([exn:fail? (lambda (_) "?")])
+                                       (for/list ([p (in-directory versioned-dir)]) (path->string p)))))
+            ;; And the plain compiled/ dir must NOT have picked up a
+            ;; hello_rkt.zo at the top level (Chez machine-type
+            ;; subdirs under compiled/test-cs/ are fine).
+            (define plain-zo (build-path work-dir "compiled" "hello_rkt.zo"))
+            (check-false (file-exists? plain-zo)
+                         "plain compiled/hello_rkt.zo should not exist")
+
+            ;; Startup time test: `racket -e 1` through the shim must
+            ;; not be significantly slower than without PLTCOMPILEDROOTS.
+            ;; The . fallback in PLTCOMPILEDROOTS must resolve existing
+            ;; compiled files; if it doesn't (e.g., using @ instead of .),
+            ;; Racket re-expands from source and takes ~14s instead of ~0.2s.
+            (define racket-shim (build-path (rackup-shims-dir) "racket"))
+            (define t0 (current-inexact-milliseconds))
+            (define-values (tp tp-out tp-in tp-err)
+              (subprocess #f #f #f racket-shim "-e" "1"))
+            (close-output-port tp-in)
+            (subprocess-wait tp)
+            (define tp-out-str (port->string tp-out))
+            (define tp-err-str (port->string tp-err))
+            (close-input-port tp-out)
+            (close-input-port tp-err)
+            (define elapsed-ms (- (current-inexact-milliseconds) t0))
+            (check-equal? (subprocess-status tp) 0
+                          (format "racket -e 1 through shim failed (exit ~a, stderr=~a)"
+                                  (subprocess-status tp) tp-err-str))
+            (check-true (< elapsed-ms 10000)
+                        (format "racket -e 1 through shim took ~ams (should be <10s; >10s means compiled-file fallback is broken)"
+                                (inexact->exact (round elapsed-ms)))))
+          (lambda ()
+            (if old-toolchain
+                (putenv "RACKUP_TOOLCHAIN" old-toolchain)
+                (putenv "RACKUP_TOOLCHAIN" ""))
+            (if old-pltcr
+                (putenv "PLTCOMPILEDROOTS" old-pltcr)
+                (putenv "PLTCOMPILEDROOTS" ""))
+            (if old-pltaddon
+                (putenv "PLTADDONDIR" old-pltaddon)
+                (putenv "PLTADDONDIR" ""))
+            (if old-pltcollects
+                (putenv "PLTCOLLECTS" old-pltcollects)
+                (putenv "PLTCOLLECTS" ""))))))))
+
+  ;; Direct test: setting PLTCOMPILEDROOTS with correct fallback roots
+  ;; must not cause a startup penalty.  This catches regressions like
+  ;; using @ instead of . (which breaks compiled-file resolution and
+  ;; causes a ~14s re-expansion penalty).
+  ;;
+  ;; Reads the running Racket's existing compiled-file-roots from its
+  ;; config.rktd and constructs the PLTCOMPILEDROOTS value the same way
+  ;; rackup would at install time.  This works for both in-place layouts
+  ;; (fallback = .) and FHS layouts (fallback = absolute reroot path).
+  (let ()
+    (define real-racket
+      (simplify-path (resolve-path (find-system-path 'exec-file)) #t))
+    (define real-bin-dir (let-values ([(d _ __) (split-path real-racket)]) d))
+    (when real-bin-dir
+      (define existing-roots (read-toolchain-compiled-file-roots real-bin-dir))
+      (define pcr-value (compiled-roots-value "test" "cs" existing-roots))
+      (when pcr-value
+        ;; Start from a clean environment to avoid interference from the
+        ;; test harness's RACKUP_* variables.
+        (define env (environment-variables-copy (current-environment-variables)))
+        (environment-variables-set!
+         env #"PLTCOMPILEDROOTS" (string->bytes/utf-8 pcr-value))
+        ;; Clear any test-harness vars that might confuse the child racket
+        (for ([var (in-list '(#"RACKUP_HOME" #"RACKUP_TESTING" #"RACKUP_TOOLCHAIN"
+                              #"PLTADDONDIR" #"PLTCOLLECTS" #"PLTUSERHOME"))])
+          (environment-variables-set! env var #f))
+        (define t0 (current-inexact-milliseconds))
+        (define-values (proc out in err)
+          (parameterize ([current-environment-variables env])
+            (subprocess #f #f #f real-racket "-e" "1")))
+        (close-output-port in)
+        (subprocess-wait proc)
+        (define out-str (port->string out))
+        (define err-str (port->string err))
+        (close-input-port out)
+        (close-input-port err)
+        (define elapsed-ms (- (current-inexact-milliseconds) t0))
+        (check-equal? (subprocess-status proc) 0
+                      (format "racket -e 1 with PLTCOMPILEDROOTS=~a failed (exit ~a, stderr=~a)"
+                              pcr-value (subprocess-status proc) err-str))
+        (check-true (< elapsed-ms 10000)
+                    (format "PLTCOMPILEDROOTS=~a startup took ~ams (should be <10s)"
+                            pcr-value (inexact->exact (round elapsed-ms)))))))
+
+  ;; Migration test: an installed toolchain whose meta.rktd predates
+  ;; per-toolchain PLTCOMPILEDROOTS gets the entry backfilled by
+  ;; reshim! (which runs on every state change).  Both meta.rktd and
+  ;; env.sh should be updated.
+  (with-temp-rackup-home
+   (lambda (tmp)
+     (ensure-index!)
+     (define id "release-9.1-cs-x86_64-linux-full")
+     (define install-root (rackup-toolchain-install-dir id))
+     (define real-bin (build-path install-root "bin"))
+     (make-directory* real-bin)
+     (write-string-file (build-path real-bin "racket")
+                        "#!/usr/bin/env bash\nexit 0\n")
+     (file-or-directory-permissions (build-path real-bin "racket") #o755)
+     (make-file-or-directory-link real-bin (rackup-toolchain-bin-link id))
+
+     ;; Register the toolchain as if it had been installed by an older
+     ;; rackup: env-vars is empty (no PLTCOMPILEDROOTS).
+     (with-state-lock
+       (register-toolchain! id
+                            (hash 'id id 'kind 'release 'requested-spec "9.1"
+                                  'resolved-version "9.1" 'variant 'cs
+                                  'distribution 'full 'arch "x86_64"
+                                  'platform "linux"
+                                  'env-vars '()
+                                  'executables '("racket")
+                                  'installed-at "2026-02-01T00:00:00Z")))
+
+     ;; Sanity: nothing has PLTCOMPILEDROOTS yet
+     (check-false (assoc "PLTCOMPILEDROOTS" (toolchain-env-vars id))
+                  "before reshim: no PLTCOMPILEDROOTS in meta")
+     (check-false (file-exists? (rackup-toolchain-env-file id))
+                  "before reshim: no env.sh")
+
+     ;; Run reshim - this is what every state-changing rackup command
+     ;; (and `rackup reshim`) eventually triggers.
+     (with-state-lock (reshim!))
+
+     ;; meta.rktd now has PLTCOMPILEDROOTS
+     (define after-env-vars (toolchain-env-vars id))
+     (define pcr-pair (assoc "PLTCOMPILEDROOTS" after-env-vars))
+     (check-not-false pcr-pair "after reshim: PLTCOMPILEDROOTS backfilled in meta")
+     (check-equal? (cdr pcr-pair) "compiled/9.1-cs:."
+                   "after reshim: PLTCOMPILEDROOTS value matches version-variant")
+
+     ;; env.sh now exists with unconditional export
+     (check-true (file-exists? (rackup-toolchain-env-file id))
+                 "after reshim: env.sh written")
+     (define env-sh-content (file->string (rackup-toolchain-env-file id)))
+     (check-true (string-contains? env-sh-content "export PLTCOMPILEDROOTS='compiled/9.1-cs:.'")
+                 "after reshim: env.sh contains unconditional PLTCOMPILEDROOTS export")
+     (check-false (regexp-match? #px"if \\[ -z \"\\$\\{PLTCOMPILEDROOTS:-\\}\" \\];"
+                                 env-sh-content)
+                  "after reshim: env.sh does NOT use conditional guard")
+
+     ;; Idempotent: a second reshim does not duplicate the entry
+     (with-state-lock (reshim!))
+     (define after-env-vars-2 (toolchain-env-vars id))
+     (check-equal? (length (filter (lambda (kv) (equal? (car kv) "PLTCOMPILEDROOTS"))
+                                   after-env-vars-2))
+                   1
+                   "second reshim is idempotent")))

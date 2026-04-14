@@ -415,9 +415,13 @@
      (restore-saved-racket-env-vars! env)
      (environment-variables-set! env #"RACKUP_TOOLCHAIN" (string->bytes/utf-8 id))
      (for ([kv (in-list (toolchain-runtime-env-vars id))])
-       (environment-variables-set! env
-                                   (string->bytes/utf-8 (car kv))
-                                   (string->bytes/utf-8 (cdr kv))))
+       (define key (string->bytes/utf-8 (car kv)))
+       ;; For PLTCOMPILEDROOTS, respect a user-set value restored above.
+       (unless (and (equal? (car kv) "PLTCOMPILEDROOTS")
+                    (environment-variables-ref env key))
+         (environment-variables-set! env
+                                     key
+                                     (string->bytes/utf-8 (cdr kv)))))
      (define old-path (or (getenv "PATH") ""))
      (define shims (path->string (rackup-shims-dir)))
      (define runtime-path
@@ -478,19 +482,29 @@
             (if (= (length targets) 1) "" "s"))))
 
 (define (cmd-remove rest)
+  (define clean-compiled? #f)
   (define spec
     (command-line #:program "rackup remove"
                   #:argv rest
+                  #:once-each
+                  [("--clean-compiled")
+                   ("Remove version-specific compiled/<key>/ directories"
+                    "from user-scope and linked package source directories")
+                   (set! clean-compiled? #t)]
                   #:args (spec)
                   spec))
   (define installed-id (find-local-toolchain spec))
   (cond
-    [installed-id (remove-toolchain! installed-id)]
+    [installed-id (remove-toolchain! installed-id #:clean-compiled? clean-compiled?)]
     [else
      (define orphan-id (find-orphan-toolchain-id spec))
-     (if orphan-id
-         (remove-orphan-toolchain! orphan-id)
-         (rackup-error "no matching installed toolchain: ~a" spec))]))
+     (cond
+       [orphan-id
+        (when clean-compiled?
+          (rackup-error "--clean-compiled cannot be used with orphan toolchains"))
+        (remove-orphan-toolchain! orphan-id)]
+       [else
+        (rackup-error "no matching installed toolchain: ~a" spec)])]))
 
 (define (cmd-reshim rest)
   (define aliases? #f)
