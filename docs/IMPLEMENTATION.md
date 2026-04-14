@@ -133,26 +133,50 @@ Several inputs from the environment are validated before use:
 
 When `bin/rackup` starts, it saves any user-set Racket environment variables (`PLTCOLLECTS`, `PLTADDONDIR`, `PLTCOMPILEDROOTS`, `PLTUSERHOME`, `RACKET_XPATCH`, `PLT_COMPILED_FILE_CHECK`) as `_RACKUP_ORIG_*` and then unsets the originals. This prevents the user's Racket environment from interfering with rackup's own runtime (whether hidden runtime or embedded exe). `PLTHOME` is not included because it is not a Racket environment variable (it is a convention from the `plt-bin` script in `racket-dev-goodies`).
 
-When `rackup run` spawns a subprocess, `restore-saved-racket-env-vars!` in `util.rkt` first restores the user's original Racket environment variables from the `_RACKUP_ORIG_*` copies. Then `cmd-run` overlays the target toolchain's managed environment variables on top (currently only `PLTADDONDIR`). This means a user-set `PLTCOLLECTS` passes through to the toolchain's Racket, allowing users to add collection directories that are available regardless of which toolchain is active.
+When `rackup run` spawns a subprocess, `restore-saved-racket-env-vars!` in `util.rkt` first restores the user's original Racket environment variables from the `_RACKUP_ORIG_*` copies. Then `cmd-run` overlays the target toolchain's managed environment variables on top (`PLTADDONDIR`, and `PLTCOMPILEDROOTS` unless the user has set their own). This means a user-set `PLTCOLLECTS` passes through to the toolchain's Racket, allowing users to add collection directories that are available regardless of which toolchain is active.
 
 ## Per-toolchain env.sh
 
 The shim dispatcher sources a per-toolchain `env.sh` file if present. For linked (local) toolchains, the env file is regenerated on every `reshim!` call by `regenerate-env-files!` in `shims.rkt`, because the source tree layout may change. If a local toolchain has no derivable env vars (e.g., the source root cannot be located), the env file is deleted rather than written empty. Installed (release/snapshot) toolchains do not have env files.
 
-The env file exports only `PLTADDONDIR` when a value can be computed. Neither `PLTHOME` nor `PLTCOLLECTS` is set — the Racket binary finds its own collections via compiled-in relative paths, and `PLTHOME` is not a Racket environment variable. The one exception is old PLT Scheme installations (version <= 4.x) where the parent directory is named `plt`: these set `PLTHOME` because PLT Scheme's `bin/mzscheme` shell wrapper uses it to locate the real binary under `.bin/<archsys>/`. If `PLTADDONDIR` is still unset after sourcing (or if no env file exists), the dispatcher synthesizes a fallback value (`~/.rackup/addons/<id>`).
+The env file exports all variables unconditionally (`PLTADDONDIR`, `PLTCOMPILEDROOTS`). The shim dispatcher sources env.sh per-invocation, so these are scoped to each subprocess — they do not leak into the user's shell. Neither `PLTHOME` nor `PLTCOLLECTS` is set — the Racket binary finds its own collections via compiled-in relative paths, and `PLTHOME` is not a Racket environment variable. The one exception is old PLT Scheme installations (version <= 4.x) where the parent directory is named `plt`: these set `PLTHOME` because PLT Scheme's `bin/mzscheme` shell wrapper uses it to locate the real binary under `.bin/<archsys>/`. If `PLTADDONDIR` is still unset after sourcing (or if no env file exists), the dispatcher synthesizes a fallback value (`~/.rackup/addons/<id>`).
 
-## Post-self-upgrade reshim
+## Per-toolchain PLTCOMPILEDROOTS
 
-`cmd-self-upgrade` invokes `rackup reshim` in a subprocess after a successful update, so the freshly-installed rackup code drives the reshim. Running reshim in-process would use the old in-memory code and miss any new migration logic introduced by the upgrade.
+Different Racket versions (and CS vs BC) produce incompatible `.zo` bytecode. To prevent cross-version contamination in `compiled/` directories under user source trees, rackup sets `PLTCOMPILEDROOTS` per toolchain so each version+variant writes compiled output to its own subdirectory while preserving access to the toolchain's existing compiled files.
+
+### How the value is constructed
+
+At toolchain install or link time, `compiled-roots-value` in `state.rkt` constructs a colon-separated PLTCOMPILEDROOTS string:
+
+1. The first entry is `compiled/<version>-<variant>` (e.g., `compiled/9.1-cs`), which is where new `.zo` files are written.
+2. The remaining entries are the toolchain's existing `compiled-file-roots`, read from its `config.rktd` by `read-toolchain-compiled-file-roots`. This preserves the toolchain's native compiled-file layout:
+   - **In-place installs** (rackup's default): existing roots = `(same)`, serialized as `.` → `compiled/9.1-cs:.`
+   - **FHS installs** (e.g., setup-racket on CI): existing roots include an absolute reroot path → `compiled/9.1-cs:/usr/lib/racket/compiled:.`
+3. `.` (equivalent to `'same`) is always included in the fallbacks so that user code's `compiled/` directories are found regardless of install layout.
+
+The `'same` symbol in `current-compiled-file-roots` cannot be spelled directly in PLTCOMPILEDROOTS because `path-list-string->path-list` converts all entries to path objects. However, `.` is a relative path that `(build-path dir ".")` resolves to `dir` itself, which is functionally equivalent.
+
+For linked toolchains where version or variant cannot be probed, PLTCOMPILEDROOTS is omitted. The value flows through the existing `env-vars` metadata pipeline: `write-env-file!`/`write-toolchain-env-file!` emits an unconditional export in env.sh (sourced per-invocation by the shim dispatcher), and `cmd-run` in `main.rkt` preserves a user-restored value before overlaying toolchain env vars. Racket-specific env vars are **not** exported into the user's shell by `rackup switch` — only `RACKUP_TOOLCHAIN` and `PATH` are set in the shell, to avoid leaking into non-rackup commands like `make install` in a source checkout.
+
+### Migration for existing installs
+
+Toolchains installed by an older rackup do not have PLTCOMPILEDROOTS in their `meta.rktd`. `regenerate-env-files!` in `shims.rkt` backfills it: on every `reshim!` call (which runs as part of `commit-state-change!` for any state-modifying command), each installed toolchain's metadata is checked, and if it lacks PLTCOMPILEDROOTS but the version+variant yield a value, the entry is added to `meta.rktd` and `env.sh` is rewritten. The backfill is idempotent — subsequent reshims see the entry and do nothing. Users only need to run any state-changing command (e.g., `rackup reshim`, `rackup install`, `rackup upgrade`) after upgrading rackup to pick up the new PLTCOMPILEDROOTS for existing toolchains.
+
+### Cleaning up on removal
+
+`rackup remove <toolchain> --clean-compiled` removes `compiled/<key>/` subdirectories from user package source trees before removing the toolchain. The toolchain's install directory and addon directory are fully deleted by `remove-toolchain!`, so those don't need explicit cleanup — this flag targets the directories that persist afterwards: user-scope catalog packages (which live under the addon dir) and linked packages (`raco pkg install --link <dir>`) whose source trees are anywhere on disk.
+
+The implementation runs the toolchain's own `racket -e` with a small program that uses `pkg/lib`'s `installed-pkg-table` and `pkg-directory` to print the absolute source directory of every user-scope package, then walks each directory to find and delete `compiled/<key>/` subdirectories.
 
 ## Shell integration
 
 `rackup init` writes a managed block into `~/.bashrc` or `~/.zshrc` delimited by marker comments (`# >>> rackup initialize >>>`). The managed block:
 
 1. Prepends `~/.rackup/shims` to `PATH`.
-2. Defines a `rackup()` shell function that intercepts `rackup switch` and `rackup shell` commands, evals the output (shell code that sets environment variables), and delegates everything else to the real `rackup` binary.
+2. Defines a `rackup()` shell function that intercepts `rackup switch` and `rackup shell` commands, evals the output (shell code that sets `RACKUP_TOOLCHAIN`), and delegates everything else to the real `rackup` binary.
 
-The shell function is necessary because a child process cannot modify its parent's environment. `rackup switch stable` emits shell code like `export RACKUP_TOOLCHAIN=release-9.1-cs-x86_64-linux-full; export PLTHOME=...`, and the shell function evals it in the current shell.
+The shell function is necessary because a child process cannot modify its parent's environment. `rackup switch stable` emits shell code like `export RACKUP_TOOLCHAIN=release-9.1-cs-x86_64-linux-full`, and the shell function evals it in the current shell. Racket-specific env vars (`PLTADDONDIR`, `PLTCOMPILEDROOTS`, `PLTHOME`) are not exported into the shell — they are set internally by the shim dispatcher via env.sh, scoped to each subprocess invocation. This prevents them from leaking into non-rackup commands.
 
 Tab completion scripts for bash and zsh are generated by `shell.rkt` and written to `~/.rackup/shell/rackup.{bash,zsh}`. The completion functions enumerate installed toolchains by listing the `~/.rackup/toolchains/` directory.
 
