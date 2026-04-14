@@ -67,6 +67,15 @@ workflows (`.github/workflows/`), and install scripts
 (`scripts/install.sh`) for the corresponding generation step. If it
 doesn't exist, add it in the same commit.
 
+## Testing Racket behavior
+
+When investigating how Racket handles environment variables
+(`PLTADDONDIR`, `PLTCOMPILEDROOTS`, etc.), always use the actual
+Racket binary (`/home/samth/sw/plt/racket/bin/racket` or similar),
+not `racket` through the rackup shim. The shim dispatcher saves,
+unsets, and re-sets Racket env vars, so testing through the shim
+gives misleading results about Racket's native behavior.
+
 ## Code ownership
 
 We own the entire project. There is no public API. Feel free to change any module's exports, signatures, or internal structure as needed — no backwards-compatibility workarounds required.

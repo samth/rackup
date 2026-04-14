@@ -354,7 +354,7 @@ EOF
                    "# rackup managed toolchain environment\n"
                    (apply string-append
                           (for/list ([kv (in-list env-vars)])
-                            (format "export ~a=~a\n" (car kv) (sh-single-quote (cdr kv)))))))
+                            (env-var-export-line (car kv) (cdr kv))))))
   (write-string-file p body)
   (file-or-directory-permissions p #o644))
 
@@ -373,25 +373,65 @@ EOF
     (or old-addon-dir
         (and source-root
              (path->string* (build-path (string->path source-root) "add-on")))))
-  (if (and (string? effective-addon-dir) (not (string-blank? effective-addon-dir)))
-      (list (cons "PLTADDONDIR" effective-addon-dir))
-      null))
+  (define addon-entry
+    (if (and (string? effective-addon-dir) (not (string-blank? effective-addon-dir)))
+        (list (cons "PLTADDONDIR" effective-addon-dir))
+        null))
+  (define real-bin-dir-str (hash-ref meta 'real-bin-dir #f))
+  (define existing-roots
+    (if real-bin-dir-str
+        (read-toolchain-compiled-file-roots (string->path real-bin-dir-str))
+        '(same)))
+  (define compiled-roots-entry
+    (cond
+      [(compiled-roots-value (hash-ref meta 'resolved-version #f)
+                             (hash-ref meta 'variant #f)
+                             existing-roots)
+       =>
+       (lambda (v) (list (cons "PLTCOMPILEDROOTS" v)))]
+      [else null]))
+  (append addon-entry compiled-roots-entry))
+
+;; Backfill PLTCOMPILEDROOTS into an installed toolchain whose metadata
+;; predates per-toolchain compiled roots.  Adds the entry to env-vars in
+;; meta.rktd and rewrites env.sh.  Idempotent: does nothing if the
+;; toolchain already has PLTCOMPILEDROOTS or if a value cannot be
+;; computed from its version+variant.
+(define (backfill-installed-env-vars! id meta)
+  (define current (meta->env-vars meta))
+  (define has-pcr? (assoc "PLTCOMPILEDROOTS" current))
+  (define computed-pcr
+    (compiled-roots-value (hash-ref meta 'resolved-version #f)
+                          (hash-ref meta 'variant #f)))
+  (when (and computed-pcr (not has-pcr?))
+    (define new-env-vars
+      (append current (list (cons "PLTCOMPILEDROOTS" computed-pcr))))
+    (define new-meta
+      (hash-set meta 'env-vars
+                (for/list ([kv (in-list new-env-vars)])
+                  (list (car kv) (cdr kv)))))
+    (write-toolchain-meta! id new-meta)
+    (write-env-file! id new-env-vars)))
 
 (define (regenerate-env-files!)
   (for ([id (in-list (installed-toolchain-ids))])
     (define meta (read-toolchain-meta id))
     (when (hash? meta)
       (define kind (hash-ref meta 'kind #f))
-      ;; Only regenerate env files for local (linked) toolchains, where
-      ;; the env vars are derived from the source layout and the
-      ;; computation may have changed.  Installed (release/snapshot)
-      ;; toolchains have env vars computed once at install time and
-      ;; stored in the meta; they don't need regeneration.
-      (when (eq? kind 'local)
-        (define env-vars (compute-local-env-vars meta))
-        (if (pair? env-vars)
-            (write-env-file! id env-vars)
-            (delete-env-file! id))))))
+      (cond
+        ;; Local (linked) toolchains: regenerate env vars from the
+        ;; source layout (which may have changed).
+        [(eq? kind 'local)
+         (define env-vars (compute-local-env-vars meta))
+         (if (pair? env-vars)
+             (write-env-file! id env-vars)
+             (delete-env-file! id))]
+        ;; Installed toolchains: env vars are normally computed once at
+        ;; install time and stored in meta, but backfill PLTCOMPILEDROOTS
+        ;; for toolchains that were installed by an older rackup which
+        ;; did not compute it.
+        [else
+         (backfill-installed-env-vars! id meta)]))))
 
 (define/state-locked (reshim!)
   (regenerate-env-files!)
