@@ -530,11 +530,11 @@
                     set -euo pipefail
                     if [[ "$#" -ge 2 && "$1" == "-e" ]]; then
                       if [[ "$2" == *"(version)"*"system-type"*"find-system-path"* ]]; then
-                        printf '9.99-local\nchez-scheme\n@|addon-dir|'
+                        printf '9.99\nchez-scheme\n@|addon-dir|'
                         exit 0
                       fi
                       case "$2" in
-                        *"(version)"*) printf '9.99-local'; exit 0 ;;
+                        *"(version)"*) printf '9.99'; exit 0 ;;
                         *"system-type 'vm"*) printf 'cs'; exit 0 ;;
                         *"find-system-path 'addon-dir"*) printf '@|addon-dir|'; exit 0 ;;
                       esac
@@ -571,6 +571,12 @@
      (check-not-false (member "scheme" (hash-ref linked-meta 'executables)))
      (check-not-false (member "petite" (hash-ref linked-meta 'executables)))
      (check-true (file-exists? (rackup-toolchain-env-file linked-id)))
+     ;; Linked toolchain env.sh should use a local-name-suffixed key so it
+     ;; doesn't share a compiled/<version>-<variant>/ dir with an
+     ;; installer-built toolchain at the same version+variant.
+     (let ([env-sh (file->string (rackup-toolchain-env-file linked-id))])
+       (check-true (string-contains? env-sh "compiled/9.99-cs-local-devsrc")
+                   "linked env.sh uses local-name-suffixed compiled dir"))
 
      (write-exe "racket"
                 @~a{#!/usr/bin/env bash
@@ -578,11 +584,11 @@
                     if [[ "$#" -ge 2 && "$1" == "-e" ]]; then
                       # Combined probe: all three queries in one -e call
                       if [[ "$2" == *"(version)"*"system-type"*"find-system-path"* ]]; then
-                        printf '9.98-local\nchez-scheme\n@|addon-dir|'
+                        printf '9.98\nchez-scheme\n@|addon-dir|'
                         exit 0
                       fi
                       case "$2" in
-                        *"(version)"*) printf '9.98-local'; exit 0 ;;
+                        *"(version)"*) printf '9.98'; exit 0 ;;
                         *"system-type 'vm"*) printf 'cs'; exit 0 ;;
                         *"find-system-path 'addon-dir"*) printf '@|addon-dir|'; exit 0 ;;
                       esac
@@ -593,7 +599,10 @@
                     printf 'ARGS=%s\n' "$*"
                     })
      (check-equal? (link-toolchain! "devsrc" (path->string src-root) '("--force")) linked-id)
-     (check-equal? (hash-ref (read-toolchain-meta linked-id) 'resolved-version) "9.98-local")
+     (check-equal? (hash-ref (read-toolchain-meta linked-id) 'resolved-version) "9.98")
+     (let ([env-sh (file->string (rackup-toolchain-env-file linked-id))])
+       (check-true (string-contains? env-sh "compiled/9.98-cs-local-devsrc")
+                   "relinked env.sh uses local-name-suffixed compiled dir"))
 
      (define shim-racket (build-path (rackup-shims-dir) "racket"))
      (define old-pltaddon (getenv "PLTADDONDIR"))
@@ -818,11 +827,11 @@
                             set -euo pipefail
                             if [[ "$#" -ge 2 && "$1" == "-e" ]]; then
                               if [[ "$2" == *"(version)"*"system-type"*"find-system-path"* ]]; then
-                                printf '9.90-local\nchez-scheme\n'
+                                printf '9.90\nchez-scheme\n'
                                 exit 0
                               fi
                               case "$2" in
-                                *"(version)"*) printf '9.90-local'; exit 0 ;;
+                                *"(version)"*) printf '9.90'; exit 0 ;;
                                 *"system-type 'vm"*) printf 'cs'; exit 0 ;;
                               esac
                             fi
@@ -2143,6 +2152,18 @@
   (check-equal? (compiled-roots-value "9.1" 'cs '("/abs/root" same))
                 "compiled/9.1-cs:/abs/root:."
                 "mixed roots: absolute + same (no duplicate .)")
+  (check-equal? (compiled-roots-value "9.1" 'cs '(same) "dev")
+                "compiled/9.1-cs-local-dev:."
+                "linked toolchain: local-name suffix distinguishes from installer")
+  (check-equal? (compiled-roots-value "9.1" 'cs '(same) #f)
+                "compiled/9.1-cs:."
+                "no local-name: no suffix")
+  (check-equal? (compiled-roots-value "9.1" 'cs '(same) "")
+                "compiled/9.1-cs:."
+                "blank local-name: no suffix")
+  (check-equal? (compiled-roots-value "9.1" 'cs '("/usr/lib/racket/compiled") "dev")
+                "compiled/9.1-cs-local-dev:/usr/lib/racket/compiled:."
+                "linked FHS layout: local-name applies to key only")
   (check-false (compiled-roots-value "9.1" 'unknown) "variant 'unknown disables")
   (check-false (compiled-roots-value "local" 'cs) "\"local\" version disables")
   (check-false (compiled-roots-value #f 'cs) "#f version disables")

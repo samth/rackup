@@ -518,7 +518,7 @@
               'pkgs-dir
               (and (directory-exists? pkgs) (path-complete-string pkgs)))])]))
 
-(define (local-layout-env-vars layout [addon-dir #f] [version #f] [variant #f])
+(define (local-layout-env-vars layout [addon-dir #f] [version #f] [variant #f] [local-name #f])
   (define source-root (hash-ref layout 'source-root #f))
   ;; For source checkouts, default PLTADDONDIR to <checkout>/add-on
   ;; (matching the plt-bin convention).
@@ -537,7 +537,7 @@
         '(same)))
   (define compiled-roots-entry
     (cond
-      [(compiled-roots-value version variant existing-roots)
+      [(compiled-roots-value version variant existing-roots local-name)
        =>
        (lambda (v) (list (cons "PLTCOMPILEDROOTS" v)))]
       [else null]))
@@ -808,7 +808,7 @@
              base-env-vars))
        (define-values (version* variant* addon-dir*)
          (probe-local-racket-version+variant+addon-dir (path->string* real-bin-dir) probe-env-vars))
-       (define env-vars (local-layout-env-vars layout addon-dir* version* variant*))
+       (define env-vars (local-layout-env-vars layout addon-dir* version* variant* name))
        (make-bin-overlay! id real-bin-dir extra-exes)
        (maybe-wrap-local-chez-extra-executables! id extra-exes layout)
        (if (pair? env-vars)
@@ -1066,9 +1066,14 @@
   (unless (hash? meta)
     (install-warn "Cannot clean compiled dirs: missing metadata for ~a" id)
     (set! meta (hash)))
+  (define local-name
+    (and (eq? (hash-ref meta 'kind #f) 'local)
+         (hash-ref meta 'requested-spec #f)))
   (define key-value
     (compiled-roots-value (hash-ref meta 'resolved-version #f)
-                          (hash-ref meta 'variant #f)))
+                          (hash-ref meta 'variant #f)
+                          '(same)
+                          local-name))
   (cond
     [(not key-value)
      (install-warn

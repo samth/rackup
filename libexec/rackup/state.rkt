@@ -168,12 +168,16 @@
 ;; roots.  `existing-roots` is a list as found in config.rktd's
 ;; 'compiled-file-roots key (e.g., (same) for in-place installs, or
 ;; ("/usr/lib/racket/compiled") for FHS installs).  When not provided,
-;; defaults to (same).
+;; defaults to (same).  `local-name` is the local name of a linked
+;; toolchain (e.g., "dev" for `rackup link dev`), and when non-#f is
+;; appended to the key so locally-built toolchains don't share
+;; compiled-file directories with release installs of the same
+;; version+variant.
 ;;
 ;; Returns a string like "compiled/9.1-cs:." or
-;; "compiled/9.1-cs:/usr/lib/racket/compiled", or #f when the
-;; version/variant are too incomplete to form a stable key.
-(define (compiled-roots-value version variant [existing-roots '(same)])
+;; "compiled/9.1-cs-local-dev:." (for linked toolchains), or #f when
+;; the version/variant are too incomplete to form a stable key.
+(define (compiled-roots-value version variant [existing-roots '(same)] [local-name #f])
   (define variant-str
     (cond
       [(symbol? variant) (and (not (eq? variant 'unknown)) (symbol->string variant))]
@@ -184,9 +188,14 @@
       [(and (string? version) (not (string-blank? version)) (not (equal? version "local")))
        version]
       [else #f]))
+  (define local-suffix
+    (cond
+      [(and (string? local-name) (not (string-blank? local-name)))
+       (format "-local-~a" local-name)]
+      [else ""]))
   (cond
     [(and version-str variant-str)
-     (define key (format "compiled/~a-~a" version-str variant-str))
+     (define key (format "compiled/~a-~a~a" version-str variant-str local-suffix))
      ;; Always include 'same (serialized as ".") so that user code's
      ;; compiled/ directories are found, even on FHS installs where the
      ;; existing roots only contain absolute reroot paths for system

@@ -382,11 +382,15 @@ EOF
     (if real-bin-dir-str
         (read-toolchain-compiled-file-roots (string->path real-bin-dir-str))
         '(same)))
+  (define local-name
+    (and (eq? (hash-ref meta 'kind #f) 'local)
+         (hash-ref meta 'requested-spec #f)))
   (define compiled-roots-entry
     (cond
       [(compiled-roots-value (hash-ref meta 'resolved-version #f)
                              (hash-ref meta 'variant #f)
-                             existing-roots)
+                             existing-roots
+                             local-name)
        =>
        (lambda (v) (list (cons "PLTCOMPILEDROOTS" v)))]
       [else null]))
