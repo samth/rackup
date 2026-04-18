@@ -536,11 +536,24 @@ if [ -z "$FROM_LOCAL" ] && [ "$FORCE_SOURCE" -eq 0 ]; then
           if command -v xattr >/dev/null 2>&1; then
             xattr -dr com.apple.quarantine "$PREFIX/bin" 2>/dev/null || true
           fi
+          # Ad-hoc sign on macOS so the binary passes code signature
+          # validation.  The build-time signature from a different macOS
+          # version may not be accepted by the user's OS (e.g., a binary
+          # signed on Sonoma is rejected by Tahoe).  Re-signing locally
+          # ensures the signature is produced by the local codesign tool.
+          if command -v codesign >/dev/null 2>&1; then
+            codesign --sign - --force "$PREFIX/bin/rackup-core" 2>/dev/null || true
+          fi
           if [ -d "$BINARY_DIR/lib" ]; then
             rm -rf "${PREFIX:?}/lib"
             cp -R "$BINARY_DIR/lib" "$PREFIX/lib"
             if command -v xattr >/dev/null 2>&1; then
               xattr -dr com.apple.quarantine "$PREFIX/lib" 2>/dev/null || true
+            fi
+            # Sign any dylibs as well.
+            if command -v codesign >/dev/null 2>&1; then
+              find "$PREFIX/lib" -type f \( -name '*.dylib' -o -name '*.so' \) \
+                -exec codesign --sign - --force {} \; 2>/dev/null || true
             fi
           fi
           cp "$BINARY_DIR/libexec/rackup-bootstrap.sh" "$PREFIX/libexec/rackup-bootstrap.sh"
