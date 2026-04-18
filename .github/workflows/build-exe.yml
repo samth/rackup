@@ -20,11 +20,14 @@ jobs:
             artifact_name: aarch64-linux
             setup_racket_arch: arm64
             cross_target: ""
-          - runs_on: macos-15-intel
+          # Build macOS binaries on macOS 26 so the ad-hoc code signature
+          # is produced by the latest codesign and accepted by macOS 26+
+          # kernels (which reject signatures from older macOS versions).
+          - runs_on: macos-26-intel
             artifact_name: x86_64-macosx
             setup_racket_arch: x64
             cross_target: ""
-          - runs_on: macos-14
+          - runs_on: macos-26
             artifact_name: aarch64-macosx
             setup_racket_arch: arm64
             cross_target: ""
