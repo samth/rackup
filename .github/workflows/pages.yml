@@ -3,19 +3,6 @@ name: Deploy Pages
 on:
   push:
     branches: [main]
-    paths:
-      - .github/workflows/pages.yml
-      - .github/workflows/build-exe.yml
-      - bin/**
-      - docker/**
-      - libexec/**
-      - pages/**
-      - pages/build-pages-site.rkt
-      - scripts/copy-filtered-tree.sh
-      - test/docker-test-fresh-install.sh
-      - test/e2e-fresh-container.sh
-      - scripts/install.sh
-      - scripts/build-dist.sh
   workflow_dispatch:
 
 permissions:
