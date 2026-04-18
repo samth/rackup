@@ -145,6 +145,14 @@ mkdir -p "$STAGE_DIR/bin" "$STAGE_DIR/libexec"
 cp "$DIST_DIR/bin/rackup-core" "$STAGE_DIR/bin/rackup-core"
 chmod +x "$STAGE_DIR/bin/rackup-core"
 
+# Ad-hoc sign on macOS. raco exe may invalidate the linker's automatic
+# signature by modifying the Mach-O after creation.  CI runners tolerate
+# invalid signatures, but user Macs with default security settings kill
+# the binary (Killed: 9 / SIGKILL from the kernel).
+if command -v codesign >/dev/null 2>&1; then
+  codesign --sign - --force "$STAGE_DIR/bin/rackup-core"
+fi
+
 if [ -d "$DIST_DIR/lib" ]; then
   cp -R "$DIST_DIR/lib" "$STAGE_DIR/lib"
 fi
