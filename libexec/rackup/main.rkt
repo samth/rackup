@@ -45,12 +45,33 @@
 (define (usage-line cmd desc)
   (printf "  ~a~a~a\n" cmd (make-string (max 2 (- 22 (string-length cmd))) #\space) desc))
 
+(define version-help
+  (string-append
+   "A <version> is a Racket release number (e.g. 8.18), or one of the channels:\n"
+   "stable, pre-release, snapshot, snapshot:utah, snapshot:northwestern.\n"
+   "Run `rackup available` to see installable versions and channels."))
+
+;; `command-line` requires #:usage-help strings to be literals, not a runtime
+;; identifier like `version-help`, so this wrapper inlines them.
+(define-syntax-rule (command-line/version-help
+                     #:program program-expr
+                     #:argv argv-expr
+                     clause ...)
+  (command-line
+   #:program program-expr
+   #:argv argv-expr
+   #:usage-help
+   "A <version> is a Racket release number (e.g. 8.18), or one of the channels:"
+   "stable, pre-release, snapshot, snapshot:utah, snapshot:northwestern."
+   "Run `rackup available` to see installable versions and channels."
+   clause ...))
+
 (define (usage)
   (displayln "rackup - Racket toolchain manager")
   (displayln "")
   (displayln "Commands:")
-  (usage-line "available [--all|--limit N]" "List remote install specs and recent release versions.")
-  (usage-line "install <spec> [flags]" "Install a Racket toolchain (release, pre-release, snapshot).")
+  (usage-line "available [--all|--limit N]" "List remote install versions and recent release versions.")
+  (usage-line "install <version> [flags]" "Install a Racket toolchain (release, pre-release, snapshot).")
   (usage-line "link <name> <path> [flags]"
               "Link an in-place/local Racket build as a managed toolchain.")
   (usage-line "list [--ids]" "List installed toolchains (shows default/active tags).")
@@ -68,7 +89,7 @@
               "Run a command using a specific toolchain without changing defaults.")
   (usage-line "prompt [--long|--short|--raw|--source]"
               "Print fast prompt info for PS1 (default: compact label).")
-  (usage-line "upgrade [spec] [--force]" "Upgrade channel-based toolchains to latest version.")
+  (usage-line "upgrade [version] [--force]" "Upgrade channel-based toolchains to latest version.")
   (usage-line "remove <toolchain>" "Remove an installed or linked toolchain and its addon dir.")
   (usage-line "reshim" "Rebuild executable shims from installed toolchains.")
   (usage-line "init [--shell bash|zsh]" "Install/update shell integration in ~/.bashrc or ~/.zshrc.")
@@ -81,6 +102,8 @@
   (usage-line "doctor" "Print diagnostics for paths, runtime, and installed toolchains.")
   (usage-line "version" "Print rackup version info (git commit and date).")
   (usage-line "help [command]" "Show global help or help for a specific command.")
+  (displayln "")
+  (displayln version-help)
   (displayln "")
   (displayln "Use `rackup <command> --help` or `rackup help <command>` for command help."))
 
@@ -453,22 +476,25 @@
   (ensure-index!)
   (define force? #f)
   (define no-cache? #f)
-  (define spec-arg
-    (command-line #:program "rackup upgrade"
+  (define version-arg
+    (command-line/version-help
+                  #:program "rackup upgrade"
                   #:argv (reorder-args rest)
+                  #:usage-help
+                  "Only channel-based toolchains can be upgraded; omit <version> to upgrade all."
                   #:once-each
                   [("--force") "Reinstall even if already up to date" (set! force? #t)]
                   [("--no-cache") "Re-download installer instead of using cache" (set! no-cache? #t)]
-                  #:args maybe-spec
-                  (match maybe-spec
+                  #:args version
+                  (match version
                     ['() #f]
                     [(list s) s]
-                    [_ (rackup-error "usage: rackup upgrade [spec] [--force] [--no-cache]")])))
-  (define targets (upgradeable-toolchains spec-arg))
+                    [_ (rackup-error "usage: rackup upgrade [version] [--force] [--no-cache]")])))
+  (define targets (upgradeable-toolchains version-arg))
   (when (null? targets)
-    (if spec-arg
+    (if version-arg
         (rackup-error "no upgradeable toolchain matching '~a' found.\nOnly channel-based toolchains (stable, pre-release, snapshot) can be upgraded."
-                      spec-arg)
+                      version-arg)
         (rackup-error "no upgradeable toolchains installed.\nInstall a channel-based toolchain first, e.g.: rackup install stable")))
   (define upgraded 0)
   (for ([pair (in-list targets)])
@@ -492,28 +518,31 @@
 
 (define (cmd-remove rest)
   (define clean-compiled? #f)
-  (define spec
+  (define toolchain
     (command-line #:program "rackup remove"
                   #:argv rest
+                  #:usage-help
+                  "<toolchain> is an installed toolchain id or a prefix; run `rackup list`"
+                  "to see installed toolchains."
                   #:once-each
                   [("--clean-compiled")
                    ("Remove version-specific compiled/<key>/ directories"
                     "from user-scope and linked package source directories")
                    (set! clean-compiled? #t)]
-                  #:args (spec)
-                  spec))
-  (define installed-id (find-local-toolchain spec))
+                  #:args (toolchain)
+                  toolchain))
+  (define installed-id (find-local-toolchain toolchain))
   (cond
     [installed-id (remove-toolchain! installed-id #:clean-compiled? clean-compiled?)]
     [else
-     (define orphan-id (find-orphan-toolchain-id spec))
+     (define orphan-id (find-orphan-toolchain-id toolchain))
      (cond
        [orphan-id
         (when clean-compiled?
           (rackup-error "--clean-compiled cannot be used with orphan toolchains"))
         (remove-orphan-toolchain! orphan-id)]
        [else
-        (rackup-error "no matching installed toolchain: ~a" spec)])]))
+        (rackup-error "no matching installed toolchain: ~a" toolchain)])]))
 
 (define (cmd-reshim rest)
   (define aliases? #f)
@@ -552,11 +581,12 @@
   (define short-aliases? #f)
   (define opts-rev '())
   (define (flag! . args) (set! opts-rev (append (reverse args) opts-rev)))
-  (define spec
-    (command-line #:program "rackup install"
+  (define version
+    (command-line/version-help
+                  #:program "rackup install"
                   #:argv (reorder-args rest
-                                    '("--variant" "--distribution" "--snapshot-site"
-                                      "--arch" "--installer-ext"))
+                                       '("--variant" "--distribution" "--snapshot-site"
+                                         "--arch" "--installer-ext"))
                   #:once-each
                   [("--variant") v "cs|bc - Override VM variant" (flag! "--variant" v)]
                   [("--distribution") d "full|minimal - Distribution type" (flag! "--distribution" d)]
@@ -573,9 +603,9 @@
                   #:once-any
                   [("--quiet") "Show minimal output" (flag! "--quiet")]
                   [("--verbose") "Show detailed output" (flag! "--verbose")]
-                  #:args (spec)
-                  spec))
-  (void (install-toolchain! spec (reverse opts-rev)))
+                  #:args (version)
+                  version))
+  (void (install-toolchain! version (reverse opts-rev)))
   (when short-aliases?
     (commit-state-change!
      (install-shim-aliases!))))
