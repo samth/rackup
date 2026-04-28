@@ -20,6 +20,7 @@
          system*/check
          shell-exe
          capture-program-output
+         probe-local-racket-version+variant+addon-dir
          current-iso8601
          path-basename-string
          http-url?
@@ -130,6 +131,40 @@
     (if (apply system* exe args)
         (string-trim (get-output-string out))
         #f)))
+
+;; Probe a local Racket binary for its version, variant ('cs/'bc), and
+;; native addon-dir.  Returns three values, any of which may be #f if
+;; the probe fails (e.g., the binary cannot run).  `env-vars` is an
+;; alist of additional environment to apply for the probe.
+(define (probe-local-racket-version+variant+addon-dir bin-dir env-vars)
+  (define racket-exe (build-path (string->path bin-dir) "racket"))
+  (define combined-out
+    (capture-program-output
+     #:env env-vars
+     racket-exe
+     "-e"
+     (string-append
+      "(displayln (version))"
+      "(displayln (let ([v (system-type 'vm)])"
+      "  (if (symbol? v) (symbol->string v) (format \"~a\" v))))"
+      "(display (find-system-path 'addon-dir))")))
+  (define (normalize-vm-name s)
+    (and s (not (string-blank? s))
+         (match (string-downcase s)
+           ["chez-scheme" "cs"]
+           ["racket" "bc"]
+           [v v])))
+  (define-values (version-out variant-out addon-out)
+    (if combined-out
+        (let ([lines (string-split combined-out "\n")])
+          (if (>= (length lines) 3)
+              (values (first lines) (second lines)
+                      (string-join (drop lines 2) "\n"))
+              (values #f #f #f)))
+        (values #f #f #f)))
+  (values (and version-out (not (string-blank? version-out)) version-out)
+          (normalize-vm-name variant-out)
+          (and addon-out (not (string-blank? addon-out)) addon-out)))
 
 (define (http-url? s)
   (and (string? s) (regexp-match? #px"(?i:^http://)" s)))

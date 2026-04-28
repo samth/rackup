@@ -519,16 +519,16 @@
               (and (directory-exists? pkgs) (path-complete-string pkgs)))])]))
 
 (define (local-layout-env-vars layout [addon-dir #f] [version #f] [variant #f] [local-name #f])
-  (define source-root (hash-ref layout 'source-root #f))
-  ;; For source checkouts, default PLTADDONDIR to <checkout>/add-on
-  ;; (matching the plt-bin convention).
-  (define effective-addon-dir
-    (or addon-dir
-        (and source-root
-             (path->string* (build-path (string->path source-root) "add-on")))))
+  ;; If the probe gave us an addon-dir, use it.  Otherwise leave
+  ;; PLTADDONDIR unset and let the shim dispatcher fall back to its
+  ;; default (which is per-toolchain under ~/.rackup/addons/).  We
+  ;; intentionally do NOT fall back to <source-root>/add-on: that
+  ;; tends to be wrong for users whose packages live in their native
+  ;; addon-dir (e.g., ~/.local/share/racket/<install-name>/), and the
+  ;; old behavior caused silent breakage of `raco pkg` operations.
   (define addon-entry
-    (if (and (string? effective-addon-dir) (not (string-blank? effective-addon-dir)))
-        (list (cons "PLTADDONDIR" effective-addon-dir))
+    (if (and (string? addon-dir) (not (string-blank? addon-dir)))
+        (list (cons "PLTADDONDIR" addon-dir))
         null))
   (define bin-dir-str (hash-ref layout 'bin-dir #f))
   (define existing-roots
@@ -542,38 +542,6 @@
        (lambda (v) (list (cons "PLTCOMPILEDROOTS" v)))]
       [else null]))
   (append addon-entry compiled-roots-entry))
-
-(define (probe-local-racket-version+variant+addon-dir bin-dir env-vars)
-  (define racket-exe (build-path (string->path bin-dir) "racket"))
-  ;; Combine all three queries into a single racket invocation to avoid
-  ;; paying startup cost three times.
-  (define combined-out
-    (capture-program-output
-     #:env env-vars
-     racket-exe
-     "-e"
-     (string-append
-      "(displayln (version))"
-      "(displayln (let ([v (system-type 'vm)])"
-      "  (if (symbol? v) (symbol->string v) (format \"~a\" v))))"
-      "(display (find-system-path 'addon-dir))")))
-  (define (normalize-vm-name s)
-    (and s (not (string-blank? s))
-         (match (string-downcase s)
-           ["chez-scheme" "cs"]
-           ["racket" "bc"]
-           [v v])))
-  (define-values (version-out variant-out addon-out)
-    (if combined-out
-        (let ([lines (string-split combined-out "\n")])
-          (if (>= (length lines) 3)
-              (values (first lines) (second lines)
-                      (string-join (drop lines 2) "\n"))
-              (values #f #f #f)))
-        (values #f #f #f)))
-  (values (and version-out (not (string-blank? version-out)) version-out)
-          (normalize-vm-name variant-out)
-          (and addon-out (not (string-blank? addon-out)) addon-out)))
 
 ;; Old PLT Scheme installations (version <= 4.x) have a shell wrapper at
 ;; plt/bin/mzscheme that uses $PLTHOME to locate the real binary under
@@ -797,17 +765,17 @@
                                   (raise e))])
        (make-directory* tc-dir)
        (define extra-exes (find-local-chez-extra-executables layout))
-       (define base-env-vars (local-layout-env-vars layout))
-       ;; Restore user's saved PLTCOMPILEDROOTS (if any) for the probe.
-       ;; bin/rackup saves it as _RACKUP_ORIG_PLTCOMPILEDROOTS before
-       ;; unsetting it for the rackup-core runtime.
-       (define saved-compiled-roots (getenv "_RACKUP_ORIG_PLTCOMPILEDROOTS"))
-       (define probe-env-vars
-         (if saved-compiled-roots
-             (cons (cons "PLTCOMPILEDROOTS" saved-compiled-roots) base-env-vars)
-             base-env-vars))
+       ;; Probe the linked racket with a clean environment so
+       ;; find-system-path returns the binary's native addon-dir.
        (define-values (version* variant* addon-dir*)
-         (probe-local-racket-version+variant+addon-dir (path->string* real-bin-dir) probe-env-vars))
+         (reprobe-local-toolchain (path->string* real-bin-dir)))
+       (unless addon-dir*
+         (install-warn
+          (string-append
+           "could not probe addon-dir from ~a; PLTADDONDIR will be unset.\n"
+           "  Run `rackup link --force ~a ~a` after fixing the binary\n"
+           "  (e.g., once `raco setup` finishes) to record the correct value.")
+          (path->string* real-bin-dir) name (hash-ref layout 'input-path)))
        (define env-vars (local-layout-env-vars layout addon-dir* version* variant* name))
        (make-bin-overlay! id real-bin-dir extra-exes)
        (maybe-wrap-local-chez-extra-executables! id extra-exes layout)

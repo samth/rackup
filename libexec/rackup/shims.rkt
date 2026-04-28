@@ -20,7 +20,8 @@
          current-toolchain-source
          shim-aliases-installed?
          install-shim-aliases!
-         remove-shim-aliases!)
+         remove-shim-aliases!
+         reprobe-local-toolchain)
 
 (define bootstrap-shim-names
   '("racket" "raco"))
@@ -355,29 +356,61 @@ EOF
                    (apply string-append
                           (for/list ([kv (in-list env-vars)])
                             (env-var-export-line (car kv) (cdr kv))))))
-  (write-string-file p body)
-  (file-or-directory-permissions p #o644))
+  (define existing
+    (and (file-exists? p)
+         (with-handlers ([exn:fail? (lambda (_) #f)])
+           (file->string p))))
+  (unless (equal? existing body)
+    (write-string-file p body)
+    (file-or-directory-permissions p #o644)))
 
 (define (delete-env-file! id)
   (define p (rackup-toolchain-env-file id))
   (when (file-exists? p)
     (delete-file p)))
 
+;; Re-probe a linked toolchain's racket binary.  Returns (values
+;; version variant addon-dir), all #f if the binary is missing or
+;; fails to run.  Restores _RACKUP_ORIG_PLTCOMPILEDROOTS so the probe
+;; can find its own .zo files.
+(define (reprobe-local-toolchain real-bin-dir-str)
+  (cond
+    [(not (string? real-bin-dir-str)) (values #f #f #f)]
+    [(not (file-exists? (build-path (string->path real-bin-dir-str) "racket")))
+     (values #f #f #f)]
+    [else
+     (probe-local-racket-version+variant+addon-dir
+      real-bin-dir-str (saved-pltcompiledroots-env))]))
+
+(define (saved-pltcompiledroots-env)
+  (define saved (getenv "_RACKUP_ORIG_PLTCOMPILEDROOTS"))
+  (if saved (list (cons "PLTCOMPILEDROOTS" saved)) null))
+
+(define (lookup-env-var alist key)
+  (define p (assoc key alist))
+  (and p (cadr p)))
+
+;; Re-probe the linked toolchain's racket binary on every call so
+;; addon-dir, version, and variant reflect the current source-tree
+;; state.  Returns the new env-vars list and the probed (or fallback)
+;; version+variant.  Does not fall back to <source-root>/add-on for
+;; PLTADDONDIR: that location is usually wrong for users whose
+;; packages live in their native addon-dir.
 (define (compute-local-env-vars meta)
-  (define source-root (hash-ref meta 'source-root #f))
-  (define old-env-vars (hash-ref meta 'env-vars '()))
-  (define old-addon-dir
-    (for/or ([kv (in-list old-env-vars)])
-      (and (equal? (car kv) "PLTADDONDIR") (cadr kv))))
-  (define effective-addon-dir
-    (or old-addon-dir
-        (and source-root
-             (path->string* (build-path (string->path source-root) "add-on")))))
-  (define addon-entry
-    (if (and (string? effective-addon-dir) (not (string-blank? effective-addon-dir)))
-        (list (cons "PLTADDONDIR" effective-addon-dir))
-        null))
   (define real-bin-dir-str (hash-ref meta 'real-bin-dir #f))
+  (define-values (probed-version probed-variant probed-addon)
+    (reprobe-local-toolchain real-bin-dir-str))
+  (define version (or probed-version (hash-ref meta 'resolved-version #f)))
+  (define variant
+    (or (and probed-variant (string->symbol probed-variant))
+        (hash-ref meta 'variant #f)))
+  (define addon-dir
+    (or probed-addon
+        (lookup-env-var (hash-ref meta 'env-vars '()) "PLTADDONDIR")))
+  (define addon-entry
+    (if (and (string? addon-dir) (not (string-blank? addon-dir)))
+        (list (cons "PLTADDONDIR" addon-dir))
+        null))
   (define existing-roots
     (if real-bin-dir-str
         (read-toolchain-compiled-file-roots (string->path real-bin-dir-str))
@@ -387,14 +420,13 @@ EOF
          (hash-ref meta 'requested-spec #f)))
   (define compiled-roots-entry
     (cond
-      [(compiled-roots-value (hash-ref meta 'resolved-version #f)
-                             (hash-ref meta 'variant #f)
-                             existing-roots
-                             local-name)
+      [(compiled-roots-value version variant existing-roots local-name)
        =>
        (lambda (v) (list (cons "PLTCOMPILEDROOTS" v)))]
       [else null]))
-  (append addon-entry compiled-roots-entry))
+  (values (append addon-entry compiled-roots-entry)
+          version
+          variant))
 
 ;; Backfill PLTCOMPILEDROOTS into an installed toolchain whose metadata
 ;; predates per-toolchain compiled roots.  Adds the entry to env-vars in
@@ -423,17 +455,26 @@ EOF
     (when (hash? meta)
       (define kind (hash-ref meta 'kind #f))
       (cond
-        ;; Local (linked) toolchains: regenerate env vars from the
-        ;; source layout (which may have changed).
+        ;; Replacing env-vars wholesale also cleans up legacy
+        ;; PLTHOME/PLTCOLLECTS entries from older rackup versions.
         [(eq? kind 'local)
-         (define env-vars (compute-local-env-vars meta))
+         (define-values (env-vars new-version new-variant)
+           (compute-local-env-vars meta))
+         (define updates
+           (filter values
+                   (list (cons 'env-vars
+                               (for/list ([kv (in-list env-vars)])
+                                 (list (car kv) (cdr kv))))
+                         (and new-version (cons 'resolved-version new-version))
+                         (and new-variant (cons 'variant new-variant)))))
+         (define new-meta
+           (for/fold ([m meta]) ([u (in-list updates)])
+             (hash-set m (car u) (cdr u))))
+         (unless (equal? new-meta meta)
+           (write-toolchain-meta! id new-meta))
          (if (pair? env-vars)
              (write-env-file! id env-vars)
              (delete-env-file! id))]
-        ;; Installed toolchains: env vars are normally computed once at
-        ;; install time and stored in meta, but backfill PLTCOMPILEDROOTS
-        ;; for toolchains that were installed by an older rackup which
-        ;; did not compute it.
         [else
          (backfill-installed-env-vars! id meta)]))))
 
