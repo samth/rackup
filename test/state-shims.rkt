@@ -822,12 +822,13 @@
      (make-file-or-directory-link runtime-real-bin (rackup-runtime-bin-link runtime-id))
      (make-file-or-directory-link runtime-version-dir (rackup-runtime-current-link))
      (define racket-bin (build-path bin-dir "racket"))
+     (define fake-addon-dir (path->string (build-path tmp "fake-addon")))
      (write-string-file racket-bin
                         @~a{#!/usr/bin/env bash
                             set -euo pipefail
                             if [[ "$#" -ge 2 && "$1" == "-e" ]]; then
                               if [[ "$2" == *"(version)"*"system-type"*"find-system-path"* ]]; then
-                                printf '9.90\nchez-scheme\n'
+                                printf '9.90\nchez-scheme\n@|fake-addon-dir|'
                                 exit 0
                               fi
                               case "$2" in
@@ -2589,3 +2590,90 @@
                                    after-env-vars-2))
                    1
                    "second reshim is idempotent")))
+
+  ;; Test: reshim re-probes a linked toolchain's racket binary so
+  ;; addon-dir, version, and variant reflect the current source-tree
+  ;; state.  Old toolchains may have stale PLTHOME/PLTCOLLECTS entries
+  ;; in env-vars from an older rackup; reshim should clean them up.
+  (with-temp-rackup-home
+   (lambda (tmp)
+     (ensure-index!)
+     (define src-root (build-path tmp "linked-src"))
+     (define plthome (build-path src-root "racket"))
+     (define bin-dir (build-path plthome "bin"))
+     (make-directory* bin-dir)
+     (make-directory* (build-path plthome "collects"))
+     (define new-addon (path->string (build-path tmp "new-addon")))
+
+     ;; Fake racket that returns NEW values on probe (different from
+     ;; what was stored in meta).
+     (write-string-file (build-path bin-dir "racket")
+                        @~a{#!/usr/bin/env bash
+                            set -euo pipefail
+                            if [[ "$#" -ge 2 && "$1" == "-e" ]]; then
+                              if [[ "$2" == *"(version)"*"system-type"*"find-system-path"* ]]; then
+                                printf '9.7.0.5\nchez-scheme\n@|new-addon|'
+                                exit 0
+                              fi
+                            fi
+                            })
+     (file-or-directory-permissions (build-path bin-dir "racket") #o755)
+
+     (define id "local-stale")
+     (define real-bin-link (rackup-toolchain-bin-link id))
+     (make-directory* (rackup-toolchain-dir id))
+     (make-file-or-directory-link bin-dir real-bin-link)
+
+     ;; Register a linked toolchain with stale meta env-vars: PLTHOME,
+     ;; PLTCOLLECTS (from before bc1d7f8), and a wrong PLTADDONDIR.
+     (with-state-lock
+       (register-toolchain! id
+                            (hash 'id id
+                                  'kind 'local
+                                  'requested-spec "stale"
+                                  'resolved-version "9.0.0.1"  ; stale
+                                  'variant 'cs                  ; ok
+                                  'distribution 'in-place
+                                  'arch "x86_64"
+                                  'platform "linux"
+                                  'source-root (path->string src-root)
+                                  'plthome (path->string plthome)
+                                  'real-bin-dir (path->string bin-dir)
+                                  'env-vars '(("PLTHOME" "/old/plthome")
+                                              ("PLTCOLLECTS" "/old/collects:/old/pkgs")
+                                              ("PLTADDONDIR" "/old/wrong/addon"))
+                                  'executables '("racket")
+                                  'installed-at "2026-03-09T00:00:00Z")))
+
+     (with-state-lock (reshim!))
+
+     ;; meta should now have the re-probed values.
+     (define new-meta (read-toolchain-meta id))
+     (check-equal? (hash-ref new-meta 'resolved-version) "9.7.0.5"
+                   "reshim re-probed version")
+     (check-equal? (hash-ref new-meta 'variant) 'cs
+                   "reshim re-probed variant")
+
+     ;; env-vars should be clean: only PLTADDONDIR + PLTCOMPILEDROOTS,
+     ;; no stale PLTHOME or PLTCOLLECTS.
+     (define new-env-vars (toolchain-env-vars id))
+     (check-false (assoc "PLTHOME" new-env-vars)
+                  "reshim cleaned stale PLTHOME from env-vars")
+     (check-false (assoc "PLTCOLLECTS" new-env-vars)
+                  "reshim cleaned stale PLTCOLLECTS from env-vars")
+     (check-equal? (cdr (assoc "PLTADDONDIR" new-env-vars)) new-addon
+                   "reshim updated PLTADDONDIR to probed value")
+     (define pcr (assoc "PLTCOMPILEDROOTS" new-env-vars))
+     (check-not-false pcr "reshim wrote PLTCOMPILEDROOTS")
+     (check-equal? (cdr pcr) "compiled/9.7.0.5-cs-local-stale:."
+                   "reshim PLTCOMPILEDROOTS uses re-probed version")
+
+     ;; env.sh should also reflect the new values.
+     (define env-sh (file->string (rackup-toolchain-env-file id)))
+     (check-true (string-contains? env-sh
+                                   (format "export PLTADDONDIR='~a'" new-addon))
+                 "env.sh has new PLTADDONDIR")
+     (check-false (string-contains? env-sh "PLTHOME")
+                  "env.sh does NOT contain stale PLTHOME")
+     (check-false (string-contains? env-sh "PLTCOLLECTS")
+                  "env.sh does NOT contain stale PLTCOLLECTS")))
