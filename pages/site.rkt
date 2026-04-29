@@ -432,6 +432,7 @@ sh install.sh && rm install.sh})
           @tr{@td{@code{rackup run @i{name} -- @i{cmd}}} @td{Run a command using a specific toolchain}}
           @tr{@td{@code{rackup which @i{cmd}}} @td{Show path for a shimmed command}}
           @tr{@td{@code{rackup link @i{name} @i{path}}} @td{Link a local source tree}}
+          @tr{@td{@code{rackup rebuild}} @td{Rebuild a linked source toolchain in place}}
           @tr{@td{@code{rackup upgrade}} @td{Upgrade channel-based toolchains to latest version}}
           @tr{@td{@code{rackup remove @i{name}}} @td{Remove an installed toolchain}}
           @tr{@td{@code{rackup prompt}} @td{Print toolchain info for shell prompt}}

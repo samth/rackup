@@ -301,6 +301,62 @@ rackup link cs-head ~/src/racket --force
 
 @; ────────────────────────────────────────────────────────────────────
 
+@section[#:tag "rebuild" #:style 'unnumbered]{@tt{rackup rebuild}}
+
+Rebuild a linked source toolchain in place by running @tt{make} against
+its source tree.  Useful after pulling upstream changes or editing
+collects: rackup re-probes the version, refreshes the toolchain's
+@tt{env.sh}, and updates @tt{meta.rktd} with a @tt{last-rebuilt-at}
+timestamp.
+
+The @tt{build/} directory is @emph{not} deleted; @tt{make} runs
+incrementally.  Pulling is opt-in and never automatic.
+
+@shell-block{rackup rebuild [<name>] [flags] [-- <make-args>...]}
+
+If @tt{<name>} is omitted, the active toolchain (from
+@tt{RACKUP_TOOLCHAIN} or the default) is used.  Anything after
+@tt{--} is appended verbatim to the @tt{make} argv.
+
+@subsection[#:tag "rebuild-flags" #:style sub-style]{Flags}
+
+@opt-table[
+  @list[@exec{--pull}
+        "Run `git pull --ff-only` in the source tree before building.
+         Errors out if the source is not a git work tree."]
+  @list[@exec{-j N, --jobs N}
+        "Parallelism for make.  rackup passes both `-jN` and `CPUS=N`
+         (the Racket build's recursive variable).  Defaults to the
+         number of available processors."]
+  @list[@exec{--dry-run}
+        "Print the planned commands and exit without running anything."]
+  @list[@exec{--no-update-meta}
+        "Skip the post-build version reprobe and `env.sh` regeneration.
+         Escape hatch when the source tree is in a transient state."]
+]
+
+@subsection[#:tag "rebuild-layouts" #:style sub-style]{Supported layouts}
+
+@itemlist[
+  @item{Package-based source checkout (with a top-level @tt{Makefile}):
+        @tt{make} runs at the source root.}
+  @item{Plain in-place build (no @tt{pkgs/}, but a @tt{Makefile} at
+        @tt{PLTHOME}): @tt{make} runs at @tt{PLTHOME}.}
+  @item{Installed-prefix layouts (no @tt{Makefile}) are not supported;
+        @tt{rackup rebuild} reports a clear error and does nothing.}
+]
+
+@subsection[#:tag "rebuild-examples" #:style sub-style]{Examples}
+
+@shell-block|{
+rackup rebuild dev
+rackup rebuild dev -- CPUS=8 PKGS="main-distribution"
+rackup rebuild dev --pull -j 4
+rackup rebuild --dry-run
+}|
+
+@; ────────────────────────────────────────────────────────────────────
+
 @section[#:tag "remove" #:style 'unnumbered]{@tt{rackup remove}}
 
 Remove one installed or linked toolchain and its per-toolchain addon

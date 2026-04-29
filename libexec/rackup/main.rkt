@@ -1,9 +1,9 @@
 #lang racket/base
 
 (require racket/cmdline
+         racket/file
          racket/list
          racket/match
-         racket/file
          racket/path
          racket/port
          racket/runtime-path
@@ -15,6 +15,7 @@
          "install.rkt"
          "legacy-plt-catalog.rkt"
          "paths.rkt"
+         "rebuild.rkt"
          "remote.rkt"
          "rktd-io.rkt"
          "runtime.rkt"
@@ -74,6 +75,8 @@
   (usage-line "install <version> [flags]" "Install a Racket toolchain (release, pre-release, snapshot).")
   (usage-line "link <name> <path> [flags]"
               "Link an in-place/local Racket build as a managed toolchain.")
+  (usage-line "rebuild [<name>] [flags] [-- <make-args>...]"
+              "Rebuild a linked source toolchain in place (runs `make`).")
   (usage-line "list [--ids]" "List installed toolchains (shows default/active tags).")
   (usage-line "default [id|status|set <toolchain>|clear|<toolchain>|--unset]"
               "Show, set, or clear the global default toolchain.")
@@ -744,6 +747,44 @@
   (define id (link-toolchain! name path opts))
   (displayln id))
 
+(define (cmd-rebuild rest)
+  (define-values (rebuild-args make-args)
+    (split-on-double-dash rest))
+  (define pull? #f)
+  (define dry-run? #f)
+  (define update-meta? #t)
+  (define jobs #f)
+  (define name
+    (command-line #:program "rackup rebuild"
+                  #:argv (reorder-args rebuild-args '("-j" "--jobs"))
+                  #:usage-help
+                  "Rebuild a linked source toolchain in place by running `make`."
+                  "If <name> is omitted, the active or default toolchain is used."
+                  "Anything after `--` is passed verbatim to make, e.g.:"
+                  "  rackup rebuild dev -- CPUS=8 PKGS=\"main-distribution\""
+                  #:once-each
+                  [("--pull") "Run `git pull --ff-only` in the source tree first"
+                              (set! pull? #t)]
+                  [("-j" "--jobs") n "Parallelism for make (-jN, CPUS=N)"
+                                   (let ([v (string->number n)])
+                                     (unless (and (exact-integer? v) (positive? v))
+                                       (rackup-error "--jobs requires a positive integer: ~a" n))
+                                     (set! jobs v))]
+                  [("--dry-run") "Print planned commands without executing them"
+                                 (set! dry-run? #t)]
+                  [("--no-update-meta")
+                   "Skip post-build metadata refresh (escape hatch)"
+                   (set! update-meta? #f)]
+                  #:args ([name #f])
+                  name))
+  (rebuild-toolchain! name
+                      #:pull? pull?
+                      #:dry-run? dry-run?
+                      #:update-meta? update-meta?
+                      #:jobs jobs
+                      #:make-args make-args)
+  (void))
+
 (define (parse-uninstall-options rest)
   (define yes? #f)
   (command-line #:program "rackup uninstall"
@@ -1043,6 +1084,7 @@
     [(list "available" rest ...) (cmd-available rest)]
     [(list "install" rest ...) (cmd-install rest)]
     [(list "link" rest ...) (cmd-link rest)]
+    [(list "rebuild" rest ...) (cmd-rebuild rest)]
     [(list "list" rest ...) (cmd-list rest)]
     [(list "default" rest ...) (cmd-default rest)]
     [(list "current" rest ...) (cmd-current rest)]
@@ -1075,6 +1117,7 @@
 
 (module+ for-testing
   (provide cmd-uninstall
+           cmd-rebuild
            validate-uninstall-home-path!
            delete-rackup-home!/external
            installed-toolchain-metas/safe

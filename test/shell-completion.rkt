@@ -20,6 +20,7 @@
   ;; Both contain all command names
   (for ([cmd '("available" "install"
                            "link"
+                           "rebuild"
                            "list"
                            "default"
                            "current"
