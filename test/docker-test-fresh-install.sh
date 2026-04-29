@@ -17,6 +17,7 @@ SOURCE_BUILD_REF="${RACKUP_E2E_SOURCE_BUILD_REF:-v8.18}"
 SOURCE_BUILD_COMMIT="${RACKUP_E2E_SOURCE_BUILD_COMMIT:-}"
 SOURCE_BUILD_TARGET="${RACKUP_E2E_SOURCE_BUILD_TARGET:-base}"
 SOURCE_BUILD_JOBS="${RACKUP_E2E_SOURCE_BUILD_JOBS:-2}"
+EXERCISE_REBUILD="${RACKUP_E2E_EXERCISE_REBUILD:-0}"
 HOST_RACKET="${RACKUP_E2E_HOST_RACKET:-present}"
 PREBUILT_PAGES_DIR=""
 PREBUILT_PAGES_DIR_OWNED=0
@@ -50,6 +51,7 @@ Options:
                         Exact upstream commit for source-build image caching
   --source-build-target T make target for source-build local-link mode (default: base)
   --source-build-jobs N   Parallel jobs for source-build local-link mode (default: 2)
+  --exercise-rebuild      After linking, exercise `rackup rebuild` (smoke + dry-run + pass-through)
   --host-racket MODE      present|absent system Racket in test image (default: present)
   --download-cache-dir DIR
                         Reuse a prepared rackup download cache from the host
@@ -124,6 +126,10 @@ while [[ $# -gt 0 ]]; do
     --source-build-jobs)
       SOURCE_BUILD_JOBS="$2"
       shift 2
+      ;;
+    --exercise-rebuild)
+      EXERCISE_REBUILD=1
+      shift
       ;;
     --host-racket)
       HOST_RACKET="$2"
@@ -311,6 +317,7 @@ fi
   -e RACKUP_E2E_SOURCE_BUILD_COMMIT="$SOURCE_BUILD_COMMIT" \
   -e RACKUP_E2E_SOURCE_BUILD_TARGET="$SOURCE_BUILD_TARGET" \
   -e RACKUP_E2E_SOURCE_BUILD_JOBS="$SOURCE_BUILD_JOBS" \
+  -e RACKUP_E2E_EXERCISE_REBUILD="$EXERCISE_REBUILD" \
   -e RACKUP_E2E_PREBUILT_LOCAL_SOURCE_DIR="$prebuilt_local_source_dir" \
   -e RACKUP_E2E_HOST_RACKET="$HOST_RACKET" \
   -e RACKUP_E2E_UNIT_TESTS="$UNIT_TESTS" \

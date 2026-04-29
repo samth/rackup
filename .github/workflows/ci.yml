@@ -316,7 +316,7 @@ jobs:
         run: raco pkg install --auto recspecs
       - name: Test (includes local-link unit coverage)
         shell: bash
-        run: TMPDIR=/tmp raco test test/copy-filtered-tree.rkt test/rktd-io.rkt test/util.rkt test/versioning.rkt test/remote.rkt test/platform-targets.rkt test/state-shims.rkt test/uninstall.rkt
+        run: TMPDIR=/tmp raco test test/copy-filtered-tree.rkt test/rktd-io.rkt test/util.rkt test/versioning.rkt test/remote.rkt test/platform-targets.rkt test/state-shims.rkt test/uninstall.rkt test/rebuild.rkt
 
   docker-e2e-linux-distros:
     name: "Docker E2E (native ${{ matrix.arch_name }} / ${{ matrix.base_image }})"
@@ -538,7 +538,8 @@ jobs:
             --source-build-ref v8.18 \
             --source-build-commit 657a006747c199241b2569b56e07f26585eb0437 \
             --source-build-target base \
-            --source-build-jobs "$(nproc)"
+            --source-build-jobs "$(nproc)" \
+            --exercise-rebuild
 
   macos-e2e:
     name: "macOS E2E (${{ matrix.runner }})"

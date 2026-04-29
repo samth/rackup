@@ -2,6 +2,7 @@
 
 (require rackunit/text-ui
          "copy-filtered-tree.rkt"
+         "rebuild.rkt"
          "rktd-io.rkt"
          "shell-completion.rkt"
          "upgrade.rkt"

@@ -12,6 +12,7 @@ SOURCE_BUILD_REF="${RACKUP_E2E_SOURCE_BUILD_REF:-v8.18}"
 SOURCE_BUILD_COMMIT="${RACKUP_E2E_SOURCE_BUILD_COMMIT:-}"
 SOURCE_BUILD_TARGET="${RACKUP_E2E_SOURCE_BUILD_TARGET:-base}"
 SOURCE_BUILD_JOBS="${RACKUP_E2E_SOURCE_BUILD_JOBS:-2}"
+EXERCISE_REBUILD="${RACKUP_E2E_EXERCISE_REBUILD:-0}"
 PREBUILT_LOCAL_SOURCE_DIR="${RACKUP_E2E_PREBUILT_LOCAL_SOURCE_DIR:-}"
 HOST_RACKET="${RACKUP_E2E_HOST_RACKET:-present}"
 
@@ -676,6 +677,90 @@ else
   fake_petite_out="$(run_rackup run localsrc -- petite --version)"
   assert_contains "FAKE-SCHEME --version" "$fake_scheme_out" "linked fake source tree should expose scheme"
   assert_contains "FAKE-PETITE --version" "$fake_petite_out" "linked fake source tree should expose petite"
+fi
+
+if [[ "$EXERCISE_REBUILD" == "1" ]]; then
+  echo
+  echo "== rackup rebuild smoke =="
+  # 1. Against the link from above ($local_src_root): for the standard
+  #    source-build path (tarball + configure --prefix) the layout is an
+  #    installed-prefix, so `rackup rebuild` must fail with a clear
+  #    "installed prefix" error rather than silently doing nothing.
+  rebuild_err="$(run_rackup rebuild localsrc 2>&1 || true)"
+  assert_contains "cannot rebuild" "$rebuild_err" "rebuild against installed-prefix link should error"
+  echo "rebuild rejects installed-prefix layout"
+  rebuild_pull_err="$(run_rackup rebuild localsrc --pull 2>&1 || true)"
+  assert_contains "cannot rebuild" "$rebuild_pull_err" "rebuild --pull against installed-prefix should also error"
+  echo "rebuild --pull rejects installed-prefix layout"
+
+  # 2. Against a synthetic package-based source tree with a Makefile.
+  #    Use --dry-run to avoid actually invoking make, plus stub make/git
+  #    to isolate the test from host toolchain quirks.
+  rebuild_root="$TMPDIR/rackup-e2e-rebuild-src"
+  rm -rf "$rebuild_root"
+  mkdir -p "$rebuild_root/racket/bin" "$rebuild_root/racket/collects" "$rebuild_root/pkgs"
+  cat >"$rebuild_root/racket/bin/racket" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+default_addon_dir="$(cd "$(dirname "$0")/../.." && pwd)/add-on/development"
+if [[ "$#" -ge 2 && "$1" == "-e" ]]; then
+  if [[ "$2" == *"(version)"*"system-type"*"find-system-path"* ]]; then
+    printf '9.99-rebuild\nchez-scheme\n%s' "${PLTADDONDIR:-$default_addon_dir}"
+    exit 0
+  fi
+fi
+echo unhandled
+exit 1
+EOF
+  cat >"$rebuild_root/racket/bin/raco" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+  chmod +x "$rebuild_root/racket/bin/racket" "$rebuild_root/racket/bin/raco"
+  cat >"$rebuild_root/Makefile" <<'EOF'
+default:
+	@echo OK
+EOF
+  run_rackup link rebuildsrc "$rebuild_root" >/dev/null
+
+  # --dry-run plan should mention the make argv with -jN, CPUS=N, and
+  # any user pass-through args.  Capture stdout only (errors should be
+  # rare here; if any happen, the output check will fail loudly).
+  dry_out="$(run_rackup rebuild rebuildsrc --dry-run -j 2 -- CPUS=2 PKGS=racket-lib)"
+  assert_contains "make -j2 CPUS=2" "$dry_out" "dry-run should print -jN and CPUS=N"
+  assert_contains "PKGS=racket-lib" "$dry_out" "dry-run should pass through user args after --"
+  assert_contains "$rebuild_root" "$dry_out" "dry-run plan should run make at the source root"
+  echo "rebuild --dry-run prints expected plan"
+
+  # --pull --dry-run on a non-git source: dry-run prints planned pull
+  # but does not verify, so it should succeed without git invocation.
+  pull_dry_out="$(run_rackup rebuild rebuildsrc --pull --dry-run)"
+  assert_contains "git -C" "$pull_dry_out" "dry-run --pull should print the planned git pull"
+  assert_contains "pull --ff-only" "$pull_dry_out" "dry-run --pull should call git pull --ff-only"
+  echo "rebuild --pull --dry-run prints expected git plan"
+
+  # --pull (no dry-run) on a non-git source must fail with a clear
+  # "not a git work tree" error (or "requires git" if git is absent).
+  pull_real_err="$(run_rackup rebuild rebuildsrc --pull 2>&1 || true)"
+  if [[ "$pull_real_err" == *"requires"*"git"* ]]; then
+    echo "rebuild --pull errors helpfully: git missing"
+  else
+    assert_contains "not a git work tree" "$pull_real_err" "rebuild --pull on non-git source should error"
+    echo "rebuild --pull rejects non-git source"
+  fi
+
+  # Real rebuild (no dry-run) actually runs `make`.  The Makefile is a
+  # no-op `default:` target, so it should succeed.  After it succeeds,
+  # meta.rktd should carry both `installed-at` and `last-rebuilt-at`.
+  run_rackup rebuild rebuildsrc -j 1
+  meta_path="$RACKUP_HOME/toolchains/local-rebuildsrc/meta.rktd"
+  [[ -f "$meta_path" ]] || fail "expected meta.rktd at $meta_path"
+  assert_contains "last-rebuilt-at" "$(cat "$meta_path")" "meta should be tagged after rebuild"
+  echo "real rebuild updated meta with last-rebuilt-at"
+
+  run_rackup remove rebuildsrc >/dev/null
+  rm -rf "$rebuild_root"
+  echo "rebuild smoke complete"
 fi
 run_rackup default "$primary_id"
 
