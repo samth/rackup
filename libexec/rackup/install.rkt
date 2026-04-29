@@ -28,7 +28,10 @@
          run-macos-dmg-installer!
          enumerate-toolchain-executables
          doctor-report
-         commit-state-change!)
+         commit-state-change!
+         detect-local-source-layout
+         finalize-local-toolchain!
+         local-toolchain-id)
 
 ;; Acquire the state lock, run body, then reshim to keep shims
 ;; consistent with the new state.
@@ -764,33 +767,55 @@
                                     (delete-directory/files tc-dir))
                                   (raise e))])
        (make-directory* tc-dir)
-       (define extra-exes (find-local-chez-extra-executables layout))
-       ;; Probe the linked racket with a clean environment so
-       ;; find-system-path returns the binary's native addon-dir.
-       (define-values (version* variant* addon-dir*)
-         (reprobe-local-toolchain (path->string* real-bin-dir)))
-       (unless addon-dir*
-         (install-warn
-          (string-append
-           "could not probe addon-dir from ~a; PLTADDONDIR will be unset.\n"
-           "  Run `rackup link --force ~a ~a` after fixing the binary\n"
-           "  (e.g., once `raco setup` finishes) to record the correct value.")
-          (path->string* real-bin-dir) name (hash-ref layout 'input-path)))
-       (define env-vars (local-layout-env-vars layout addon-dir* version* variant* name))
-       (make-bin-overlay! id real-bin-dir extra-exes)
-       (maybe-wrap-local-chez-extra-executables! id extra-exes layout)
-       (if (pair? env-vars)
-           (write-toolchain-env-file! id env-vars)
-           (delete-toolchain-env-file! id))
-       (ensure-toolchain-addon-dir! id)
-       (define executables (enumerate-toolchain-executables (rackup-toolchain-bin-link id)))
-       (define meta (local-toolchain-meta id name layout real-bin-dir executables env-vars version* variant*))
-       (commit-state-change!
-        (register-toolchain! id meta)
-        (when (hash-ref parsed-opts 'set-default? #f)
-          (set-default-toolchain! id)))
+       (finalize-local-toolchain! id name layout
+                                  #:set-default? (hash-ref parsed-opts 'set-default? #f))
        (displayln (format "Linked ~a => ~a" id (hash-ref layout 'input-path)))
        id)]))
+
+;; Shared post-build finalize: probe version/variant, recompute env vars,
+;; rewrite the bin overlay and env.sh, register/update meta, commit and
+;; reshim.  Used by `link-toolchain!` (initial link) and by
+;; `rebuild-toolchain!` (refresh after `make`).  Returns the new meta.
+(define (finalize-local-toolchain! id name layout
+                                   #:set-default? [set-default? #f]
+                                   #:installed-at [installed-at #f]
+                                   #:last-rebuilt-at [last-rebuilt-at #f])
+  (define real-bin-dir (string->path (hash-ref layout 'bin-dir)))
+  (define racket-exe (build-path real-bin-dir "racket"))
+  (unless (file-executable?/safe racket-exe)
+    (rackup-error "linked toolchain does not contain an executable racket binary at ~a"
+                  (path->string* racket-exe)))
+  (define extra-exes (find-local-chez-extra-executables layout))
+  ;; Probe the linked racket with a clean environment so
+  ;; find-system-path returns the binary's native addon-dir.
+  (define-values (version* variant* addon-dir*)
+    (reprobe-local-toolchain (path->string* real-bin-dir)))
+  (unless addon-dir*
+    (install-warn
+     (string-append
+      "could not probe addon-dir from ~a; PLTADDONDIR will be unset.\n"
+      "  Run `rackup link --force ~a ~a` after fixing the binary\n"
+      "  (e.g., once `raco setup` finishes) to record the correct value.")
+     (path->string* real-bin-dir) name (hash-ref layout 'input-path)))
+  (define env-vars (local-layout-env-vars layout addon-dir* version* variant* name))
+  (make-bin-overlay! id real-bin-dir extra-exes)
+  (maybe-wrap-local-chez-extra-executables! id extra-exes layout)
+  (if (pair? env-vars)
+      (write-toolchain-env-file! id env-vars)
+      (delete-toolchain-env-file! id))
+  (ensure-toolchain-addon-dir! id)
+  (define executables (enumerate-toolchain-executables (rackup-toolchain-bin-link id)))
+  (define base-meta
+    (local-toolchain-meta id name layout real-bin-dir executables env-vars version* variant*))
+  (define meta
+    (let* ([m base-meta]
+           [m (if installed-at (hash-set m 'installed-at installed-at) m)]
+           [m (if last-rebuilt-at (hash-set m 'last-rebuilt-at last-rebuilt-at) m)])
+      m))
+  (commit-state-change!
+   (register-toolchain! id meta)
+   (when set-default? (set-default-toolchain! id)))
+  meta)
 
 (define (report-default-change! before after id explicit?)
   (when (and after (not (equal? before after)))
