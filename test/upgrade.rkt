@@ -32,6 +32,21 @@
     " Package  Checksum  Source\n foo  abc  cat\n")
    '("foo"))
 
+  ;; Stray tokens (terminal escape fragments, partial messages) must
+  ;; be filtered so they aren't passed to `raco pkg install`.
+  (check-equal?
+   (parse-pkg-show-output
+    (string-append
+     " Package  Checksum  Source\n"
+     " rhombus  abc123      catalog\n"
+     " [22  garbage  garbage\n"
+     " main-distribution  def456  catalog\n"))
+   '("rhombus" "main-distribution"))
+  (check-equal?
+   (parse-pkg-show-output
+    " Package  Checksum  Source\n  /usr/local/path  -  bad\n some-pkg  abc  src\n")
+   '("some-pkg"))
+
   ;; ---------------------------------------------------------------------------
   ;; meta->upgrade-spec
 
