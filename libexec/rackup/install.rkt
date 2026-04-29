@@ -1082,30 +1082,34 @@
                     key
                     (if (= removed 1) "y" "ies"))])]))
 
-;; Parse the output of `raco pkg show --user` into a list of package
-;; names.  The format is a header line ("Package  Checksum  Source")
-;; followed by one line per package, where the first whitespace-delimited
-;; field is the package name.  A line containing "[none]" means no
-;; packages.
+;; Parse `raco pkg show --user` into a list of package names.  Header
+;; line "Package Checksum Source"; "[none]" means empty.  Filter
+;; tokens that don't match the package-name pattern so stray bytes
+;; (terminal escape fragments, partial error messages) aren't passed
+;; to `raco pkg install`.
 (define (parse-pkg-show-output text)
   (if (or (not text) (string-blank? text))
       null
-      (let ([lines (string-split text "\n")])
-        (for/list ([line (in-list lines)]
-                   #:when (not (or (string-blank? line)
-                                   (regexp-match? #px"^\\s*Package\\b" line)
-                                   (regexp-match? #px"\\[none\\]" line))))
-          (car (string-split (string-trim line)))))))
+      (for/list ([line (in-list (string-split text "\n"))]
+                 #:unless (or (string-blank? line)
+                              (regexp-match? #px"^\\s*Package\\b" line)
+                              (regexp-match? #px"\\[none\\]" line))
+                 [tok (in-value (car (string-split (string-trim line))))]
+                 #:when (valid-pkg-name? tok))
+        tok)))
 
 ;; Migrate user-scoped packages from old-id to new-id by listing
 ;; packages from the old toolchain and installing them in the new one.
+;; Returns #t on success (or when there are no packages to migrate),
+;; #f when the migration command reported errors.
 (define (migrate-user-packages! old-id new-id)
   (install-info "Checking for user packages to migrate...")
   (define show-output (capture-raco-output old-id "pkg" "show" "--user"))
   (define pkgs (parse-pkg-show-output show-output))
   (cond
     [(null? pkgs)
-     (install-info "No user packages to migrate.")]
+     (install-info "No user packages to migrate.")
+     #t]
     [else
      (install-info "Migrating ~a user package~a: ~a"
                    (length pkgs)
@@ -1121,11 +1125,15 @@
      (define ok?
        (parameterize ([current-environment-variables env])
          (apply system* raco-exe "pkg" "install" "--auto" "--skip-installed" pkgs)))
-     (if ok?
-         (install-ok "Migrated ~a package~a."
-                     (length pkgs)
-                     (if (= (length pkgs) 1) "" "s"))
-         (install-warn "Package migration had errors. Some packages may not have been migrated."))]))
+     (cond
+       [ok?
+        (install-ok "Migrated ~a package~a."
+                    (length pkgs)
+                    (if (= (length pkgs) 1) "" "s"))
+        #t]
+       [else
+        (install-warn "Package migration had errors. Some packages may not have been migrated.")
+        #f])]))
 
 ;; Determine the install spec to use when resolving the latest version
 ;; for a toolchain's channel.  The kind field is 'release for both
@@ -1226,12 +1234,24 @@
      (define spec (meta->upgrade-spec meta))
      (define new-id (install-toolchain! spec install-opts))
      (when (and (not (equal? new-id id)) (toolchain-exists? id))
-       (migrate-user-packages! id new-id)
+       (define migrated? (migrate-user-packages! id new-id))
        (when was-default?
          (commit-state-change!
           (set-default-toolchain! new-id))
          (install-info "Default toolchain updated to ~a" new-id))
-       (remove-toolchain! id))
+       (cond
+         [migrated?
+          (remove-toolchain! id)]
+         [else
+          ;; Migration failed -- keep the old toolchain so the user can
+          ;; recover.  Don't silently delete data.
+          (install-warn
+           (string-append
+            "Keeping old toolchain ~a because migration failed.\n"
+            "  Investigate the failure above, then either:\n"
+            "    - rackup upgrade --force ~a   (retry migration)\n"
+            "    - rackup remove ~a            (discard old toolchain)")
+           id id id)]))
      new-id]
     [else
      (install-ok "  ~a is up to date (~a)" id current-version)

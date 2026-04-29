@@ -31,6 +31,7 @@
          verify-installer-checksum!
          valid-toolchain-id?
          ensure-valid-toolchain-id!
+         valid-pkg-name?
          string-has-control-char?
          ensure-string-without-control-chars!
          ensure-path-without-control-chars!
@@ -245,6 +246,14 @@
   (unless (valid-toolchain-id? s)
     (rackup-error "invalid ~a: ~v" what s))
   s)
+
+;; Package name validation: positive allowlist matching Racket's pkg
+;; name rules.  Used to filter stray tokens out of `raco pkg show`
+;; output before passing them to `raco pkg install`.
+(define (valid-pkg-name? s)
+  (and (string? s)
+       (not (string-blank? s))
+       (regexp-match? #px"^[a-zA-Z0-9][a-zA-Z0-9_.+-]*$" s)))
 
 ;; Control character detection
 (define (string-has-control-char? s)
