@@ -507,4 +507,151 @@
   (define riscv-stable-req
     (resolve-install-request "stable" #:distribution 'full #:arch "riscv64" #:platform "linux"))
   (check-equal? (hash-ref riscv-stable-req 'distribution) 'minimal)
-  (check-equal? (hash-ref riscv-stable-req 'arch) "riscv64"))
+  (check-equal? (hash-ref riscv-stable-req 'arch) "riscv64")
+
+  ;; --- Content-Length parsing -------------------------------------------
+
+  (check-false (parse-content-length null))
+  (check-false (parse-content-length (list #"X-Other: 7")))
+  (check-equal? (parse-content-length (list #"Content-Length: 1234")) 1234)
+  ;; Header-ref does case-insensitive matching.
+  (check-equal? (parse-content-length (list #"content-length: 1234")) 1234)
+  (check-equal? (parse-content-length (list #"CONTENT-LENGTH: 1234")) 1234)
+  ;; Whitespace tolerated.
+  (check-equal? (parse-content-length (list #"Content-Length:    42")) 42)
+  (check-equal? (parse-content-length (list #"Content-Length:\t42\t")) 42)
+  (check-equal? (parse-content-length (list #"Content-Length: 0")) 0)
+  ;; Headers list with multiple entries; first match wins.
+  (check-equal? (parse-content-length (list #"Server: x" #"Content-Length: 99" #"Etag: y"))
+                99)
+  ;; Garbage values reject cleanly.
+  (check-false (parse-content-length (list #"Content-Length: not-a-number")))
+  (check-false (parse-content-length (list #"Content-Length: -5")))
+  (check-false (parse-content-length (list #"Content-Length: 1.5")))
+  (check-false (parse-content-length (list #"Content-Length: ")))
+
+  ;; --- format-bytes -----------------------------------------------------
+
+  (check-equal? (format-bytes 0) "0 B")
+  (check-equal? (format-bytes 1023) "1023 B")
+  (check-equal? (format-bytes 1024) "1.0 KB")
+  (check-equal? (format-bytes (* 1024 1024)) "1.0 MB")
+  (check-equal? (format-bytes (* 1024 1024 1024)) "1.00 GB")
+  (check-regexp-match #px"^312\\.0 MB$" (format-bytes (* 312 1024 1024)))
+
+  ;; --- progress-bar -----------------------------------------------------
+
+  ;; 30-cell width, with eighth-block sub-cell granularity.
+  (let ([empty (progress-bar 0.0)]
+        [full (progress-bar 1.0)]
+        [half (progress-bar 0.5)])
+    (check-equal? empty (string-append "[" (make-string 30 #\░) "]"))
+    (check-equal? full (string-append "[" (make-string 30 #\█) "]"))
+    ;; Half == 15 full blocks then 15 empty blocks.
+    (check-equal? half
+                  (string-append "["
+                                 (make-string 15 #\█)
+                                 (make-string 15 #\░)
+                                 "]")))
+  ;; Out-of-range fractions are clamped.
+  (check-equal? (progress-bar -0.5) (progress-bar 0.0))
+  (check-equal? (progress-bar 1.5) (progress-bar 1.0))
+  ;; Sub-cell granularity: 1/240 fraction → first eighth-block visible.
+  (let ([s (progress-bar (/ 1.0 (* 30 8)))])
+    (check-true (regexp-match? #px"^\\[▏" s)
+                "1/240 should render the 1/8 left-block character"))
+
+  ;; --- copy-port/progress: byte-perfect round-trip ----------------------
+
+  (define (collect-bytes payload total-len)
+    ;; Run copy-port/progress with a custom input port and verify the
+    ;; output bytes match payload exactly.
+    (define in (open-input-bytes payload))
+    (define out (open-output-bytes))
+    (copy-port/progress in out total-len "test")
+    (get-output-bytes out))
+
+  ;; Empty body.
+  (check-equal? (collect-bytes #"" 0) #"")
+  (check-equal? (collect-bytes #"" #f) #"")
+  ;; Body smaller than buffer.
+  (check-equal? (collect-bytes #"hello" 5) #"hello")
+  (check-equal? (collect-bytes #"hello" #f) #"hello")
+  ;; Body whose length disagrees with declared Content-Length: bytes are
+  ;; still copied verbatim (the percentage display clamps but data flow
+  ;; is unaffected).
+  (check-equal? (collect-bytes #"hello" 999) #"hello")
+  (check-equal? (collect-bytes #"hello" 2) #"hello")
+  ;; Body larger than the 64KB internal buffer: forces multiple
+  ;; read-bytes-avail!/write-bytes iterations of the copy loop.
+  (let ([big (make-bytes (* 200 1024) 65)])
+    (check-equal? (collect-bytes big (bytes-length big)) big))
+  ;; Body with embedded NUL and high-bit bytes: ensure no encoding
+  ;; conversion sneaks in along the byte path.
+  (let ([raw (apply bytes-append
+                    (for/list ([i (in-range 256)]) (bytes i)))])
+    (check-equal? (collect-bytes raw (bytes-length raw)) raw))
+
+  ;; --- copy-port/progress: degenerate ports -----------------------------
+
+  ;; Port that returns at most one byte per read-bytes-avail! call.
+  ;; The copy loop must accumulate every byte without dropping any.
+  (define (make-one-byte-port src)
+    (define i 0)
+    (define len (bytes-length src))
+    (make-input-port 'one-byte
+                     (lambda (buf)
+                       (cond
+                         [(= i len) eof]
+                         [else
+                          (bytes-set! buf 0 (bytes-ref src i))
+                          (set! i (add1 i))
+                          1]))
+                     #f
+                     void))
+  (let* ([payload (bytes-append (make-bytes 4096 88)
+                                #"--MIDDLE--"
+                                (make-bytes 4096 89))]
+         [in (make-one-byte-port payload)]
+         [out (open-output-bytes)])
+    (copy-port/progress in out (bytes-length payload) "drip")
+    (check-equal? (get-output-bytes out) payload
+                  "one-byte-at-a-time port must produce identical bytes"))
+
+  ;; --- download-url->file: round-trip via mocked sendrecv ---------------
+
+  (let ([payload (bytes-append (make-bytes (* 100 1024) 70)
+                               #"\0\1\2\3\4\5"
+                               (make-bytes (* 50 1024) 71))]
+        [in #f]
+        [dest #f])
+    (set! in (open-input-bytes payload))
+    (set! dest (make-temporary-file "rackup-download-roundtrip-~a" #f tmp-root))
+    (parameterize ([current-http-sendrecv-proc
+                    (make-keyword-procedure
+                     (lambda (_kws _kw-args . _args)
+                       (values "HTTP/1.1 200 OK"
+                               (list (string->bytes/utf-8
+                                      (format "Content-Length: ~a" (bytes-length payload))))
+                               in)))])
+      (define returned (download-url->file "http://example.invalid/file" dest))
+      (check-equal? returned dest)
+      (check-equal? (file->bytes dest) payload
+                    "downloaded file must contain exactly the response body"))
+    (check-true (port-closed? in)
+                "input port must be closed after a successful download")
+    (delete-file dest))
+
+  ;; download-url->file when the response has no Content-Length: still
+  ;; copies verbatim and closes the input port.
+  (let* ([payload #"abcdefghij"]
+         [in (open-input-bytes payload)]
+         [dest (make-temporary-file "rackup-download-no-clen-~a" #f tmp-root)])
+    (parameterize ([current-http-sendrecv-proc
+                    (make-keyword-procedure
+                     (lambda (_kws _kw-args . _args)
+                       (values "HTTP/1.1 200 OK" null in)))])
+      (download-url->file "http://example.invalid/file" dest))
+    (check-equal? (file->bytes dest) payload)
+    (check-true (port-closed? in))
+    (delete-file dest)))
