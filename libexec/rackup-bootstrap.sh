@@ -267,10 +267,19 @@ rackup_verify_runtime_installer() {
 rackup_download_to() {
   url="$1"
   out="$2"
+  mode="${3:-quiet}"
   if command -v curl >/dev/null 2>&1; then
-    curl -fsSL "$url" -o "$out"
+    if [ "$mode" = "progress" ] && [ -t 2 ]; then
+      curl -fL --progress-bar "$url" -o "$out"
+    else
+      curl -fsSL "$url" -o "$out"
+    fi
   elif command -v wget >/dev/null 2>&1; then
-    wget -qO "$out" "$url"
+    if [ "$mode" = "progress" ] && [ -t 2 ]; then
+      wget -O "$out" "$url"
+    else
+      wget -qO "$out" "$url"
+    fi
   else
     rackup_fail "need curl or wget"
   fi
@@ -502,7 +511,7 @@ rackup_hidden_runtime_install_if_missing() {
     rackup_verify_runtime_installer "$filename" "$installer_cache"
   else
     rackup_warn "downloading hidden runtime installer: $installer_url"
-    rackup_download_to "$installer_url" "$installer_cache"
+    rackup_download_to "$installer_url" "$installer_cache" progress
     rackup_verify_runtime_installer "$filename" "$installer_cache"
     if [ "$runtime_ext" = "sh" ]; then
       chmod 0755 "$installer_cache" || true

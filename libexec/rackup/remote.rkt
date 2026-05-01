@@ -1,6 +1,7 @@
 #lang racket/base
 
 (require racket/file
+         racket/format
          racket/list
          racket/match
          racket/path
@@ -126,13 +127,19 @@
                      (url->string u)
                      (url->string target)))
      (http-open/input target (sub1 redirects-left))]
-    [(equal? code 200) in]
+    [(equal? code 200) (values in (parse-content-length headers))]
     [else
      (close-input-port in)
      (rackup-error "HTTP request failed (~a): ~a" code (url->string u))]))
 
+(define (parse-content-length headers)
+  (define v (header-ref headers "Content-Length"))
+  (and v
+       (let ([n (string->number (string-trim v))])
+         (and (exact-nonnegative-integer? n) n))))
+
 (define (http-get-string url-str)
-  (define in (http-open/input url-str))
+  (define-values (in _len) (http-open/input url-str))
   (dynamic-wind void
                 (lambda ()
                   (port->string in))
@@ -140,7 +147,7 @@
                   (close-input-port in))))
 
 (define (http-get-rktd url-str)
-  (define in (http-open/input url-str))
+  (define-values (in _len) (http-open/input url-str))
   (dynamic-wind
    void
    (lambda ()
@@ -153,16 +160,99 @@
    (lambda ()
      (close-input-port in))))
 
+(define (format-bytes n)
+  (cond
+    [(< n 1024) (format "~a B" n)]
+    [(< n (* 1024 1024)) (format "~a KB" (~r (/ n 1024.0) #:precision '(= 1)))]
+    [(< n (* 1024 1024 1024))
+     (format "~a MB" (~r (/ n 1024.0 1024.0) #:precision '(= 1)))]
+    [else (format "~a GB" (~r (/ n 1024.0 1024.0 1024.0) #:precision '(= 2)))]))
+
+(define progress-bar-width 30)
+
+;; Unicode left-block eighths: 1/8, 2/8, ..., 7/8.  Combined with U+2588
+;; (full block) for whole cells, this gives sub-cell granularity.
+(define eighth-blocks
+  (vector "" "▏" "▎" "▍" "▌" "▋" "▊" "▉"))
+(define full-block "█")
+(define empty-block "░")
+
+(define (progress-bar fraction)
+  (define f (max 0.0 (min 1.0 fraction)))
+  (define total-eighths (inexact->exact (floor (* f progress-bar-width 8))))
+  (define-values (full extra) (quotient/remainder total-eighths 8))
+  (define filled
+    (string-append (apply string-append (for/list ([_ (in-range full)]) full-block))
+                   (vector-ref eighth-blocks extra)))
+  (define filled-cells (+ full (if (positive? extra) 1 0)))
+  (define empty
+    (apply string-append
+           (for/list ([_ (in-range (- progress-bar-width filled-cells))]) empty-block)))
+  (string-append "[" filled empty "]"))
+
+(define (progress-enabled?)
+  (and (terminal-port? (current-error-port))
+       (not (getenv "RACKUP_NO_PROGRESS"))))
+
+(define (copy-port/progress in out total-len label)
+  (define show? (progress-enabled?))
+  (define err (current-error-port))
+  (define buf (make-bytes (* 64 1024)))
+  (define start-ms (current-inexact-milliseconds))
+  (define last-ms 0.0)
+  (define last-width 0)
+  (define received 0)
+  (define (render! force?)
+    (when show?
+      (define now (current-inexact-milliseconds))
+      (when (or force? (>= (- now last-ms) 200))
+        (set! last-ms now)
+        (define elapsed-s (max 0.001 (/ (- now start-ms) 1000.0)))
+        (define rate (inexact->exact (round (/ received elapsed-s))))
+        (define text
+          (cond
+            [(and total-len (positive? total-len))
+             (define frac (/ received (* 1.0 total-len)))
+             (format "  ~a  ~a%  ~a / ~a at ~a/s"
+                     (progress-bar frac)
+                     (~r (min 100.0 (* frac 100.0)) #:precision '(= 1))
+                     (format-bytes received)
+                     (format-bytes total-len)
+                     (format-bytes rate))]
+            [else
+             (format "  ~a: ~a at ~a/s"
+                     label (format-bytes received) (format-bytes rate))]))
+        (define width (string-length text))
+        (define padded
+          (if (< width last-width)
+              (string-append text (make-string (- last-width width) #\space))
+              text))
+        (set! last-width width)
+        (fprintf err "\r~a" padded)
+        (flush-output err))))
+  (let loop ()
+    (define n (read-bytes-avail! buf in))
+    (cond
+      [(eof-object? n)
+       (render! #t)
+       (when show? (newline err) (flush-output err))]
+      [else
+       (write-bytes buf out 0 n)
+       (set! received (+ received n))
+       (render! #f)
+       (loop)])))
+
 (define (download-url->file url-str dest-path)
   (make-directory* (or (path-only dest-path) "."))
-  (define in (http-open/input url-str))
+  (define-values (in content-length) (http-open/input url-str))
+  (define label (path-basename-string dest-path))
   (dynamic-wind
    void
    (lambda ()
      (call-with-output-file* dest-path
        #:exists 'truncate/replace
        (lambda (out)
-         (copy-port in out))))
+         (copy-port/progress in out content-length label))))
    (lambda ()
      (close-input-port in)))
   dest-path)
@@ -909,4 +999,8 @@
 (module+ for-testing
   (provide current-http-sendrecv-proc
            http-get-string
-           http-get-rktd))
+           http-get-rktd
+           parse-content-length
+           format-bytes
+           progress-bar
+           copy-port/progress))
