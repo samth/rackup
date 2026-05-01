@@ -11,7 +11,10 @@
          racket/system
          (for-syntax racket/base
                      racket/file
-                     racket/string)
+                     racket/string
+                     racket/syntax
+                     "commands-data.rkt")
+         "commands-data.rkt"
          "install.rkt"
          "legacy-plt-catalog.rkt"
          "paths.rkt"
@@ -563,6 +566,10 @@
   (commit-state-change!
    (when aliases? (install-shim-aliases!))
    (when no-aliases? (remove-shim-aliases!)))
+  ;; Keep installed shell helper scripts in sync with the running rackup
+  ;; code so new subcommands and flags become tab-completable without
+  ;; requiring the user to rerun `rackup init`.
+  (refresh-shell-integration!)
   (displayln "Reshim complete."))
 
 ;; Reorder install args so flags precede the positional spec.
@@ -1074,6 +1081,28 @@
                 (void))
   (doctor-report))
 
+;; Build a name → handler lookup table from `rackup-commands` at compile
+;; time, skipping `help` (dispatched by hand).  Adding a new subcommand
+;; means (1) editing commands-data.rkt and (2) defining `cmd-<name>`;
+;; the dispatcher and the bash/zsh completion both pick it up
+;; automatically — there is no second list to keep in sync.
+(define-syntax (rackup-dispatch-table stx)
+  (syntax-case stx ()
+    [(_)
+     (with-syntax ([(name ...)
+                    (for/list ([entry (in-list rackup-commands)]
+                               #:unless (member (car entry)
+                                                rackup-manual-dispatch-commands))
+                      (car entry))]
+                   [(handler ...)
+                    (for/list ([entry (in-list rackup-commands)]
+                               #:unless (member (car entry)
+                                                rackup-manual-dispatch-commands))
+                      (format-id stx "cmd-~a" (car entry)))])
+       #'(make-immutable-hash (list (cons name handler) ...)))]))
+
+(define dispatch-table (rackup-dispatch-table))
+
 (define (dispatch args)
   (match args
     ['() (usage)]
@@ -1081,30 +1110,11 @@
     [(list "help") (usage)]
     [(list "help" cmd) (dispatch (list cmd "--help"))]
     [(list "help" _ ...) (rackup-error "usage: rackup help [command]")]
-    [(list "available" rest ...) (cmd-available rest)]
-    [(list "install" rest ...) (cmd-install rest)]
-    [(list "link" rest ...) (cmd-link rest)]
-    [(list "rebuild" rest ...) (cmd-rebuild rest)]
-    [(list "list" rest ...) (cmd-list rest)]
-    [(list "default" rest ...) (cmd-default rest)]
-    [(list "current" rest ...) (cmd-current rest)]
-    [(list "prompt" rest ...) (cmd-prompt rest)]
-    [(list "which" rest ...) (cmd-which rest)]
-    [(list "switch" rest ...) (cmd-switch rest)]
-    [(list "shell" rest ...) (cmd-shell rest)]
-    [(list "run" rest ...) (cmd-run rest)]
-    [(list "upgrade" rest ...) (cmd-upgrade rest)]
-    [(list "remove" rest ...) (cmd-remove rest)]
-    [(list "reshim" rest ...) (cmd-reshim rest)]
-    [(list "init" rest ...) (cmd-init rest)]
-    [(list "uninstall" rest ...) (cmd-uninstall rest)]
-    [(list "self-upgrade" rest ...) (cmd-self-upgrade rest)]
-    [(list "runtime" rest ...) (cmd-runtime rest)]
-    [(list "doctor" rest ...) (cmd-doctor rest)]
-    [(list "version" rest ...) (cmd-version rest)]
-    [_
-     (usage)
-     (exit 2)]))
+    [(cons cmd rest)
+     (define handler (hash-ref dispatch-table cmd #f))
+     (cond
+       [handler (handler rest)]
+       [else (usage) (exit 2)])]))
 
 (define (main)
   (with-handlers ([exn:fail:user? (lambda (e)
