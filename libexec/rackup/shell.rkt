@@ -4,6 +4,7 @@
          racket/list
          racket/path
          racket/string
+         "commands-data.rkt"
          "paths.rkt"
          "rktd-io.rkt"
          "shims.rkt"
@@ -13,12 +14,20 @@
 (provide emit-shell-activation
          emit-shell-deactivation
          init-shell!
+         refresh-shell-integration!
          shell-helper-script
          strip-managed-block
          remove-shell-init-blocks!)
 
 (define start-marker "# >>> rackup initialize >>>")
 (define end-marker "# <<< rackup initialize <<<")
+
+;; The rackup subcommand list lives in commands-data.rkt; the dispatcher
+;; in main.rkt is generated from the same data via a macro, so the two
+;; cannot drift apart.
+
+(define (commands-space-separated)
+  (string-join rackup-public-command-names " "))
 
 (define (shell-wrapper-function)
   (string-append "rackup() {\n"
@@ -64,7 +73,7 @@
    "  words=(\"${COMP_WORDS[@]}\")\n"
    "  cword=$COMP_CWORD\n"
    "\n"
-   "  local commands=\"available install link rebuild list default current which switch shell run prompt remove reshim init uninstall self-upgrade runtime doctor version help\"\n"
+   "  local commands=\"" (commands-space-separated) "\"\n"
    "\n"
    "  if [ \"$cword\" -eq 1 ]; then\n"
    "    COMPREPLY=($(compgen -W \"$commands\" -- \"$cur\"))\n"
@@ -73,12 +82,14 @@
    "\n"
    "  # flag argument completion\n"
    "  case \"$prev\" in\n"
-   "    --variant)      COMPREPLY=($(compgen -W \"cs bc\" -- \"$cur\")); return ;;\n"
-   "    --distribution) COMPREPLY=($(compgen -W \"full minimal\" -- \"$cur\")); return ;;\n"
-   "    --snapshot-site) COMPREPLY=($(compgen -W \"auto utah northwestern\" -- \"$cur\")); return ;;\n"
-   "    --arch)         COMPREPLY=($(compgen -W \"x86_64 aarch64 i386 arm riscv64 ppc\" -- \"$cur\")); return ;;\n"
-   "    --shell)        COMPREPLY=($(compgen -W \"bash zsh\" -- \"$cur\")); return ;;\n"
-   "    --toolchain)    COMPREPLY=($(compgen -W \"$(_rackup_toolchains)\" -- \"$cur\")); return ;;\n"
+   "    --variant)        COMPREPLY=($(compgen -W \"cs bc\" -- \"$cur\")); return ;;\n"
+   "    --distribution)   COMPREPLY=($(compgen -W \"full minimal\" -- \"$cur\")); return ;;\n"
+   "    --snapshot-site)  COMPREPLY=($(compgen -W \"auto utah northwestern\" -- \"$cur\")); return ;;\n"
+   "    --arch)           COMPREPLY=($(compgen -W \"x86_64 aarch64 i386 arm riscv64 ppc\" -- \"$cur\")); return ;;\n"
+   "    --installer-ext)  COMPREPLY=($(compgen -W \"sh tgz dmg\" -- \"$cur\")); return ;;\n"
+   "    --shell)          COMPREPLY=($(compgen -W \"bash zsh\" -- \"$cur\")); return ;;\n"
+   "    --toolchain)      COMPREPLY=($(compgen -W \"$(_rackup_toolchains)\" -- \"$cur\")); return ;;\n"
+   "    --ref|--repo|--limit|--jobs|-j) return ;;\n"
    "  esac\n"
    "\n"
    "  local cmd=\"${words[1]}\"\n"
@@ -87,13 +98,22 @@
    "      COMPREPLY=($(compgen -W \"--all --limit\" -- \"$cur\"))\n"
    "      ;;\n"
    "    install)\n"
-   "      COMPREPLY=($(compgen -W \"stable pre-release snapshot snapshot:utah snapshot:northwestern --variant --distribution --snapshot-site --arch --set-default --force --no-cache --quiet --verbose\" -- \"$cur\"))\n"
+   "      COMPREPLY=($(compgen -W \"stable pre-release snapshot snapshot:utah snapshot:northwestern --variant --distribution --snapshot-site --arch --installer-ext --set-default --force --no-cache --short-aliases --quiet --verbose\" -- \"$cur\"))\n"
    "      ;;\n"
    "    link)\n"
-   "      COMPREPLY=($(compgen -W \"--set-default --force\" -- \"$cur\"))\n"
+   "      if [[ \"$cur\" == -* ]]; then\n"
+   "        COMPREPLY=($(compgen -W \"--set-default --force\" -- \"$cur\"))\n"
+   "      elif [ \"$cword\" -ge 3 ]; then\n"
+   "        COMPREPLY=($(compgen -d -- \"$cur\"))\n"
+   "      else\n"
+   "        COMPREPLY=($(compgen -W \"--set-default --force\" -- \"$cur\"))\n"
+   "      fi\n"
    "      ;;\n"
    "    rebuild)\n"
-   "      COMPREPLY=($(compgen -W \"--pull --jobs --dry-run --no-update-meta $(_rackup_toolchains)\" -- \"$cur\"))\n"
+   "      COMPREPLY=($(compgen -W \"--pull --jobs -j --dry-run --no-update-meta $(_rackup_toolchains)\" -- \"$cur\"))\n"
+   "      ;;\n"
+   "    list)\n"
+   "      COMPREPLY=($(compgen -W \"--ids\" -- \"$cur\"))\n"
    "      ;;\n"
    "    default)\n"
    "      COMPREPLY=($(compgen -W \"id status set clear --unset $(_rackup_toolchains)\" -- \"$cur\"))\n"
@@ -102,7 +122,11 @@
    "      COMPREPLY=($(compgen -W \"id source line\" -- \"$cur\"))\n"
    "      ;;\n"
    "    which)\n"
-   "      COMPREPLY=($(compgen -W \"--toolchain\" -- \"$cur\"))\n"
+   "      if [[ \"$cur\" == -* ]]; then\n"
+   "        COMPREPLY=($(compgen -W \"--toolchain\" -- \"$cur\"))\n"
+   "      else\n"
+   "        COMPREPLY=($(compgen -c -- \"$cur\"))\n"
+   "      fi\n"
    "      ;;\n"
    "    switch)\n"
    "      COMPREPLY=($(compgen -W \"--unset $(_rackup_toolchains)\" -- \"$cur\"))\n"
@@ -111,13 +135,20 @@
    "      COMPREPLY=($(compgen -W \"--deactivate $(_rackup_toolchains)\" -- \"$cur\"))\n"
    "      ;;\n"
    "    run)\n"
-   "      COMPREPLY=($(compgen -W \"$(_rackup_toolchains)\" -- \"$cur\"))\n"
+   "      if [ \"$cword\" -eq 2 ]; then\n"
+   "        COMPREPLY=($(compgen -W \"$(_rackup_toolchains)\" -- \"$cur\"))\n"
+   "      else\n"
+   "        COMPREPLY=($(compgen -c -- \"$cur\"))\n"
+   "      fi\n"
    "      ;;\n"
    "    prompt)\n"
    "      COMPREPLY=($(compgen -W \"--long --short --raw --source\" -- \"$cur\"))\n"
    "      ;;\n"
    "    remove)\n"
-   "      COMPREPLY=($(compgen -W \"$(_rackup_toolchains)\" -- \"$cur\"))\n"
+   "      COMPREPLY=($(compgen -W \"--clean-compiled $(_rackup_toolchains)\" -- \"$cur\"))\n"
+   "      ;;\n"
+   "    reshim)\n"
+   "      COMPREPLY=($(compgen -W \"--short-aliases --no-short-aliases\" -- \"$cur\"))\n"
    "      ;;\n"
    "    init)\n"
    "      COMPREPLY=($(compgen -W \"--shell\" -- \"$cur\"))\n"
@@ -126,7 +157,10 @@
    "      COMPREPLY=($(compgen -W \"--dangerously-delete-without-prompting\" -- \"$cur\"))\n"
    "      ;;\n"
    "    self-upgrade)\n"
-   "      COMPREPLY=($(compgen -W \"--with-init\" -- \"$cur\"))\n"
+   "      COMPREPLY=($(compgen -W \"--with-init --exe --source --ref --repo\" -- \"$cur\"))\n"
+   "      ;;\n"
+   "    upgrade)\n"
+   "      COMPREPLY=($(compgen -W \"--force --no-cache\" -- \"$cur\"))\n"
    "      ;;\n"
    "    runtime)\n"
    "      COMPREPLY=($(compgen -W \"status install upgrade\" -- \"$cur\"))\n"
@@ -138,6 +172,19 @@
    "}\n"
    "\n"
    "complete -F _rackup rackup\n"))
+
+(define (zsh-command-describe-list)
+  ;; Build the zsh `_describe` command list as quoted 'name:description' strings.
+  (apply string-append
+         (for/list ([entry (in-list rackup-public-commands)])
+           (string-append "    '"
+                          (car entry)
+                          ":"
+                          (cdr entry)
+                          "'\n"))))
+
+(define (zsh-command-names-list)
+  (string-join rackup-public-command-names " "))
 
 (define (zsh-completion-script)
   (string-append
@@ -152,30 +199,32 @@
    "  fi\n"
    "}\n"
    "\n"
+   "# Emit toolchain id:description pairs for zsh _describe.\n"
+   "_rackup_toolchains_described() {\n"
+   "  local dir=\"${RACKUP_HOME:-$HOME/.rackup}/toolchains\"\n"
+   "  [ -d \"$dir\" ] || return\n"
+   "  local f id meta version variant dist desc\n"
+   "  for f in \"$dir\"/*/; do\n"
+   "    [ -d \"$f\" ] || continue\n"
+   "    id=$(basename \"$f\")\n"
+   "    meta=\"$f/meta.rktd\"\n"
+   "    desc=\"toolchain\"\n"
+   "    if [ -f \"$meta\" ]; then\n"
+   "      version=$(sed -n \"s/.*'resolved-version[[:space:]]*\\\"\\([^\\\"]*\\)\\\".*/\\1/p\" \"$meta\" 2>/dev/null | head -n1)\n"
+   "      variant=$(sed -n \"s/.*'variant[[:space:]]*\\\"\\([^\\\"]*\\)\\\".*/\\1/p\" \"$meta\" 2>/dev/null | head -n1)\n"
+   "      dist=$(sed -n \"s/.*'distribution[[:space:]]*\\\"\\([^\\\"]*\\)\\\".*/\\1/p\" \"$meta\" 2>/dev/null | head -n1)\n"
+   "      if [ -n \"$version\" ]; then\n"
+   "        desc=\"$version${variant:+, $variant}${dist:+, $dist}\"\n"
+   "      fi\n"
+   "    fi\n"
+   "    print -- \"${id}:${desc}\"\n"
+   "  done\n"
+   "}\n"
+   "\n"
    "_rackup() {\n"
    "  local -a commands\n"
    "  commands=(\n"
-   "    'available:List remote install specs and recent release versions'\n"
-   "    'install:Install a Racket toolchain'\n"
-   "    'link:Link an in-place/local Racket build as a managed toolchain'\n"
-   "    'rebuild:Rebuild a linked source toolchain in place'\n"
-   "    'list:List installed toolchains'\n"
-   "    'default:Show, set, or clear the global default toolchain'\n"
-   "    'current:Show the active toolchain and where it came from'\n"
-   "    'which:Show the real executable path for a tool'\n"
-   "    'switch:Switch the active toolchain in this shell'\n"
-   "    'shell:Emit shell code to activate/deactivate a toolchain'\n"
-   "    'run:Run a command using a specific toolchain'\n"
-   "    'prompt:Print prompt info for PS1'\n"
-   "    'remove:Remove an installed or linked toolchain'\n"
-   "    'reshim:Rebuild executable shims'\n"
-   "    'init:Install/update shell integration'\n"
-   "    'uninstall:Remove rackup and its data'\n"
-   "    'self-upgrade:Upgrade rackup code'\n"
-   "    'runtime:Manage internal runtime'\n"
-   "    'doctor:Print diagnostics'\n"
-   "    'version:Print version info'\n"
-   "    'help:Show help'\n"
+   (zsh-command-describe-list)
    "  )\n"
    "\n"
    "  if (( CURRENT == 2 )); then\n"
@@ -186,7 +235,9 @@
    "  local cmd=\"${words[2]}\"\n"
    "  case \"$cmd\" in\n"
    "    available)\n"
-   "      _arguments '*:option:(--all --limit)'\n"
+   "      _arguments \\\n"
+   "        '--all[Show all versions]' \\\n"
+   "        '--limit[Maximum versions to show]:n'\n"
    "      ;;\n"
    "    install)\n"
    "      _arguments \\\n"
@@ -195,9 +246,11 @@
    "        '--distribution[Distribution type]:distribution:(full minimal)' \\\n"
    "        '--snapshot-site[Snapshot mirror]:site:(auto utah northwestern)' \\\n"
    "        '--arch[Target architecture]:arch:(x86_64 aarch64 i386 arm riscv64 ppc)' \\\n"
+   "        '--installer-ext[Force installer extension]:ext:(sh tgz dmg)' \\\n"
    "        '--set-default[Set as default]' \\\n"
    "        '--force[Force reinstall]' \\\n"
    "        '--no-cache[Skip download cache]' \\\n"
+   "        '--short-aliases[Install short aliases r/dr]' \\\n"
    "        '--quiet[Quiet output]' \\\n"
    "        '--verbose[Verbose output]'\n"
    "      ;;\n"
@@ -205,70 +258,101 @@
    "      _arguments '1:name:' '2:path:_directories' '*:option:(--set-default --force)'\n"
    "      ;;\n"
    "    rebuild)\n"
-   "      local -a toolchains\n"
-   "      toolchains=(${(f)\"$(_rackup_toolchains)\"})\n"
+   "      local -a tcs\n"
+   "      tcs=(${(f)\"$(_rackup_toolchains_described)\"})\n"
    "      _arguments \\\n"
-   "        \"::toolchain:($toolchains)\" \\\n"
    "        '--pull[Run git pull --ff-only first]' \\\n"
    "        '--jobs[Parallel jobs for make]:jobs' \\\n"
    "        '-j[Parallel jobs for make]:jobs' \\\n"
    "        '--dry-run[Print planned commands only]' \\\n"
-   "        '--no-update-meta[Skip metadata refresh]'\n"
+   "        '--no-update-meta[Skip metadata refresh]' \\\n"
+   "        \"::toolchain:((${tcs}))\"\n"
+   "      ;;\n"
+   "    list)\n"
+   "      _arguments '--ids[Print only toolchain IDs]'\n"
    "      ;;\n"
    "    default)\n"
-   "      local -a toolchains\n"
-   "      toolchains=(${(f)\"$(_rackup_toolchains)\"})\n"
-   "      _arguments \"*:option:(id status set clear --unset $toolchains)\"\n"
+   "      local -a tcs\n"
+   "      tcs=(${(f)\"$(_rackup_toolchains_described)\"})\n"
+   "      _arguments \\\n"
+   "        '--unset[Clear the default toolchain]' \\\n"
+   "        \"*::action:((id\\:'show id' status\\:'show set/unset' set\\:'set default' clear\\:'clear default' ${tcs}))\"\n"
    "      ;;\n"
    "    current)\n"
-   "      _arguments '*:subcommand:(id source line)'\n"
+   "      _arguments \"1:subcommand:((id\\:'show id' source\\:'show source' line\\:'id and source'))\"\n"
    "      ;;\n"
    "    which)\n"
-   "      local -a toolchains\n"
-   "      toolchains=(${(f)\"$(_rackup_toolchains)\"})\n"
+   "      local -a tcs\n"
+   "      tcs=(${(f)\"$(_rackup_toolchains_described)\"})\n"
    "      _arguments \\\n"
-   "        \"--toolchain[Use specific toolchain]:toolchain:($toolchains)\" \\\n"
-   "        '1:command:'\n"
+   "        \"--toolchain[Use specific toolchain]:toolchain:((${tcs}))\" \\\n"
+   "        '1:command:_command_names'\n"
    "      ;;\n"
    "    switch)\n"
-   "      local -a toolchains\n"
-   "      toolchains=(${(f)\"$(_rackup_toolchains)\"})\n"
-   "      _arguments \"*:toolchain:(--unset $toolchains)\"\n"
+   "      local -a tcs\n"
+   "      tcs=(${(f)\"$(_rackup_toolchains_described)\"})\n"
+   "      _arguments \\\n"
+   "        '--unset[Deactivate shell toolchain]' \\\n"
+   "        \"1:toolchain:((${tcs}))\"\n"
    "      ;;\n"
    "    shell)\n"
-   "      local -a toolchains\n"
-   "      toolchains=(${(f)\"$(_rackup_toolchains)\"})\n"
-   "      _arguments \"*:toolchain:(--deactivate $toolchains)\"\n"
+   "      local -a tcs\n"
+   "      tcs=(${(f)\"$(_rackup_toolchains_described)\"})\n"
+   "      _arguments \\\n"
+   "        '--deactivate[Deactivate shell toolchain]' \\\n"
+   "        \"1:toolchain:((${tcs}))\"\n"
    "      ;;\n"
    "    run)\n"
-   "      local -a toolchains\n"
-   "      toolchains=(${(f)\"$(_rackup_toolchains)\"})\n"
-   "      _arguments \"1:toolchain:($toolchains)\"\n"
+   "      local -a tcs\n"
+   "      tcs=(${(f)\"$(_rackup_toolchains_described)\"})\n"
+   "      _arguments \\\n"
+   "        \"1:toolchain:((${tcs}))\" \\\n"
+   "        '*:command:_command_names'\n"
    "      ;;\n"
    "    prompt)\n"
-   "      _arguments '*:option:(--long --short --raw --source)'\n"
+   "      _arguments \\\n"
+   "        '--long[Long format: \\[rk:<id>\\]]' \\\n"
+   "        '--short[Short format (default)]' \\\n"
+   "        '--raw[Raw toolchain ID]' \\\n"
+   "        '--source[ID and source]'\n"
    "      ;;\n"
    "    remove)\n"
-   "      local -a toolchains\n"
-   "      toolchains=(${(f)\"$(_rackup_toolchains)\"})\n"
-   "      _arguments \"1:toolchain:($toolchains)\"\n"
+   "      local -a tcs\n"
+   "      tcs=(${(f)\"$(_rackup_toolchains_described)\"})\n"
+   "      _arguments \\\n"
+   "        '--clean-compiled[Remove version-specific compiled directories]' \\\n"
+   "        \"1:toolchain:((${tcs}))\"\n"
+   "      ;;\n"
+   "    reshim)\n"
+   "      _arguments \\\n"
+   "        '(--no-short-aliases)--short-aliases[Enable short aliases r/dr]' \\\n"
+   "        '(--short-aliases)--no-short-aliases[Remove short aliases]'\n"
    "      ;;\n"
    "    init)\n"
    "      _arguments '--shell[Shell type]:shell:(bash zsh)'\n"
    "      ;;\n"
    "    uninstall)\n"
-   "      _arguments '*:option:(--dangerously-delete-without-prompting)'\n"
+   "      _arguments '--dangerously-delete-without-prompting[Skip confirmation prompt]'\n"
    "      ;;\n"
    "    self-upgrade)\n"
-   "      _arguments '*:option:(--with-init)'\n"
+   "      _arguments \\\n"
+   "        '--with-init[Also update shell init]' \\\n"
+   "        '(--source)--exe[Require prebuilt binary]' \\\n"
+   "        '(--exe)--source[Install from source]' \\\n"
+   "        '--ref[Git ref]:ref' \\\n"
+   "        '--repo[GitHub repository]:owner/repo'\n"
+   "      ;;\n"
+   "    upgrade)\n"
+   "      _arguments \\\n"
+   "        '--force[Reinstall even if up to date]' \\\n"
+   "        '--no-cache[Re-download installer]' \\\n"
+   "        '1:version:'\n"
    "      ;;\n"
    "    runtime)\n"
-   "      _arguments '*:subcommand:(status install upgrade)'\n"
+   "      _arguments \"1:subcommand:((status\\:'show runtime status' install\\:'install runtime' upgrade\\:'upgrade runtime'))\"\n"
    "      ;;\n"
    "    help)\n"
-   "      local -a cmd_names\n"
-   "      cmd_names=(available install link list default current which switch shell run prompt remove reshim init uninstall self-upgrade runtime doctor version help)\n"
-   "      _arguments \"1:command:($cmd_names)\"\n"
+   "      _arguments \"1:command:(" (zsh-command-names-list) ")\"\n"
    "      ;;\n"
    "  esac\n"
    "}\n"
@@ -405,6 +489,21 @@
         (set! removed (cons rc removed)))))
   (reverse removed))
 
+(define (write-shell-helper-files!)
+  (for ([s '("bash" "zsh")])
+    (define p (rackup-shell-script s))
+    (write-string-file p (shell-helper-script s))))
+
+;; Refresh helper scripts in-place (e.g. after `self-upgrade`) so any
+;; new commands or flags become tab-completable in existing shells
+;; without requiring the user to rerun `rackup init`.  Only writes the
+;; helper scripts; does NOT modify the user's rc files.  No-op if the
+;; user has not previously run `rackup init` (no helper directory).
+(define (refresh-shell-integration!)
+  (define shell-dir (rackup-shell-dir))
+  (when (directory-exists? shell-dir)
+    (write-shell-helper-files!)))
+
 (define (init-shell! [shell-name #f])
   (ensure-rackup-layout!)
   (define shell* (or shell-name (guess-shell)))
@@ -412,9 +511,7 @@
     (rackup-error "unsupported shell for init: ~a" shell*))
   (ensure-shim-dispatcher!)
   (ensure-core-rackup-shim!)
-  (for ([s '("bash" "zsh")])
-    (define p (rackup-shell-script s))
-    (write-string-file p (shell-helper-script s)))
+  (write-shell-helper-files!)
   (define rc (rc-path shell*))
   (define existing (read-string-file rc ""))
   (write-string-file rc (replace-managed-block existing (managed-rc-block shell*)))
