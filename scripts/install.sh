@@ -280,6 +280,25 @@ download_file() {
   fi
 }
 
+# Like download_file, but show a progress bar on stderr when stderr is a
+# terminal.  Use for large downloads (binary tarballs) where the user
+# benefits from seeing progress.
+download_file_progress() {
+  url="$1"
+  out="$2"
+  if [ ! -t 2 ] || [ -n "${RACKUP_NO_PROGRESS:-}" ]; then
+    download_file "$url" "$out"
+    return
+  fi
+  if command -v curl >/dev/null 2>&1; then
+    curl -fL --progress-bar "$url" -o "$out"
+  elif command -v wget >/dev/null 2>&1; then
+    wget --show-progress -nv -O "$out" "$url"
+  else
+    return 1
+  fi
+}
+
 # Compute SHA-256 of a file, printing the hex digest to stdout.
 # Returns 1 if no hash tool is available.
 is_sha256_hex() {
@@ -504,7 +523,7 @@ if [ -z "$FROM_LOCAL" ] && [ "$FORCE_SOURCE" -eq 0 ]; then
     BINARY_URL="$BINARY_BASE_URL/$BINARY_NAME"
     CHECKSUM_URL="${BINARY_URL}.sha256"
     info "Downloading prebuilt binary for $HOST_TARGET..."
-    if download_file "$BINARY_URL" "$TMPDIR_INSTALL/rackup-binary.tar.gz"; then
+    if download_file_progress "$BINARY_URL" "$TMPDIR_INSTALL/rackup-binary.tar.gz"; then
       info "Downloaded prebuilt binary."
       # Verify SHA-256 checksum of the binary tarball.
       if download_file "$CHECKSUM_URL" "$TMPDIR_INSTALL/rackup-binary.tar.gz.sha256"; then
@@ -603,11 +622,7 @@ if [ "$INSTALLED_PREBUILT" -eq 0 ]; then
       ARCHIVE_URL="https://github.com/${REPO}/archive/refs/heads/${REF}.tar.gz"
     fi
     info "Downloading rackup sources from ${ARCHIVE_URL}"
-    if command -v curl >/dev/null 2>&1; then
-      curl -fsSL "$ARCHIVE_URL" -o "$TMPDIR_INSTALL/rackup.tar.gz"
-    elif command -v wget >/dev/null 2>&1; then
-      wget -qO "$TMPDIR_INSTALL/rackup.tar.gz" "$ARCHIVE_URL"
-    else
+    if ! download_file_progress "$ARCHIVE_URL" "$TMPDIR_INSTALL/rackup.tar.gz"; then
       warn "Error: need curl or wget to download rackup sources."
       exit 1
     fi
