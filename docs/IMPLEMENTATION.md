@@ -114,6 +114,12 @@ The default toolchain is also stored separately in `~/.rackup/state/default-tool
 
 Each toolchain has a `meta.rktd` file under `~/.rackup/toolchains/<id>/` recording its kind, version, variant, architecture, platform, installer URL, install timestamp, and other details. This file is written once at install time and not modified afterward.
 
+### Toolchain install prefix (`--prefix`)
+
+By default the on-disk directory for a toolchain is the same as its logical location, `~/.rackup/toolchains/<id>/`. With `rackup install --prefix <path>` (or `RACKUP_TOOLCHAIN_PREFIX=<path>`), the install routine places the real directory at `<path>/<id>/` and creates `~/.rackup/toolchains/<id>` as an absolute symlink pointing to it. All path-derived helpers in `paths.rkt` continue to return the symlinked location, so the rest of the codebase is oblivious to the indirection — the OS resolves through the link.
+
+The prefix is recorded in `meta.rktd` under `'toolchain-prefix` so `rackup upgrade` reinstalls in the same prefix without the user having to repeat the flag. `delete-toolchain-dir!` (in `install.rkt`) detects the symlink form and cleans up both the link target and the link itself; `toolchain-dir-occupied?` treats a dangling link as occupied so `--force` can recover when the prefix target is gone (e.g., after `/tmp` is wiped on reboot). `rackup doctor` annotates each toolchain with its prefix or flags broken links.
+
 ### Atomic file writes
 
 `rktd-io.rkt` provides `write-rktd-file` and `write-string-file` which write to a temporary file in the same directory and then `rename-file-or-directory` atomically into place. This prevents partial writes from corrupting state files if rackup is interrupted.

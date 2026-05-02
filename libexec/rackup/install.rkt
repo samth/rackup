@@ -31,7 +31,9 @@
          commit-state-change!
          detect-local-source-layout
          finalize-local-toolchain!
-         local-toolchain-id)
+         local-toolchain-id
+         delete-toolchain-dir!
+         resolve-toolchain-prefix)
 
 ;; Acquire the state lock, run body, then reshim to keep shims
 ;; consistent with the new state.
@@ -75,6 +77,33 @@
       (string-append (string-join (take lines max-lines) "\n")
                      "\n..."
                      (format "\n[truncated to first ~a lines]" max-lines))))
+
+;; Remove a toolchain directory whether it's a real directory or a
+;; --prefix symlink (working or dangling).  Idempotent: a no-op when
+;; nothing exists at tc-dir.  We can't just call delete-directory/files
+;; because Racket deletes the link only, leaving the prefix target.
+(define (delete-toolchain-dir! tc-dir)
+  (cond
+    [(link-exists? tc-dir)
+     (define target (resolve-path tc-dir))
+     (when (directory-exists? target)
+       (delete-directory/files target))
+     (delete-file tc-dir)]
+    [(directory-exists? tc-dir)
+     (delete-directory/files tc-dir)]))
+
+;; Validate and absolutize a --prefix value (or RACKUP_TOOLCHAIN_PREFIX).
+;; Returns an absolute path with ~ expanded, or #f when missing/blank.
+(define (resolve-toolchain-prefix raw)
+  (and raw (not (and (string? raw) (string-blank? raw)))
+       (let ([p (path->complete-path
+                 (expand-user-path
+                  (if (path? raw) raw (string->path raw))))])
+         (ensure-path-without-control-chars! p "toolchain prefix")
+         (when (and (file-exists? p) (not (directory-exists? p)))
+           (rackup-error "toolchain prefix exists and is not a directory: ~a"
+                         (path->string* p)))
+         p)))
 
 (define (installer-cache-file installer-url)
   (build-path (rackup-download-cache-dir)
@@ -575,7 +604,7 @@
       [else null]))
   (append plthome-entry compiled-roots-entry))
 
-(define (toolchain-meta request id real-bin-dir executables [env-vars null])
+(define (toolchain-meta request id real-bin-dir executables [env-vars null] [prefix #f])
   (hash 'id
         id
         'kind
@@ -608,6 +637,8 @@
         (path->string* (rackup-toolchain-bin-link id))
         'real-bin-dir
         (path->string* real-bin-dir)
+        'toolchain-prefix
+        (and prefix (path->string* prefix))
         'env-vars
         (for/list ([kv (in-list env-vars)])
           (list (car kv) (cdr kv)))
@@ -637,6 +668,7 @@
   (define no-cache? #f)
   (define verbosity 'normal)
   (define installer-ext #f)
+  (define prefix-arg #f)
   (command-line #:program "rackup install"
                 #:argv opts
                 #:once-each [("--variant") v "VM variant" (set! variant v)]
@@ -649,11 +681,17 @@
                 [("--force") "Reinstall existing canonical toolchain" (set! force? #t)]
                 [("--no-cache") "Redownload installer instead of using cache" (set! no-cache? #t)]
                 [("--installer-ext") e "Force installer extension (sh, tgz, dmg)" (set! installer-ext e)]
+                [("--prefix") p
+                              "Install under <p>/<id>/ via symlink (default: $RACKUP_TOOLCHAIN_PREFIX)"
+                              (set! prefix-arg p)]
                 #:once-any
                 [("--quiet") "Show minimal install output" (set! verbosity 'quiet)]
                 [("--verbose") "Show detailed installer URL/path output" (set! verbosity 'verbose)]
                 #:args ()
                 (void))
+  (define prefix
+    (resolve-toolchain-prefix
+     (or prefix-arg (getenv "RACKUP_TOOLCHAIN_PREFIX"))))
   (hash 'variant
         variant
         'distribution
@@ -673,7 +711,9 @@
         'verbosity
         verbosity
         'installer-ext
-        installer-ext))
+        installer-ext
+        'prefix
+        prefix))
 
 (define (parse-link-options opts)
   (define set-default? #f)
@@ -748,9 +788,9 @@
   (define parsed-opts (parse-link-options opts))
   (define id (local-toolchain-id name))
   (define tc-dir (rackup-toolchain-dir id))
-  (when (and (directory-exists? tc-dir) (hash-ref parsed-opts 'force? #f))
-    (delete-directory/files tc-dir)
-    (when (directory-exists? tc-dir)
+  (when (hash-ref parsed-opts 'force? #f)
+    (delete-toolchain-dir! tc-dir)
+    (when (or (link-exists? tc-dir) (directory-exists? tc-dir))
       (rackup-error "failed to remove existing toolchain before relink: ~a" id)))
   (define layout (detect-local-source-layout local-path))
   (define real-bin-dir (string->path (hash-ref layout 'bin-dir)))
@@ -759,12 +799,11 @@
     (rackup-error "linked toolchain does not contain an executable racket binary at ~a"
                   (path->string* racket-exe)))
   (cond
-    [(directory-exists? tc-dir)
+    [(or (link-exists? tc-dir) (directory-exists? tc-dir))
      (rackup-error "toolchain already exists: ~a (use --force to relink)" id)]
     [else
      (with-handlers ([exn:fail? (lambda (e)
-                                  (when (directory-exists? tc-dir)
-                                    (delete-directory/files tc-dir))
+                                  (delete-toolchain-dir! tc-dir)
                                   (raise e))])
        (make-directory* tc-dir)
        (finalize-local-toolchain! id name layout
@@ -887,17 +926,21 @@
   (define id (canonical-id-for-request request))
   (define tc-dir (rackup-toolchain-dir id))
   (define install-root (rackup-toolchain-install-dir id))
+  (define prefix (hash-ref parsed-opts 'prefix #f))
   (parameterize ([current-install-verbosity (hash-ref parsed-opts 'verbosity 'normal)])
     (define default-before (get-default-toolchain))
     (define explicit-default? (hash-ref parsed-opts 'set-default? #f))
-    (when (and (directory-exists? tc-dir) (hash-ref parsed-opts 'force? #f))
-      (delete-directory/files tc-dir)
-      (when (directory-exists? tc-dir)
+    (when (hash-ref parsed-opts 'force? #f)
+      (delete-toolchain-dir! tc-dir)
+      (when (or (link-exists? tc-dir) (directory-exists? tc-dir))
         (rackup-error "failed to remove existing toolchain before reinstall: ~a" id)))
-    ;; A directory without an index entry is a ghost from a prior interrupted
-    ;; install.  Clean it up so the install can proceed.
+    ;; A dangling --prefix symlink (target wiped, e.g., /tmp cleared) or a
+    ;; ghost dir from an interrupted install would block the reinstall;
+    ;; clean either up here.
+    (when (and (link-exists? tc-dir) (not (directory-exists? tc-dir)))
+      (delete-toolchain-dir! tc-dir))
     (when (and (directory-exists? tc-dir) (not (toolchain-exists? id)))
-      (delete-directory/files tc-dir))
+      (delete-toolchain-dir! tc-dir))
     (cond
       [(directory-exists? tc-dir)
        (install-ok "Already installed: ~a" id)
@@ -921,10 +964,22 @@
        (preflight-request-install! request installer-ext)
        (with-handlers ([(lambda (e) (or (exn:fail? e) (exn:break? e)))
                         (lambda (e)
-                                    (when (directory-exists? tc-dir)
-                                      (delete-directory/files tc-dir))
-                                    (raise e))])
-         (make-directory* tc-dir)
+                          (delete-toolchain-dir! tc-dir)
+                          (raise e))])
+         (cond
+           [prefix
+            (define real (build-path prefix id))
+            (when (or (link-exists? real) (directory-exists? real))
+              (rackup-error
+               (string-append
+                "refusing to install ~a into existing prefix path: ~a\n"
+                "Remove or relocate the existing path before reinstalling.")
+               id (path->string* real)))
+            (install-info "Installing into prefix ~a" (path->string* prefix))
+            (make-directory* real)
+            (make-file-or-directory-link real tc-dir)]
+           [else
+            (make-directory* tc-dir)])
          (cond
            [(equal? installer-ext "sh")
             (run-linux-installer! installer-path
@@ -945,7 +1000,7 @@
              (delete-toolchain-env-file! id))
          (ensure-toolchain-addon-dir! id)
          (define executables (enumerate-toolchain-executables real-bin-dir))
-         (define meta (toolchain-meta request id real-bin-dir executables env-vars))
+         (define meta (toolchain-meta request id real-bin-dir executables env-vars prefix))
          (commit-state-change!
           (register-toolchain! id meta)
           (when explicit-default?
@@ -962,10 +1017,8 @@
     (rackup-error "toolchain not installed: ~a" id))
   (when clean-compiled?
     (clean-toolchain-compiled-dirs! id))
-  (define tc-dir (rackup-toolchain-dir id))
   (define addon (rackup-addon-dir id))
-  (when (directory-exists? tc-dir)
-    (delete-directory/files tc-dir))
+  (delete-toolchain-dir! (rackup-toolchain-dir id))
   (when (directory-exists? addon)
     (delete-directory/files addon))
   (commit-state-change!
@@ -1254,6 +1307,10 @@
           (if (and s (not (eq? s 'auto)))
               (list "--snapshot-site" (format "~a" s))
               null))
+        (let ([p (hash-ref meta 'toolchain-prefix #f)])
+          (if (and (string? p) (not (string-blank? p)))
+              (list "--prefix" p)
+              null))
         (if force? (list "--force") null)
         (if no-cache? (list "--no-cache") null)))
      (define spec (meta->upgrade-spec meta))
@@ -1317,13 +1374,24 @@
   (for ([kv findings])
     (printf "~a: ~a\n" (ansi "1" (format "~a" (car kv))) (cdr kv)))
   (for ([id ids])
-    (define m (read-toolchain-meta id))
-    (printf "toolchain ~a => ~a\n"
+    (define m (or (read-toolchain-meta id) (hash)))
+    (define tc-dir (rackup-toolchain-dir id))
+    (define prefix-note
+      (cond
+        [(not (link-exists? tc-dir)) ""]
+        [(directory-exists? tc-dir)
+         (format " ~a" (ansi "36" (format "(prefix -> ~a)"
+                                          (path->string* (resolve-path tc-dir)))))]
+        [else
+         (format " ~a" (ansi "31" (format "(BROKEN: link target missing -> ~a)"
+                                          (path->string* (resolve-path tc-dir)))))]))
+    (printf "toolchain ~a => ~a~a\n"
             id
             (ansi "90" (format "(~a, ~a, ~a)"
                                 (hash-ref m 'resolved-version #f)
                                 (hash-ref m 'variant #f)
-                                (hash-ref m 'distribution #f))))))
+                                (hash-ref m 'distribution #f)))
+            prefix-note)))
 
 (module+ for-testing
   (provide detect-bin-dir

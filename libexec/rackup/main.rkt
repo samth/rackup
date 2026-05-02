@@ -135,7 +135,7 @@
   (with-handlers ([exn:fail? (lambda (_) null)])
     (if (directory-exists? (rackup-toolchains-dir))
         (sort (for/list ([p (in-list (directory-list (rackup-toolchains-dir) #:build? #t))]
-                         #:when (directory-exists? p))
+                         #:when (or (directory-exists? p) (link-exists? p)))
                 (path-basename-string p))
               string<?)
         null)))
@@ -163,9 +163,9 @@
 (define (remove-orphan-toolchain! id)
   (define tc-dir (rackup-toolchain-dir id))
   (define addon (rackup-addon-dir id))
-  (unless (directory-exists? tc-dir)
+  (unless (or (link-exists? tc-dir) (directory-exists? tc-dir))
     (rackup-error "orphan toolchain directory not found: ~a" id))
-  (delete-directory/files tc-dir)
+  (delete-toolchain-dir! tc-dir)
   (when (directory-exists? addon)
     (delete-directory/files addon))
   (with-handlers ([exn:fail? (lambda (_) (void))])
@@ -596,7 +596,7 @@
                   #:program "rackup install"
                   #:argv (reorder-args rest
                                        '("--variant" "--distribution" "--snapshot-site"
-                                         "--arch" "--installer-ext"))
+                                         "--arch" "--installer-ext" "--prefix"))
                   #:once-each
                   [("--variant") v "cs|bc - Override VM variant" (flag! "--variant" v)]
                   [("--distribution") d "full|minimal - Distribution type" (flag! "--distribution" d)]
@@ -608,6 +608,9 @@
                   [("--no-cache") "Redownload installer" (flag! "--no-cache")]
                   [("--installer-ext") e "sh|tgz|dmg - Force installer extension"
                    (flag! "--installer-ext" e)]
+                  [("--prefix") p
+                   "Install toolchain under <p>/<id>/ via symlink (e.g., /tmp/rackup-tc on fast disk)"
+                   (flag! "--prefix" p)]
                   [("--short-aliases") "Install short aliases: r (racket), dr (drracket)"
                    (set! short-aliases? #t)]
                   #:once-any

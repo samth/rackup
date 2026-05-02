@@ -316,7 +316,7 @@ jobs:
         run: raco pkg install --auto recspecs
       - name: Test (includes local-link unit coverage)
         shell: bash
-        run: TMPDIR=/tmp raco test test/copy-filtered-tree.rkt test/rktd-io.rkt test/util.rkt test/versioning.rkt test/remote.rkt test/platform-targets.rkt test/state-shims.rkt test/uninstall.rkt test/rebuild.rkt
+        run: TMPDIR=/tmp raco test test/copy-filtered-tree.rkt test/install-prefix.rkt test/rktd-io.rkt test/util.rkt test/versioning.rkt test/remote.rkt test/platform-targets.rkt test/state-shims.rkt test/uninstall.rkt test/rebuild.rkt
 
   docker-e2e-linux-distros:
     name: "Docker E2E (native ${{ matrix.arch_name }} / ${{ matrix.base_image }})"
