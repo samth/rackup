@@ -194,8 +194,16 @@
   (and (terminal-port? (current-error-port))
        (not (getenv "RACKUP_NO_PROGRESS"))))
 
+;; Don't show a progress bar for tiny downloads -- it just flashes
+;; once and disappears.  Threshold matches roughly the smallest
+;; binary tarball we ship; everything smaller (install.sh script,
+;; .sha256 sidecar, version stamps) is sub-second on any connection.
+(define progress-min-bytes (* 256 1024))
+
 (define (copy-port/progress in out total-len label)
-  (define show? (progress-enabled?))
+  (define show? (and (progress-enabled?)
+                     (or (not total-len)
+                         (>= total-len progress-min-bytes))))
   (define err (current-error-port))
   (define buf (make-bytes (* 64 1024)))
   (define start-ms (current-inexact-milliseconds))
