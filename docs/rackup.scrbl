@@ -84,6 +84,17 @@ The @tt{<spec>} argument selects which toolchain to install:
         "Redownload installer instead of using cache."]
   @list[@exec{--installer-ext sh|tgz|dmg}
         "Force installer extension (default: platform-dependent)."]
+  @list[@exec{--prefix <path>}
+        @elem{Install the toolchain under @tt{<path>/<id>/} on disk
+              and create @tt{~/.rackup/toolchains/<id>} as a symlink
+              to it.  Useful when @tt{~/.rackup} lives on slow or
+              networked storage; point @tt{--prefix} at a local
+              filesystem (e.g.@literal{ }@tt{/tmp/rackup-tc}) to keep
+              compilation fast.  Falls back to the
+              @tt{RACKUP_TOOLCHAIN_PREFIX} environment variable when
+              the flag is omitted.  The choice is persisted in the
+              toolchain's metadata so @tt{rackup upgrade} reinstalls
+              under the same prefix.}]
   @list[@exec{--quiet}
         "Show minimal output (errors + final result lines)."]
   @list[@exec{--verbose}
@@ -97,6 +108,7 @@ rackup install stable
 rackup install 8.18 --variant cs
 rackup install snapshot --snapshot-site utah
 rackup install pre-release --distribution minimal --set-default
+rackup install stable --prefix /tmp/rackup-tc
 }|
 
 @; ────────────────────────────────────────────────────────────────────
