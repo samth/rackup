@@ -95,7 +95,6 @@
               "Run a command using a specific toolchain without changing defaults.")
   (usage-line "prompt [--long|--short|--raw|--source]"
               "Print fast prompt info for PS1 (default: compact label).")
-  (usage-line "upgrade [version] [--force]" "Upgrade channel-based toolchains to latest version.")
   (usage-line "remove <toolchain>" "Remove an installed or linked toolchain and its addon dir.")
   (usage-line "reshim" "Rebuild executable shims from installed toolchains.")
   (usage-line "init [--shell bash|zsh]" "Install/update shell integration in ~/.bashrc or ~/.zshrc.")

@@ -1245,13 +1245,6 @@
   (expect (run-main '("install" "--help"))
           "A <version> is a Racket release number (e.g. 8.18), or one of the channels:"
           #:match 'contains)
-  (expect (run-main '("upgrade" "--help"))
-          "A <version> is a Racket release number (e.g. 8.18), or one of the channels:"
-          #:match 'contains)
-  ;; `rackup upgrade --help` adds a channel-only caveat.
-  (expect (run-main '("upgrade" "--help"))
-          "Only channel-based toolchains can be upgraded; omit <version> to upgrade all."
-          #:match 'contains)
   ;; `rackup remove --help` explains what a <toolchain> argument is.
   (expect (run-main '("remove" "--help"))
           "<toolchain> is an installed toolchain id or a prefix"

@@ -26,7 +26,6 @@
     ("shell"        . "Emit shell code to activate/deactivate a toolchain")
     ("run"          . "Run a command using a specific toolchain")
     ("prompt"       . "Print prompt info for PS1")
-    ("upgrade"      . "Deprecated: alias for self-upgrade")
     ("remove"       . "Remove an installed or linked toolchain")
     ("reshim"       . "Rebuild executable shims")
     ("init"         . "Install/update shell integration")
@@ -40,7 +39,7 @@
 ;; Commands accepted by the dispatcher but hidden from top-level
 ;; completion suggestions (typically deprecated aliases).  Their
 ;; per-command completion cases still work if a user types them.
-(define rackup-hidden-commands '("upgrade"))
+(define rackup-hidden-commands '())
 
 ;; Commands handled by hand-written match clauses in main.rkt's
 ;; dispatcher rather than by the auto-generated `(list n rest ...)`
