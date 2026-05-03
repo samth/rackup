@@ -1,5 +1,8 @@
 # Plan: Use new recspecs features in rackup tests
 
+> **Historical plan** (dated artifact): This file is intentionally retained for historical context. For current canonical architecture/implementation behavior, see [`docs/IMPLEMENTATION.md`](../IMPLEMENTATION.md).
+
+
 ## Context
 
 The `recspecs` package has been updated with new features: `capture-output`, `capture-output/split`, `#:match 'contains`/`'regexp` modes, `#:port 'stderr`/`'both`, and `#:status`/`#:env` on `expect/shell`. The rackup test file has many manual output-capture patterns and `string-contains?` checks that can be simplified using these features.

@@ -1,5 +1,8 @@
 # Plan: Demodularized Machine-Independent .zo Distribution
 
+> **Historical plan** (dated artifact): This file is intentionally retained for historical context. For current canonical architecture/implementation behavior, see [`docs/IMPLEMENTATION.md`](../IMPLEMENTATION.md).
+
+
 ## Context
 
 Currently, every `rackup` install compiles all `.rkt` source files from scratch on the client machine via `precompile-rackup-sources!`. This is slow and wasteful since the source code is identical across all installs. By shipping a demodularized machine-independent `.zo` in the tarball and recompiling it to machine-dependent form on install, we eliminate redundant source compilation and speed up the install/upgrade path.

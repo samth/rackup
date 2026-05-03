@@ -2,6 +2,14 @@
 
 This document describes the key implementation choices in rackup. It is aimed at contributors and anyone interested in the internals.
 
+## Documentation Ownership
+
+`docs/IMPLEMENTATION.md` is the canonical source of truth for contributor-facing architecture and implementation behavior.
+
+- Any change to architectural behavior must be documented here in the same change.
+- `README.md` should stay user-facing (install and usage), and should link here instead of duplicating internals.
+- `docs/IMPL_NOTES.md` and files in `docs/plans/` may contain historical context, but should link back to this document for canonical behavior.
+
 ## Two distribution modes
 
 Rackup ships in two forms: a prebuilt executable and a source distribution. The choice affects startup and runtime but the core logic is identical.

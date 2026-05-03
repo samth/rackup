@@ -1,5 +1,8 @@
 # Windows Support for rackup: Research and Considerations
 
+> **Historical plan** (dated artifact): This file is intentionally retained for historical context. For current canonical architecture/implementation behavior, see [`docs/IMPLEMENTATION.md`](../IMPLEMENTATION.md).
+
+
 This document captures research into how other toolchain managers handle Windows
 support, and what considerations apply to bringing rackup to Windows.
 

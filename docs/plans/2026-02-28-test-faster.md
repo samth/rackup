@@ -1,5 +1,8 @@
 # Ideas for Speeding Up CI Tests
 
+> **Historical plan** (dated artifact): This file is intentionally retained for historical context. For current canonical architecture/implementation behavior, see [`docs/IMPLEMENTATION.md`](../IMPLEMENTATION.md).
+
+
 The full CI pipeline has 12 jobs totaling ~14 hours of wall-clock time
 (running in parallel, dominated by the 180-minute source-build job).
 Most of that time is spent in Docker E2E jobs that rebuild images,

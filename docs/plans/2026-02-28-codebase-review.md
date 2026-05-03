@@ -1,5 +1,8 @@
 # AI Code Review: rackup
 
+> **Historical plan** (dated artifact): This file is intentionally retained for historical context. For current canonical architecture/implementation behavior, see [`docs/IMPLEMENTATION.md`](../IMPLEMENTATION.md).
+
+
 ## Executive Summary
 
 Rackup is a well-architected Racket toolchain manager with a clean Bash/Racket hybrid design. The codebase is mature, thoroughly tested, and handles an impressively wide range of Racket versions spanning 40+ years. The code is production-quality with thoughtful error handling, good separation of concerns, and comprehensive CI/E2E test coverage.

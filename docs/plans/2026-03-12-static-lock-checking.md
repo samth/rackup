@@ -1,5 +1,8 @@
 # Static Lock Checking via Syntax Parameters
 
+> **Historical plan** (dated artifact): This file is intentionally retained for historical context. For current canonical architecture/implementation behavior, see [`docs/IMPLEMENTATION.md`](../IMPLEMENTATION.md).
+
+
 ## Context
 
 The state lock protects shared state mutations. Nothing currently prevents calling locked functions outside the lock — the exploration found a bug at `main.rkt:514-516`. The goal is compile-time enforcement via syntax parameters.

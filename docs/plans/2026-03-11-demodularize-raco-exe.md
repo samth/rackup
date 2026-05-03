@@ -1,5 +1,8 @@
 # Demodularize before `raco exe` on native platforms
 
+> **Historical plan** (dated artifact): This file is intentionally retained for historical context. For current canonical architecture/implementation behavior, see [`docs/IMPLEMENTATION.md`](../IMPLEMENTATION.md).
+
+
 ## Goal
 
 Use `raco demod` to flatten rackup's module tree into a single compilation unit before building executables with `raco exe`. This should produce faster-starting executables by eliminating per-module load overhead.

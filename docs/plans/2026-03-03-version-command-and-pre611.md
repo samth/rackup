@@ -1,5 +1,8 @@
 # Plan: Issue #22 (version command) and Issue #20 (refactor pre-6.1.1 handling)
 
+> **Historical plan** (dated artifact): This file is intentionally retained for historical context. For current canonical architecture/implementation behavior, see [`docs/IMPLEMENTATION.md`](../IMPLEMENTATION.md).
+
+
 ## Issue #22: Add `version` command
 
 ### Context

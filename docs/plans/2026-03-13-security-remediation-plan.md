@@ -1,5 +1,8 @@
 # Security Remediation Plan
 
+> **Historical plan** (dated artifact): This file is intentionally retained for historical context. For current canonical architecture/implementation behavior, see [`docs/IMPLEMENTATION.md`](../IMPLEMENTATION.md).
+
+
 Status: Incomplete draft. This plan is not completed.
 
 Date: 2026-03-13

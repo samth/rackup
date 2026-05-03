@@ -1,5 +1,8 @@
 # Plan: Add flag-argument completions to bash and zsh
 
+> **Historical plan** (dated artifact): This file is intentionally retained for historical context. For current canonical architecture/implementation behavior, see [`docs/IMPLEMENTATION.md`](../IMPLEMENTATION.md).
+
+
 ## Context
 
 The shell completion currently lists flags as completable words, but when a flag takes an argument (e.g., `rackup install --distribution <TAB>`), no values are offered. The completion should detect when the previous word is a flag that takes an argument and complete the valid values.

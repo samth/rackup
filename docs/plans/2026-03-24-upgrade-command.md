@@ -1,5 +1,8 @@
 # Plan: `rackup upgrade` Command
 
+> **Historical plan** (dated artifact): This file is intentionally retained for historical context. For current canonical architecture/implementation behavior, see [`docs/IMPLEMENTATION.md`](../IMPLEMENTATION.md).
+
+
 ## Context
 
 Users install Racket toolchains via channels (`stable`, `pre-release`, `snapshot`). When a new version is released on a channel, there's currently no way to upgrade — users must manually install the new version and remove the old one. The `rackup upgrade` command automates this: resolve the latest version for each channel, install it, migrate user packages, and remove the old toolchain.

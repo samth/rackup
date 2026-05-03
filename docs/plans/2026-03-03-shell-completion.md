@@ -1,5 +1,8 @@
 # Plan: Issue #9 — Add shell completion support
 
+> **Historical plan** (dated artifact): This file is intentionally retained for historical context. For current canonical architecture/implementation behavior, see [`docs/IMPLEMENTATION.md`](../IMPLEMENTATION.md).
+
+
 ## Context
 
 rackup has no shell completion. Issue #9 requests bash and zsh completions. The shell init system (`shell.rkt`) already writes helper scripts to `~/.rackup/shell/rackup.bash` and `~/.rackup/shell/rackup.zsh` and sources them from managed blocks in rc files. Currently both files get identical POSIX content. This plan adds completion code to those scripts.
