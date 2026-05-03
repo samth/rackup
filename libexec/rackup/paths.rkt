@@ -62,36 +62,28 @@
   (ensure-path-without-control-chars! home "RACKUP_HOME")
   home)
 
-(define (rackup-bin-dir)
-  (build-path (rackup-home) "bin"))
-(define (rackup-libexec-dir)
-  (build-path (rackup-home) "libexec"))
-(define (rackup-shims-dir)
-  (build-path (rackup-home) "shims"))
-(define (rackup-shell-dir)
-  (build-path (rackup-home) "shell"))
-(define (rackup-toolchains-dir)
-  (build-path (rackup-home) "toolchains"))
-(define (rackup-addons-dir)
-  (build-path (rackup-home) "addons"))
-(define (rackup-cache-dir)
-  (build-path (rackup-home) "cache"))
-(define (rackup-download-cache-dir)
-  (build-path (rackup-cache-dir) "downloads"))
-(define (rackup-state-dir)
-  (build-path (rackup-home) "state"))
-(define (rackup-runtime-dir)
-  (build-path (rackup-home) "runtime"))
-(define (rackup-runtime-addon-dir)
-  (build-path (rackup-runtime-dir) "addon"))
-(define (rackup-runtime-versions-dir)
-  (build-path (rackup-runtime-dir) "versions"))
-(define (rackup-runtime-current-link)
-  (build-path (rackup-runtime-dir) "current"))
-(define (rackup-runtime-lock-dir)
-  (build-path (rackup-runtime-dir) ".lock"))
-(define (rackup-state-lock-dir)
-  (build-path (rackup-state-dir) ".lock"))
+(define-syntax-rule (define-home-subpaths [name segment ...] ...)
+  (begin
+    (define (name)
+      (build-path (rackup-home) segment ...))
+    ...))
+
+(define-home-subpaths
+  [rackup-bin-dir "bin"]
+  [rackup-libexec-dir "libexec"]
+  [rackup-shims-dir "shims"]
+  [rackup-shell-dir "shell"]
+  [rackup-toolchains-dir "toolchains"]
+  [rackup-addons-dir "addons"]
+  [rackup-cache-dir "cache"]
+  [rackup-download-cache-dir "cache" "downloads"]
+  [rackup-state-dir "state"]
+  [rackup-runtime-dir "runtime"]
+  [rackup-runtime-addon-dir "runtime" "addon"]
+  [rackup-runtime-versions-dir "runtime" "versions"]
+  [rackup-runtime-current-link "runtime" "current"]
+  [rackup-runtime-lock-dir "runtime" ".lock"]
+  [rackup-state-lock-dir "state" ".lock"])
 
 (define (rackup-runtime-version-dir id)
   (build-path (rackup-runtime-versions-dir) id))

@@ -95,6 +95,7 @@ The `commit-state-change!` macro in `install.rkt` wraps a body in `with-state-lo
 ## State storage
 
 All rackup state lives under `RACKUP_HOME` (default `~/.rackup`). The layout is defined in `paths.rkt` as a collection of functions that compute paths from the home directory.
+Static paths under `RACKUP_HOME` are declared once in `paths.rkt` using a small mapping (`define-home-subpaths`), which generates simple zero-argument accessors like `rackup-bin-dir` and `rackup-state-dir`. Keep explicitly parameterized helpers (for example `rackup-toolchain-dir` and `rackup-addon-dir`) as regular functions so their call shape remains clear and unchanged.
 
 ### Index
 
