@@ -52,8 +52,24 @@ rackup_runtime_cache_dir() {
   printf '%s\n' "$(rackup_home)/cache/downloads"
 }
 
+rackup_state_dir() {
+  printf '%s\n' "$(rackup_home)/state"
+}
+
+rackup_toolchains_dir() {
+  printf '%s\n' "$(rackup_home)/toolchains"
+}
+
+rackup_addons_dir() {
+  printf '%s\n' "$(rackup_home)/addons"
+}
+
+rackup_shims_dir() {
+  printf '%s\n' "$(rackup_home)/shims"
+}
+
 rackup_default_toolchain_file() {
-  printf '%s\n' "$(rackup_home)/state/default-toolchain"
+  printf '%s\n' "$(rackup_state_dir)/default-toolchain"
 }
 
 rackup_read_default_toolchain_shell() {
@@ -65,7 +81,7 @@ rackup_read_default_toolchain_shell() {
 
 rackup_toolchain_meta_file_shell() {
   toolchain_id="$1"
-  printf '%s\n' "$(rackup_home)/toolchains/$toolchain_id/meta.rktd"
+  printf '%s\n' "$(rackup_toolchains_dir)/$toolchain_id/meta.rktd"
 }
 
 rackup_rktd_string_field_shell() {

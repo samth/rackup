@@ -19,6 +19,8 @@
          rackup-runtime-addon-dir
          rackup-runtime-versions-dir
          rackup-runtime-current-link
+         rackup-runtime-current-bin-dir
+         rackup-runtime-current-racket
          rackup-runtime-lock-dir
          rackup-state-lock-dir
          rackup-runtime-version-dir
@@ -27,14 +29,18 @@
          rackup-runtime-bin-link
          rackup-index-file
          rackup-config-file
+         rackup-legacy-config-file
+         rackup-legacy-shim-aliases-file
          rackup-default-file
          rackup-shim-dispatcher
+         rackup-shim-path
          rackup-bin-entry
          rackup-shell-script
          rackup-toolchain-dir
          rackup-toolchain-install-dir
          rackup-toolchain-meta-file
          rackup-toolchain-bin-link
+         rackup-toolchain-exe-path
          rackup-toolchain-env-file
          rackup-addon-dir
          ensure-rackup-layout!)
@@ -88,6 +94,10 @@
   (build-path (rackup-runtime-dir) "versions"))
 (define (rackup-runtime-current-link)
   (build-path (rackup-runtime-dir) "current"))
+(define (rackup-runtime-current-bin-dir)
+  (build-path (rackup-runtime-current-link) "bin"))
+(define (rackup-runtime-current-racket)
+  (build-path (rackup-runtime-current-bin-dir) "racket"))
 (define (rackup-runtime-lock-dir)
   (build-path (rackup-runtime-dir) ".lock"))
 (define (rackup-state-lock-dir)
@@ -106,11 +116,17 @@
   (build-path (rackup-state-dir) "index.rktd"))
 (define (rackup-config-file)
   (build-path (rackup-state-dir) "config"))
+(define (rackup-legacy-config-file)
+  (build-path (rackup-state-dir) "config.rktd"))
+(define (rackup-legacy-shim-aliases-file)
+  (build-path (rackup-state-dir) "shim-aliases"))
 (define (rackup-default-file)
   (build-path (rackup-state-dir) "default-toolchain"))
 
 (define (rackup-shim-dispatcher)
   (build-path (rackup-libexec-dir) "rackup-shim"))
+(define (rackup-shim-path name)
+  (build-path (rackup-shims-dir) name))
 (define (rackup-bin-entry)
   (build-path (rackup-bin-dir) "rackup"))
 (define (rackup-shell-script shell-name)
@@ -124,6 +140,8 @@
   (build-path (rackup-toolchain-dir id) "meta.rktd"))
 (define (rackup-toolchain-bin-link id)
   (build-path (rackup-toolchain-dir id) "bin"))
+(define (rackup-toolchain-exe-path id exe)
+  (build-path (rackup-toolchain-bin-link id) exe))
 (define (rackup-toolchain-env-file id)
   (build-path (rackup-toolchain-dir id) "env.sh"))
 (define (rackup-addon-dir id)

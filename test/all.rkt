@@ -3,6 +3,7 @@
 (require rackunit/text-ui
          "copy-filtered-tree.rkt"
          "install-prefix.rkt"
+         "paths.rkt"
          "rebuild.rkt"
          "rktd-io.rkt"
          "shell-completion.rkt"

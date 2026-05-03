@@ -33,7 +33,7 @@
          (append (hidden-runtime-invocation-prefix racket-exe) args)))
 
 (define (hidden-runtime-racket-path)
-  (define p (build-path (rackup-runtime-current-link) "bin" "racket"))
+  (define p (rackup-runtime-current-racket))
   (and (executable-file? p) p))
 
 (define (hidden-runtime-present?)
@@ -255,8 +255,8 @@
                 'platform
                 (host-platform-token)))
         (define real-bin
-          (with-handlers ([exn:fail? (lambda (_) (build-path (rackup-runtime-current-link) "bin"))])
-            (resolve-path (build-path (rackup-runtime-current-link) "bin"))))
+          (with-handlers ([exn:fail? (lambda (_) (rackup-runtime-current-bin-dir))])
+            (resolve-path (rackup-runtime-current-bin-dir))))
         (write-runtime-meta! current-id
                              req
                              real-bin

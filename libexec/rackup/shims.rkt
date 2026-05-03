@@ -256,7 +256,7 @@ EOF
 
 (define (ensure-core-rackup-shim!)
   (ensure-rackup-layout!)
-  (define shim (build-path (rackup-shims-dir) "rackup"))
+  (define shim (rackup-shim-path "rackup"))
   (when (or (link-exists? shim) (file-exists? shim))
     (delete-file shim))
   (make-file-or-directory-link (rackup-bin-entry) shim)
@@ -282,7 +282,7 @@ EOF
   (define id (or toolchain-id (resolve-active-toolchain-id)))
   (unless id
     (rackup-error "no active/default toolchain configured"))
-  (define p (build-path (rackup-toolchain-bin-link id) exe))
+  (define p (rackup-toolchain-exe-path id exe))
   (if (file-exists? p)
       p
       (find-addon-bin-exe (rackup-addon-dir id) exe)))
