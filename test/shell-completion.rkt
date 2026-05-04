@@ -5,7 +5,8 @@
          racket/file
          racket/string
          "../libexec/rackup/shell.rkt"
-         "../libexec/rackup/paths.rkt")
+         "../libexec/rackup/paths.rkt"
+         "../libexec/rackup/commands-data.rkt")
 
 (define (contains? haystack needle)
   (regexp-match? (regexp-quote needle) haystack))
@@ -20,26 +21,7 @@
   (expect (display zsh-output) (string-copy zsh-output))
 
   ;; Both contain all command names
-  (for ([cmd '("available" "install"
-                           "link"
-                           "rebuild"
-                           "list"
-                           "default"
-                           "current"
-                           "which"
-                           "switch"
-                           "shell"
-                           "run"
-                           "prompt"
-                           "remove"
-                           "reshim"
-                           "init"
-                           "uninstall"
-                           "self-upgrade"
-                           "runtime"
-                           "doctor"
-                           "version"
-                           "help")])
+  (for ([cmd (in-list rackup-public-command-names)])
     (check-true (contains? bash-output cmd) (format "bash completion missing command: ~a" cmd))
     (check-true (contains? zsh-output cmd) (format "zsh completion missing command: ~a" cmd)))
 

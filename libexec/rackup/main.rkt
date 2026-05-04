@@ -1084,25 +1084,14 @@
                 (void))
   (doctor-report))
 
-;; Build a name → handler lookup table from `rackup-commands` at compile
-;; time, skipping `help` (dispatched by hand).  Adding a new subcommand
-;; means (1) editing commands-data.rkt and (2) defining `cmd-<name>`;
-;; the dispatcher and the bash/zsh completion both pick it up
-;; automatically — there is no second list to keep in sync.
 (define-syntax (rackup-dispatch-table stx)
   (syntax-case stx ()
     [(_)
-     (with-syntax ([(name ...)
-                    (for/list ([entry (in-list rackup-commands)]
-                               #:unless (member (car entry)
-                                                rackup-manual-dispatch-commands))
-                      (car entry))]
-                   [(handler ...)
-                    (for/list ([entry (in-list rackup-commands)]
-                               #:unless (member (car entry)
-                                                rackup-manual-dispatch-commands))
-                      (format-id stx "cmd-~a" (car entry)))])
-       #'(make-immutable-hash (list (cons name handler) ...)))]))
+     (let ([entries (command-registry (lambda (name _aliases _arg _desc _hints handler)
+                                        (cons name handler)))])
+       (with-syntax ([(name ...) (map car entries)]
+                     [(handler ...) (map cdr entries)])
+         #'(make-immutable-hash (list (cons name handler) ...))))]))
 
 (define dispatch-table (rackup-dispatch-table))
 
@@ -1114,7 +1103,8 @@
     [(list "help" cmd) (dispatch (list cmd "--help"))]
     [(list "help" _ ...) (rackup-error "usage: rackup help [command]")]
     [(cons cmd rest)
-     (define handler (hash-ref dispatch-table cmd #f))
+     (define canonical-cmd (hash-ref rackup-command-alias-map cmd cmd))
+     (define handler (hash-ref dispatch-table canonical-cmd #f))
      (cond
        [handler (handler rest)]
        [else (usage) (exit 2)])]))
