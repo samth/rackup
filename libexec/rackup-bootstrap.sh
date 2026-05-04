@@ -52,8 +52,24 @@ rackup_runtime_cache_dir() {
   printf '%s\n' "$(rackup_home)/cache/downloads"
 }
 
+rackup_state_dir() {
+  printf '%s\n' "$(rackup_home)/state"
+}
+
+rackup_toolchains_dir() {
+  printf '%s\n' "$(rackup_home)/toolchains"
+}
+
+rackup_addons_dir() {
+  printf '%s\n' "$(rackup_home)/addons"
+}
+
+rackup_shims_dir() {
+  printf '%s\n' "$(rackup_home)/shims"
+}
+
 rackup_default_toolchain_file() {
-  printf '%s\n' "$(rackup_home)/state/default-toolchain"
+  printf '%s\n' "$(rackup_state_dir)/default-toolchain"
 }
 
 rackup_read_default_toolchain_shell() {
@@ -65,7 +81,7 @@ rackup_read_default_toolchain_shell() {
 
 rackup_toolchain_meta_file_shell() {
   toolchain_id="$1"
-  printf '%s\n' "$(rackup_home)/toolchains/$toolchain_id/meta.rktd"
+  printf '%s\n' "$(rackup_toolchains_dir)/$toolchain_id/meta.rktd"
 }
 
 rackup_rktd_string_field_shell() {
@@ -579,11 +595,31 @@ rackup_hidden_runtime_install_if_missing() {
       ;;
   esac
 
+  rm -rf "$tmp_version_dir/_pkg_cache_install_log" 2>/dev/null || true
   rm -rf "$version_dir"
   mv "$tmp_version_dir" "$version_dir"
   final_real_bin="$(rackup_detect_bin_dir_shell "$version_dir/install")"
   ln -sfn "$final_real_bin" "$version_dir/bin"
   ln -sfn "$version_dir" "$current_link"
+
+  # The hidden runtime is a *minimal* Racket distribution. rackup's
+  # libexec/rackup/shell.rkt requires `scribble/text` for the shell
+  # helper templates, which lives in `scribble-text-lib`. Install it
+  # at *installation* scope (under the hidden runtime tree, which
+  # rackup owns) — bin/rackup invokes the runtime with `racket -U -A …`,
+  # which suppresses user-scope pkgs even if PLTADDONDIR points at the
+  # addon dir, so installation scope is the only consistent choice.
+  raco_exe="$final_real_bin/raco"
+  if [ ! -x "$raco_exe" ]; then
+    rackup_fail "hidden runtime is missing raco at $raco_exe"
+  fi
+  rackup_warn "installing 'scribble-text-lib' package into hidden runtime..."
+  if ! "$raco_exe" pkg install \
+    --scope installation --no-docs --auto --skip-installed --batch scribble-text-lib >&2; then
+    rm -rf "$version_dir"
+    rm -f "$current_link"
+    rackup_fail "failed to install 'scribble-text-lib' package into hidden runtime"
+  fi
 
   rackup_release_runtime_lock_shell
   trap - EXIT INT TERM HUP

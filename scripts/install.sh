@@ -718,8 +718,8 @@ if [ "$INSTALLED_PREBUILT" -eq 1 ]; then
   . "$PREFIX/libexec/rackup-bootstrap.sh"
   # No hidden runtime needed — the prebuilt binary embeds its own Racket.
   # Remove any stale hidden runtime from a prior source install.
-  if [ -d "$PREFIX/runtime" ]; then
-    rm -rf "$PREFIX/runtime"
+  if [ -d "$(rackup_runtime_dir)" ]; then
+    rm -rf "$(rackup_runtime_dir)"
   fi
   # Also remove stale source files from a prior source install.
   if [ -f "$PREFIX/libexec/rackup-core.rkt" ]; then

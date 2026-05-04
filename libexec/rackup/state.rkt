@@ -5,10 +5,13 @@
          racket/match
          racket/path
          racket/string
+         "error.rkt"
          "paths.rkt"
          "rktd-io.rkt"
          "state-lock.rkt"
-         "util.rkt")
+         "fs.rkt"
+         "security.rkt"
+         "text.rkt")
 
 (provide load-index
          save-index!
@@ -64,12 +67,12 @@
   (unless (file-exists? (rackup-index-file))
     (save-index! (empty-index)))
   ;; Migrate old config.rktd to plain text config if needed
-  (define old-config (build-path (rackup-state-dir) "config.rktd"))
+  (define old-config (rackup-legacy-config-file))
   (when (and (file-exists? old-config) (not (file-exists? (rackup-config-file))))
     (write-string-file (rackup-config-file) "")
     (delete-file old-config))
   ;; Migrate old shim-aliases marker to config flag
-  (define old-aliases (build-path (rackup-state-dir) "shim-aliases"))
+  (define old-aliases (rackup-legacy-shim-aliases-file))
   (when (file-exists? old-aliases)
     (set-config-flag! "short-aliases")
     (delete-file old-aliases))
