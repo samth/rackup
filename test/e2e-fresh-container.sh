@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/e2e-lib.sh"
+
 MODE="${RACKUP_E2E_MODE:-direct}"
 SPECS_CSV="${RACKUP_E2E_SPECS:-stable}"
 SNAPSHOT_SITE="${RACKUP_E2E_SNAPSHOT_SITE:-auto}"
@@ -28,40 +30,6 @@ RUN_SRC="${TMPDIR}/rackup-src"
 PKG_SRC_ROOT="${TMPDIR}/rackup-e2e-pkgs"
 
 mkdir -p "$HOME" "$PKG_SRC_ROOT"
-
-fail() {
-  echo "E2E failure: $*" >&2
-  exit 1
-}
-
-link_external_download_cache() {
-  local target_home="$1"
-  local external_cache="${RACKUP_E2E_DOWNLOAD_CACHE_DIR:-}"
-  [[ -n "$external_cache" ]] || return 0
-  mkdir -p "$target_home/cache"
-  rm -rf "$target_home/cache/downloads"
-  ln -s "$external_cache" "$target_home/cache/downloads"
-}
-
-assert_eq() {
-  local expected="$1"
-  local actual="$2"
-  local msg="${3:-assert_eq failed}"
-  [[ "$expected" == "$actual" ]] || fail "$msg (expected='$expected' actual='$actual')"
-}
-
-assert_contains() {
-  local needle="$1"
-  local haystack="$2"
-  local msg="${3:-assert_contains failed}"
-  [[ "$haystack" == *"$needle"* ]] || fail "$msg (needle='$needle' haystack='$haystack')"
-}
-
-assert_nonempty() {
-  local value="$1"
-  local msg="${2:-assert_nonempty failed}"
-  [[ -n "$value" ]] || fail "$msg"
-}
 
 echo "== Container environment =="
 echo "mode=$MODE"
@@ -204,20 +172,9 @@ version_prefix_for_spec() {
   esac
 }
 
-create_local_test_package() {
+create_local_fixture_package() {
   local pkg_dir="$PKG_SRC_ROOT/rackup-e2e-pkg"
-  rm -rf "$pkg_dir"
-  mkdir -p "$pkg_dir"
-  cat >"$pkg_dir/info.rkt" <<'EOF'
-#lang info
-(define collection "rackup-e2e-pkg")
-(define deps '("base"))
-EOF
-  cat >"$pkg_dir/main.rkt" <<'EOF'
-#lang racket/base
-(provide marker)
-(define marker "rackup-e2e-package-ok")
-EOF
+  create_local_test_package "$pkg_dir" "rackup-e2e-pkg" "rackup-e2e-package-ok"
   echo "$pkg_dir"
 }
 
@@ -545,7 +502,7 @@ echo "== Package install / isolation tests =="
 if [[ "$SKIP_PACKAGE_TESTS" == "1" ]]; then
   echo "Skipping package tests for this scenario"
 else
-  pkg_dir="$(create_local_test_package)"
+  pkg_dir="$(create_local_fixture_package)"
   run_rackup default "$primary_id"
   shim_raco pkg install --auto --batch --no-setup "$pkg_dir"
   shim_raco pkg show rackup-e2e-pkg >/dev/null
