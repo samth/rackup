@@ -7,8 +7,7 @@
          "../libexec/rackup/paths.rkt"
          "../libexec/rackup/rktd-io.rkt"
          "../libexec/rackup/state.rkt"
-         "../libexec/rackup/state-lock.rkt"
-         "../libexec/rackup/util.rkt")
+         "../libexec/rackup/state-lock.rkt")
 
 (define (with-temp-home proc)
   (define tmp (make-temporary-file "rackup-prefix-test~a" 'directory))

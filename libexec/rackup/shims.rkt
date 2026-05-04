@@ -9,8 +9,12 @@
          "paths.rkt"
          "state.rkt"
          "state-lock.rkt"
+         "error.rkt"
          "rktd-io.rkt"
-         "util.rkt")
+         "fs.rkt"
+         "process.rkt"
+         "security.rkt"
+         "text.rkt")
 
 (provide ensure-shim-dispatcher!
          ensure-core-rackup-shim!
@@ -256,10 +260,8 @@ EOF
 
 (define (ensure-core-rackup-shim!)
   (ensure-rackup-layout!)
-  (define shim (build-path (rackup-shims-dir) "rackup"))
-  (when (or (link-exists? shim) (file-exists? shim))
-    (delete-file shim))
-  (make-file-or-directory-link (rackup-bin-entry) shim)
+  (define shim (rackup-shim-path "rackup"))
+  (replace-path! shim (rackup-bin-entry) #:mode 'link)
   shim)
 
 (define (resolve-active-toolchain-id)
@@ -282,7 +284,7 @@ EOF
   (define id (or toolchain-id (resolve-active-toolchain-id)))
   (unless id
     (rackup-error "no active/default toolchain configured"))
-  (define p (build-path (rackup-toolchain-bin-link id) exe))
+  (define p (rackup-toolchain-exe-path id exe))
   (if (file-exists? p)
       p
       (find-addon-bin-exe (rackup-addon-dir id) exe)))
@@ -493,9 +495,7 @@ EOF
   (for ([name (in-set desired)])
     (unless (equal? name "rackup")
       (define p (build-path shims-dir name))
-      (when (link-exists? p)
-        (delete-file p))
-      (make-file-or-directory-link dispatcher p)))
+      (replace-path! p dispatcher #:mode 'link)))
   (for ([p (in-list (directory-list shims-dir #:build? #t))])
     (define name (path-basename-string p))
     (when (and (not (set-member? desired name)) (rackup-managed-shim? p))
