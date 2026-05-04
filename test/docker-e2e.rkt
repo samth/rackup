@@ -1,19 +1,30 @@
-#lang racket/base
+#lang at-exp racket/base
 
 ;; Shared Docker E2E helpers used by the Racket-ported orchestration scripts.
+;; The container/image fallbacks that remote-shell/docker doesn't support
+;; live in test/docker-extras.rkt — when remote-shell grows the relevant
+;; flags we can drop that file and call remote-shell directly.
 
 (require racket/format
-         racket/list
          racket/path
          racket/port
          racket/runtime-path
          racket/string
-         racket/system)
+         racket/system
+         recspecs
+         "../libexec/rackup/text.rkt"
+         "docker-extras.rkt")
 
 (provide root-dir
          docker-build-e2e-image
          docker-run-container
          run/check
+         command-output/check
+         current-utc-stamp
+         git-head-commit
+         transcript-header
+         standard-container-env
+         run/container->transcript
          uid-gid
          sanitize-tag
          csv-join)
@@ -21,24 +32,76 @@
 (define-runtime-path here ".")
 (define root-dir (simplify-path (build-path here "..")))
 
-;; Run a command, raising an error on failure.
+(define (resolve-exe prog)
+  (cond
+    [(path? prog) prog]
+    [(absolute-path? prog) (string->path prog)]
+    [(find-executable-path prog) => values]
+    [else (error 'run/check "executable not found: ~a" prog)]))
+
+(define (->string-arg a)
+  (if (path? a) (path->string a) a))
+
+;; Run a command, raising an error on failure. Subprocess output streams
+;; to the current ports.
 (define (run/check prog . args)
-  (define cmd (cons prog args))
-  (unless (apply system*
-                 (if (path? prog)
-                     (path->string prog)
-                     prog)
-                 (map (lambda (a)
-                        (if (path? a)
-                            (path->string a)
-                            a))
-                      args))
-    (error 'run/check "command failed: ~a" (string-join (map ~a cmd) " "))))
+  (unless (apply system* (resolve-exe prog) (map ->string-arg args))
+    (error 'run/check "command failed: ~a"
+           (string-join (map ~a (cons prog args)) " "))))
+
+;; Run a command and return trimmed stdout, raising an error (with
+;; stderr appended) on failure.
+(define (command-output/check prog . args)
+  (define ok? #t)
+  (define-values (out err)
+    (capture-output/split
+     (lambda ()
+       (set! ok? (apply system* (resolve-exe prog) (map ->string-arg args))))))
+  (unless ok?
+    (error 'command-output/check
+           "command failed: ~a\nstderr: ~a"
+           (string-join (map ~a (cons prog args)) " ")
+           (string-trim err)))
+  (string-trim out))
 
 ;; Current uid:gid string for --user.
 (define uid-gid
-  (string-trim (with-output-to-string (lambda ()
-                                        (system "printf '%s:%s' \"$(id -u)\" \"$(id -g)\"")))))
+  (format "~a:~a" (command-output/check "id" "-u") (command-output/check "id" "-g")))
+
+;; "YYYY-MM-DDTHH:MM:SSZ" for transcript headers, or compact
+;; "YYYYMMDDTHHMMSSZ" for filenames.  `current-iso8601` already produces
+;; the separator form; strip non-digits (preserving the trailing "Z")
+;; for the filename form.
+(define (current-utc-stamp #:for-filename? [for-filename? #f])
+  (define iso (current-iso8601))
+  (if for-filename? (regexp-replace* #px"[-:]" iso "") iso))
+
+(define (git-head-commit)
+  (command-output/check "git" "-C" (path->string root-dir) "rev-parse" "HEAD"))
+
+(define (transcript-header #:image image-tag
+                           #:host-racket host-racket
+                           #:trace trace)
+  @~a{rackup expanded docker transcript
+      commit: @(git-head-commit)
+      generated: @(current-utc-stamp)
+      image: @|image-tag|
+      host_racket: @|host-racket|
+      trace: @|trace|
+
+      })
+
+;; Standard env-var alist for the container (HOME/WORKDIR/TMPDIR/PATH plus extras).
+(define (standard-container-env #:home home
+                                #:workdir [workdir "/work"]
+                                #:trace [trace #f]
+                                #:extra [extra '()])
+  (append (list (cons "HOME" home)
+                (cons "WORKDIR" workdir)
+                (cons "TMPDIR" "/tmp")
+                (cons "PATH" "/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin"))
+          (if trace (list (cons "RACKUP_TRANSCRIPT_TRACE" trace)) '())
+          extra))
 
 ;; Sanitize a string for use as a Docker tag component.
 (define (sanitize-tag s)
@@ -48,55 +111,8 @@
 (define (csv-join strs)
   (string-join strs ","))
 
-;; Build the E2E Docker image.
-;; Returns the image tag used.
-(define (docker-build-e2e-image #:image-tag image-tag
-                                #:host-racket [host-racket "present"]
-                                #:base-image [base-image "ubuntu:24.04"]
-                                #:platform [platform #f]
-                                #:use-buildx-cache? [use-buildx-cache? #f]
-                                #:cache-scope [cache-scope #f]
-                                #:extra-build-args [extra-build-args '()])
-  (define include-system-racket (if (equal? host-racket "present") "1" "0"))
-  (define build-cmd
-    (if use-buildx-cache?
-        (append (list "docker" "buildx" "build" "--load")
-                (if cache-scope
-                    (list (format "--cache-from=type=gha,scope=~a" cache-scope)
-                          (format "--cache-to=type=gha,scope=~a,mode=max" cache-scope))
-                    '()))
-        (list "docker" "build")))
-  (define build-args
-    (append (list "--build-arg"
-                  (format "BASE_IMAGE=~a" base-image)
-                  "--build-arg"
-                  (format "INCLUDE_SYSTEM_RACKET=~a" include-system-racket))
-            extra-build-args))
-  (define platform-args
-    (if platform
-        (list "--platform" platform)
-        '()))
-  (define full-cmd
-    (append build-cmd
-            platform-args
-            build-args
-            (list "-t"
-                  image-tag
-                  "-f"
-                  (path->string (build-path root-dir "docker" "Dockerfile.e2e"))
-                  (path->string root-dir))))
-  (printf "Building Docker image ~a (base=~a, platform=~a)...\n"
-          image-tag
-          base-image
-          (or platform "native"))
-  (unless (apply system* full-cmd)
-    (error 'docker-build-e2e-image "docker build failed"))
-  image-tag)
-
-;; Run a container with standard options.
-;; volumes: list of "host:container[:mode]" strings
-;; env-vars: list of (name . value) pairs
-;; extra-args: additional docker run args before the command
+;; Thin wrapper over docker-extras' run-in-fresh-container! that fills
+;; in the rackup-specific defaults (uid-gid, /tmp/rackup-e2e-home, /work).
 (define (docker-run-container #:image image-tag
                               #:command command-args
                               #:platform [platform #f]
@@ -106,17 +122,52 @@
                               #:env-vars [env-vars '()]
                               #:extra-args [extra-args '()]
                               #:workdir [workdir "/work"])
-  (define cmd
-    (append (list "docker" "run" "--rm")
-            (if platform
-                (list "--platform" platform)
-                '())
-            (list "--user" user)
-            (append-map (lambda (v) (list "-v" v)) volumes)
-            (append-map (lambda (e) (list "-e" (format "~a=~a" (car e) (cdr e)))) env-vars)
-            (list "-e" (format "HOME=~a" home))
-            (list "-w" workdir)
-            extra-args
-            (list image-tag)
-            command-args))
-  (apply system* cmd))
+  (run-in-fresh-container! #:image image-tag
+                           #:command command-args
+                           #:platform platform
+                           #:user user
+                           #:home home
+                           #:volumes volumes
+                           #:env-vars env-vars
+                           #:extra-args extra-args
+                           #:workdir workdir))
+
+;; Same, with a transcript file.
+(define (run/container->transcript #:image image-tag
+                                   #:command command-args
+                                   #:transcript-path transcript-path
+                                   #:header header
+                                   #:platform [platform #f]
+                                   #:user [user uid-gid]
+                                   #:home [home "/tmp/rackup-e2e-home"]
+                                   #:volumes [volumes '()]
+                                   #:env-vars [env-vars '()]
+                                   #:workdir [workdir "/work"])
+  (run-in-fresh-container/transcript! #:image image-tag
+                                      #:command command-args
+                                      #:transcript-path transcript-path
+                                      #:header header
+                                      #:platform platform
+                                      #:user user
+                                      #:home home
+                                      #:volumes volumes
+                                      #:env-vars env-vars
+                                      #:workdir workdir))
+
+;; Build the E2E Docker image.  Returns the image tag.
+(define (docker-build-e2e-image #:image-tag image-tag
+                                #:host-racket [host-racket "present"]
+                                #:base-image [base-image "ubuntu:24.04"]
+                                #:platform [platform #f]
+                                #:use-buildx-cache? [use-buildx-cache? #f]
+                                #:cache-scope [cache-scope #f]
+                                #:extra-build-args [extra-build-args '()])
+  (build-e2e-image! #:image-tag image-tag
+                    #:dockerfile (build-path root-dir "docker" "Dockerfile.e2e")
+                    #:context-dir root-dir
+                    #:host-racket host-racket
+                    #:base-image base-image
+                    #:platform platform
+                    #:use-buildx-cache? use-buildx-cache?
+                    #:cache-scope cache-scope
+                    #:extra-build-args extra-build-args))
