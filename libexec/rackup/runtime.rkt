@@ -158,13 +158,7 @@
      (rackup-error "could not find hidden runtime bin dir under ~a" (path->string* install-root))]))
 
 (define (replace-link! link-path target-path)
-  (when (link-exists? link-path)
-    (delete-file link-path))
-  (when (file-exists? link-path)
-    (delete-file link-path))
-  (when (directory-exists? link-path)
-    (delete-directory/files link-path))
-  (make-file-or-directory-link target-path link-path))
+  (replace-path! link-path target-path #:mode 'link))
 
 (define (write-runtime-meta! id
                              req

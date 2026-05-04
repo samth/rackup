@@ -13,6 +13,7 @@
 
 (provide rackup-error
          ensure-directory*
+         replace-path!
          path->string*
          string-blank?
          executable-file?
@@ -48,6 +49,29 @@
 (define (ensure-directory* p)
   (make-directory* p)
   p)
+
+;; Replace the filesystem entry at `dest` with `src` using explicit mode:
+;; - #:mode 'link      => create symlink at `dest` pointing to `src`
+;; - #:mode 'file      => copy file bytes/permissions from `src` to `dest`
+;; - #:mode 'directory => recursively copy directory tree from `src` to `dest`
+;;
+;; Existing links/files/directories at `dest` are removed first. This is
+;; intentionally destructive and non-transactional: if the final creation/copy
+;; fails, `dest` remains absent. Any deletion or creation failure raises the
+;; originating filesystem exception.
+(define (replace-path! dest src #:mode [mode 'link])
+  (when (link-exists? dest)
+    (delete-file dest))
+  (when (file-exists? dest)
+    (delete-file dest))
+  (when (directory-exists? dest)
+    (delete-directory/files dest))
+  (case mode
+    [(link) (make-file-or-directory-link src dest)]
+    [(file) (copy-file src dest #t)]
+    [(directory) (copy-directory/files src dest #t)]
+    [else
+     (raise-argument-error 'replace-path! "(or/c 'link 'file 'directory)" mode)]))
 
 (define (path->string* p)
   (cond

@@ -261,21 +261,13 @@
 
 (define (make-bin-link! id real-bin-dir)
   (define link (rackup-toolchain-bin-link id))
-  (cond
-    [(link-exists? link) (delete-file link)]
-    [(file-exists? link) (delete-file link)]
-    [(directory-exists? link) (delete-directory/files link)])
-  (make-file-or-directory-link real-bin-dir link)
+  (replace-path! link real-bin-dir #:mode 'link)
   link)
 
 (define (link-executable-into-dir! dir src [name #f])
   (define dst-name (or name (path-basename-string src)))
   (define dst (build-path dir dst-name))
-  (cond
-    [(link-exists? dst) (delete-file dst)]
-    [(file-exists? dst) (delete-file dst)]
-    [(directory-exists? dst) (delete-directory/files dst)])
-  (make-file-or-directory-link src dst)
+  (replace-path! dst src #:mode 'link)
   dst)
 
 (define (make-bin-overlay! id real-bin-dir extra-exes)
