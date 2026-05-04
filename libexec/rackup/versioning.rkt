@@ -3,8 +3,8 @@
 (require racket/list
          racket/match
          racket/string
-         "legacy-plt-catalog.rkt"
-         "util.rkt")
+         "error.rkt"
+         "legacy-plt-catalog.rkt")
 
 (provide parse-install-spec
          cmp-versions

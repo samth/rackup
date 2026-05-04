@@ -4,10 +4,11 @@
          racket/future
          racket/string
          racket/system
+         "error.rkt"
          "install.rkt"
          "shims.rkt"
          "state.rkt"
-         "util.rkt")
+         "text.rkt")
 
 (provide rebuild-toolchain!
          rebuild-plan

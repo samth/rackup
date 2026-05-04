@@ -12,6 +12,7 @@
          racket/string
          racket/system
          "../libexec/rackup/install.rkt"
+         "../libexec/rackup/installer-backend.rkt"
          "../libexec/rackup/legacy.rkt"
          "../libexec/rackup/main.rkt"
          "../libexec/rackup/paths.rkt"
@@ -21,10 +22,11 @@
          "../libexec/rackup/shims.rkt"
          "../libexec/rackup/state.rkt"
          "../libexec/rackup/state-lock.rkt"
-         "../libexec/rackup/util.rkt"
+         "../libexec/rackup/env.rkt"
+         "../libexec/rackup/text.rkt"
          "../libexec/rackup/versioning.rkt"
          (only-in (submod "../libexec/rackup/install.rkt" for-testing)
-                  detect-bin-dir installed-toolchain-env-vars
+                  discover-bin-dir installed-toolchain-env-vars
                   write-toolchain-env-file! clean-toolchain-compiled-dirs!)
          (only-in (submod "../libexec/rackup/runtime.rkt" for-testing)
                   hidden-runtime-invocation-prefix)
@@ -54,6 +56,31 @@
       (main))))
 
 (define-runtime-path rackup-bin "../bin/rackup")
+
+;; Build a fake `racket` shell script that responds to rackup's probe
+;; (`-f probe.rkt`) and the legacy single-question `-e` calls with the
+;; given version/addon-dir, then runs `fallthrough` (a string of bash)
+;; for any other invocation.
+(define (fake-racket-script #:version version
+                            #:addon-dir addon-dir
+                            #:fallthrough [fallthrough ""])
+  @~a{#!/usr/bin/env bash
+      set -euo pipefail
+      if [[ "$#" -ge 2 && "$1" == "-f" ]]; then
+        probe="$(cat "$2")"
+        if [[ "$probe" == *"(version)"*"system-type"*"find-system-path"* ]]; then
+          printf '("@|version|" chez-scheme "@|addon-dir|")'
+          exit 0
+        fi
+      fi
+      if [[ "$#" -ge 2 && "$1" == "-e" ]]; then
+        case "$2" in
+          *"(version)"*) printf '@|version|'; exit 0 ;;
+          *"system-type 'vm"*) printf 'cs'; exit 0 ;;
+          *"find-system-path 'addon-dir"*) printf '@|addon-dir|'; exit 0 ;;
+        esac
+      fi
+      @|fallthrough|})
 
 
 
@@ -526,24 +553,14 @@
        p)
 
      (write-exe "racket"
-                @~a{#!/usr/bin/env bash
-                    set -euo pipefail
-                    if [[ "$#" -ge 2 && "$1" == "-e" ]]; then
-                      if [[ "$2" == *"(version)"*"system-type"*"find-system-path"* ]]; then
-                        printf '9.99\nchez-scheme\n@|addon-dir|'
-                        exit 0
-                      fi
-                      case "$2" in
-                        *"(version)"*) printf '9.99'; exit 0 ;;
-                        *"system-type 'vm"*) printf 'cs'; exit 0 ;;
-                        *"find-system-path 'addon-dir"*) printf '@|addon-dir|'; exit 0 ;;
-                      esac
-                    fi
-                    printf 'PLTHOME=%s\n' "${PLTHOME:-}"
-                    printf 'PLTCOLLECTS=%s\n' "${PLTCOLLECTS:-}"
-                    printf 'PLTADDONDIR=%s\n' "${PLTADDONDIR:-}"
-                    printf 'ARGS=%s\n' "$*"
-                    })
+                (fake-racket-script
+                 #:version "9.99"
+                 #:addon-dir addon-dir
+                 #:fallthrough
+                 @~a{printf 'PLTHOME=%s\n' "${PLTHOME:-}"
+                     printf 'PLTCOLLECTS=%s\n' "${PLTCOLLECTS:-}"
+                     printf 'PLTADDONDIR=%s\n' "${PLTADDONDIR:-}"
+                     printf 'ARGS=%s\n' "$*"}))
      (write-exe "raco"
                 @~a{#!/usr/bin/env bash
                     set -euo pipefail
@@ -579,25 +596,14 @@
                    "linked env.sh uses local-name-suffixed compiled dir"))
 
      (write-exe "racket"
-                @~a{#!/usr/bin/env bash
-                    set -euo pipefail
-                    if [[ "$#" -ge 2 && "$1" == "-e" ]]; then
-                      # Combined probe: all three queries in one -e call
-                      if [[ "$2" == *"(version)"*"system-type"*"find-system-path"* ]]; then
-                        printf '9.98\nchez-scheme\n@|addon-dir|'
-                        exit 0
-                      fi
-                      case "$2" in
-                        *"(version)"*) printf '9.98'; exit 0 ;;
-                        *"system-type 'vm"*) printf 'cs'; exit 0 ;;
-                        *"find-system-path 'addon-dir"*) printf '@|addon-dir|'; exit 0 ;;
-                      esac
-                    fi
-                    printf 'PLTHOME=%s\n' "${PLTHOME:-}"
-                    printf 'PLTCOLLECTS=%s\n' "${PLTCOLLECTS:-}"
-                    printf 'PLTADDONDIR=%s\n' "${PLTADDONDIR:-}"
-                    printf 'ARGS=%s\n' "$*"
-                    })
+                (fake-racket-script
+                 #:version "9.98"
+                 #:addon-dir addon-dir
+                 #:fallthrough
+                 @~a{printf 'PLTHOME=%s\n' "${PLTHOME:-}"
+                     printf 'PLTCOLLECTS=%s\n' "${PLTCOLLECTS:-}"
+                     printf 'PLTADDONDIR=%s\n' "${PLTADDONDIR:-}"
+                     printf 'ARGS=%s\n' "$*"}))
      (check-equal? (link-toolchain! "devsrc" (path->string src-root) '("--force")) linked-id)
      (check-equal? (hash-ref (read-toolchain-meta linked-id) 'resolved-version) "9.98")
      (let ([env-sh (file->string (rackup-toolchain-env-file linked-id))])
@@ -742,23 +748,13 @@
        p)
 
      (write-bin-exe "racket"
-                    @~a{#!/usr/bin/env bash
-                        set -euo pipefail
-                        if [[ "$#" -ge 2 && "$1" == "-e" ]]; then
-                          if [[ "$2" == *"(version)"*"system-type"*"find-system-path"* ]]; then
-                            printf '8.18-installed\nchez-scheme\n@|addon-dir|'
-                            exit 0
-                          fi
-                          case "$2" in
-                            *"(version)"*) printf '8.18-installed'; exit 0 ;;
-                            *"system-type 'vm"*) printf 'cs'; exit 0 ;;
-                            *"find-system-path 'addon-dir"*) printf '@|addon-dir|'; exit 0 ;;
-                          esac
-                        fi
-                        printf 'PLTHOME=%s\n' "${PLTHOME:-}"
-                        printf 'PLTCOLLECTS=%s\n' "${PLTCOLLECTS:-}"
-                        printf 'PLTADDONDIR=%s\n' "${PLTADDONDIR:-}"
-                        })
+                    (fake-racket-script
+                     #:version "8.18-installed"
+                     #:addon-dir addon-dir
+                     #:fallthrough
+                     @~a{printf 'PLTHOME=%s\n' "${PLTHOME:-}"
+                         printf 'PLTCOLLECTS=%s\n' "${PLTCOLLECTS:-}"
+                         printf 'PLTADDONDIR=%s\n' "${PLTADDONDIR:-}"}))
      (write-bin-exe "raco"
                     @~a{#!/usr/bin/env bash
                         set -euo pipefail
@@ -824,20 +820,10 @@
      (define racket-bin (build-path bin-dir "racket"))
      (define fake-addon-dir (path->string (build-path tmp "fake-addon")))
      (write-string-file racket-bin
-                        @~a{#!/usr/bin/env bash
-                            set -euo pipefail
-                            if [[ "$#" -ge 2 && "$1" == "-e" ]]; then
-                              if [[ "$2" == *"(version)"*"system-type"*"find-system-path"* ]]; then
-                                printf '9.90\nchez-scheme\n@|fake-addon-dir|'
-                                exit 0
-                              fi
-                              case "$2" in
-                                *"(version)"*) printf '9.90'; exit 0 ;;
-                                *"system-type 'vm"*) printf 'cs'; exit 0 ;;
-                              esac
-                            fi
-                            printf 'linked-toolchain-racket\n'
-                            })
+                        (fake-racket-script
+                         #:version "9.90"
+                         #:addon-dir fake-addon-dir
+                         #:fallthrough "printf 'linked-toolchain-racket\\n'"))
      (file-or-directory-permissions racket-bin #o755)
      (define linked-id (link-toolchain! "devsrc-wrapper" (path->string src-root) '("--set-default")))
      (define poisoned-collects (build-path tmp "poisoned-collects"))
@@ -1205,7 +1191,7 @@
                         "#!/usr/bin/env bash\necho tgz-runtime\n")
      (file-or-directory-permissions (build-path archive-root "racket" "bin" "racket") #o755)
      (check-true (system* tar-exe "-czf" archive "-C" archive-root "."))
-     (run-tgz-installer! archive dest)
+     (extract-tgz-installer! archive dest)
      (check-true (directory-exists? (build-path dest "racket" "bin")))
      (check-true (file-exists? (build-path dest "racket" "bin" "racket")))))
 
@@ -1213,7 +1199,7 @@
    (lambda (tmp)
      (define install-root (build-path tmp "plt-archive"))
      (make-directory* (build-path install-root "plt" "bin"))
-     (check-equal? (path->string (detect-bin-dir install-root))
+     (check-equal? (path->string (discover-bin-dir install-root))
                    (path->string (build-path install-root "plt" "bin")))))
 
   ;; `rackup help <cmd>` and `rackup <cmd> --help` produce the same output.
@@ -1766,19 +1752,22 @@
                                   'executables '("racket") 'installed-at "2026-02-26T00:00:00Z")))
 
      ;; Poison all sanitized Racket env vars
-     (define saved-vars
+     (define var-names
        (for/list ([var (in-list sanitized-racket-env-vars)])
-         (cons var (getenv var))))
+         (bytes->string/utf-8 var)))
+     (define saved-vars
+       (for/list ([name (in-list var-names)])
+         (cons name (getenv name))))
      (dynamic-wind
       (lambda ()
-        (for ([var sanitized-racket-env-vars])
-          (putenv var "/nonexistent/poisoned")))
+        (for ([name (in-list var-names)])
+          (putenv name "/nonexistent/poisoned")))
       (lambda ()
         ;; rackup list should still work
         (expect (begin (system* rackup-bin "list") (void))
                 "release-9.0" #:match 'contains))
       (lambda ()
-        (for ([kv saved-vars])
+        (for ([kv (in-list saved-vars)])
           (if (cdr kv)
               (putenv (car kv) (cdr kv))
               (putenv (car kv) "")))))))
@@ -2608,15 +2597,9 @@
      ;; Fake racket that returns NEW values on probe (different from
      ;; what was stored in meta).
      (write-string-file (build-path bin-dir "racket")
-                        @~a{#!/usr/bin/env bash
-                            set -euo pipefail
-                            if [[ "$#" -ge 2 && "$1" == "-e" ]]; then
-                              if [[ "$2" == *"(version)"*"system-type"*"find-system-path"* ]]; then
-                                printf '9.7.0.5\nchez-scheme\n@|new-addon|'
-                                exit 0
-                              fi
-                            fi
-                            })
+                        (fake-racket-script
+                         #:version "9.7.0.5"
+                         #:addon-dir new-addon))
      (file-or-directory-permissions (build-path bin-dir "racket") #o755)
 
      (define id "local-stale")

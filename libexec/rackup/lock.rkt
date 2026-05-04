@@ -7,7 +7,8 @@
                      syntax/parse
                      syntax/parse/lib/function-header
                      racket/syntax)
-         "util.rkt")
+         "error.rkt"
+         "text.rkt")
 
 (provide define-file-lock)
 

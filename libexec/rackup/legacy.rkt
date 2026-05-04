@@ -8,9 +8,10 @@
          racket/match
          racket/path
          racket/string
+         "error.rkt"
          "legacy-plt-catalog.rkt"
          "rktd-io.rkt"
-         "util.rkt"
+         "text.rkt"
          "versioning.rkt")
 
 (provide plt-scheme-download-base

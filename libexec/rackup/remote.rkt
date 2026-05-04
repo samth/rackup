@@ -9,10 +9,11 @@
          racket/string
          net/http-client
          net/url
+         "error.rkt"
          "legacy-plt-catalog.rkt"
          "legacy.rkt"
          "rktd-io.rkt"
-         "util.rkt"
+         "text.rkt"
          "versioning.rkt")
 
 (provide lookup-stable-version
