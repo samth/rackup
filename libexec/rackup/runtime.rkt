@@ -8,11 +8,17 @@
          racket/port
          racket/string
          racket/system
+         "installer-backend.rkt"
          "lock.rkt"
          "paths.rkt"
          "remote.rkt"
          "rktd-io.rkt"
-         "util.rkt"
+         "checksum.rkt"
+         "error.rkt"
+         "fs.rkt"
+         "process.rkt"
+         "security.rkt"
+         "text.rkt"
          "versioning.rkt")
 
 (provide cmd-runtime
@@ -33,7 +39,7 @@
          (append (hidden-runtime-invocation-prefix racket-exe) args)))
 
 (define (hidden-runtime-racket-path)
-  (define p (build-path (rackup-runtime-current-link) "bin" "racket"))
+  (define p (rackup-runtime-current-racket))
   (and (executable-file? p) p))
 
 (define (hidden-runtime-present?)
@@ -93,78 +99,8 @@
                  "--dest"
                  dest))
 
-(define (tar-exe)
-  (or (find-executable-path "tar") (string->path "/bin/tar")))
-
-(define (run-tgz-installer! installer-file install-root)
-  (define archive (path->complete-path installer-file))
-  (define dest (path->complete-path install-root))
-  (displayln (format "Extracting hidden runtime archive into ~a" (path->string dest)))
-  (make-directory* dest)
-  (system*/check 'hidden-runtime-tgz-installer (tar-exe) "-xzf" archive "-C" dest))
-
-(define (run-macos-dmg-installer! installer-file install-root)
-  (define dmg (path->complete-path installer-file))
-  (define dest (path->complete-path install-root))
-  (define mount-point (make-temporary-file "rackup-dmg-~a" 'directory))
-  (displayln (format "Mounting DMG and extracting hidden runtime into ~a" (path->string dest)))
-  (dynamic-wind
-   (lambda ()
-     (system*/check 'hdiutil-attach
-                    "/usr/bin/hdiutil" "attach"
-                    "-nobrowse" "-noverify" "-noautoopen" "-quiet"
-                    "-mountpoint" (path->string* mount-point)
-                    (path->string* dmg)))
-   (lambda ()
-     ;; Racket .dmg files are drag-and-drop installers containing:
-     ;; - A directory like "Racket v9.1/" with bin/, lib/, share/ inside
-     ;; - A symlink to /Applications (for drag-and-drop UX)
-     ;; We must skip symlinks to avoid copying the system /Applications.
-     (define top-dirs
-       (for/list ([p (directory-list mount-point #:build? #t)]
-                  #:when (and (directory-exists? p)
-                              (not (link-exists? p))))
-         p))
-     (define src-dir
-       (cond
-         [(for/or ([d (in-list top-dirs)])
-            (and (directory-exists? (build-path d "bin")) d))]
-         [(directory-exists? (build-path mount-point "bin"))
-          mount-point]
-         [(= (length top-dirs) 1) (car top-dirs)]
-         [else mount-point]))
-     (make-directory* dest)
-     (system*/check 'ditto "/usr/bin/ditto" (path->string* src-dir) (path->string* dest)))
-   (lambda ()
-     (system* "/usr/bin/hdiutil" "detach" (path->string* mount-point) "-quiet")
-     (when (directory-exists? mount-point)
-       (delete-directory mount-point)))))
-
-(define (installer-extension p)
-  (define low (string-downcase (path->string* p)))
-  (cond
-    [(regexp-match? #px"[.]sh$" low) "sh"]
-    [(regexp-match? #px"[.]tgz$" low) "tgz"]
-    [(regexp-match? #px"[.]dmg$" low) "dmg"]
-    [else #f]))
-
-(define (detect-bin-dir install-root)
-  (define p1 (build-path install-root "bin"))
-  (define p2 (build-path install-root "racket" "bin"))
-  (cond
-    [(directory-exists? p1) p1]
-    [(directory-exists? p2) p2]
-    [else
-     (rackup-error "could not find hidden runtime bin dir under ~a" (path->string* install-root))]))
-
 (define (replace-link! link-path target-path)
-  (when (link-exists? link-path)
-    (delete-file link-path))
-  (when (file-exists? link-path)
-    (delete-file link-path))
-  (when (directory-exists? link-path)
-    (delete-directory/files link-path))
-  (make-file-or-directory-link target-path link-path))
+  (replace-path! link-path target-path #:mode 'link))
 
 (define (write-runtime-meta! id
                              req
@@ -255,8 +191,8 @@
                 'platform
                 (host-platform-token)))
         (define real-bin
-          (with-handlers ([exn:fail? (lambda (_) (build-path (rackup-runtime-current-link) "bin"))])
-            (resolve-path (build-path (rackup-runtime-current-link) "bin"))))
+          (with-handlers ([exn:fail? (lambda (_) (rackup-runtime-current-bin-dir))])
+            (resolve-path (rackup-runtime-current-bin-dir))))
         (write-runtime-meta! current-id
                              req
                              real-bin
@@ -337,7 +273,7 @@
               (ensure-installer-cached! installer-url
                                         #:sha256 (hash-ref req 'installer-sha256 #f)
                                         #:sha1 (hash-ref req 'installer-sha1 #f))]
-             [installer-ext (installer-extension installer-file)])
+             [installer-ext (detect-installer-type installer-file)])
         (if (and (directory-exists? version-dir) (file-exists? (build-path bin-link "racket")))
             (begin
               (replace-link! (rackup-runtime-current-link) version-dir)
@@ -351,13 +287,20 @@
                 [(equal? installer-ext "sh")
                  (run-linux-installer! installer-file install-root)]
                 [(equal? installer-ext "tgz")
-                 (run-tgz-installer! installer-file install-root)]
+                 (extract-tgz-installer! installer-file install-root
+                                         #:check-label 'hidden-runtime-tgz-installer
+                                         #:archive-noun "hidden runtime archive")]
                 [(equal? installer-ext "dmg")
-                 (run-macos-dmg-installer! installer-file install-root)]
+                 (install-from-dmg! installer-file install-root
+                                    #:attach-label 'hdiutil-attach
+                                    #:copy-label 'ditto
+                                    #:source-noun "hidden runtime")]
                 [else
                  (rackup-error "unsupported hidden runtime installer format: ~a"
                                (or installer-ext "unknown"))])
-              (define real-bin (detect-bin-dir install-root))
+              (define real-bin
+                (discover-bin-dir install-root
+                                  #:error-label "hidden runtime"))
               (replace-link! bin-link real-bin)
               (write-runtime-meta! id
                                    req
