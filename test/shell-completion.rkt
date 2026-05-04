@@ -5,6 +5,7 @@
          racket/file
          racket/string
          "../libexec/rackup/shell.rkt"
+         (submod "../libexec/rackup/shell.rkt" for-testing)
          "../libexec/rackup/paths.rkt")
 
 (define (contains? haystack needle)
