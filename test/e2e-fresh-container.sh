@@ -23,7 +23,6 @@ export HOME="$TEST_HOME"
 # are not substituted. RACKUP_TESTING allows the bootstrap to proceed without them.
 export RACKUP_TESTING=1
 export TMPDIR="${TMPDIR:-/tmp}"
-export PATH="/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin"
 RUN_SRC="${TMPDIR}/rackup-src"
 PKG_SRC_ROOT="${TMPDIR}/rackup-e2e-pkgs"
 
@@ -63,28 +62,7 @@ assert_nonempty() {
   [[ -n "$value" ]] || fail "$msg"
 }
 
-echo "== Container environment =="
-echo "mode=$MODE"
-echo "specs=$SPECS_CSV"
-echo "snapshot_site=$SNAPSHOT_SITE"
-echo "local_link_mode=$LOCAL_LINK_MODE"
-echo "skip_package_tests=$SKIP_PACKAGE_TESTS"
-echo "host_racket_mode=$HOST_RACKET"
-if [[ "$LOCAL_LINK_MODE" == "build" ]]; then
-  echo "source_build_repo=$SOURCE_BUILD_REPO"
-  echo "source_build_ref=$SOURCE_BUILD_REF"
-  echo "source_build_commit=${SOURCE_BUILD_COMMIT:-}"
-  echo "source_build_target=$SOURCE_BUILD_TARGET"
-  echo "source_build_jobs=$SOURCE_BUILD_JOBS"
-  echo "prebuilt_local_source_dir=${PREBUILT_LOCAL_SOURCE_DIR:-}"
-fi
-echo "HOME=$HOME"
-echo "PWD=$(pwd)"
 host_racket_path="$(command -v racket || true)"
-echo "host-racket=${host_racket_path:-<missing>}"
-if [[ -n "$host_racket_path" ]]; then
-  racket -v || true
-fi
 
 if [[ "$MODE" == "direct" && "$HOST_RACKET" == "absent" ]]; then
   fail "direct mode requires a host racket; use --mode bootstrap for host-racket absent"

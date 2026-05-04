@@ -2,17 +2,24 @@
 
 ;; Shared Docker E2E helpers used by the Racket-ported orchestration scripts.
 
-(require racket/format
+(require racket/date
+         racket/format
          racket/list
          racket/path
          racket/port
          racket/runtime-path
          racket/string
-         racket/system)
+         racket/system
+         remote-shell/ssh)
 
 (provide root-dir
          docker-build-e2e-image
          docker-run-container
+         current-utc-stamp
+         git-head-commit
+         transcript-header
+         standard-container-env
+         run/container->transcript
          run/check
          uid-gid
          sanitize-tag
@@ -20,6 +27,104 @@
 
 (define-runtime-path here ".")
 (define root-dir (simplify-path (build-path here "..")))
+
+(define localhost-remote (remote #:host "localhost"))
+
+(define (sh-quote s)
+  (string-append "'" (regexp-replace* #rx"'" s "'\\''") "'"))
+
+(define (run/remote-shell-check cmd)
+  (unless (ssh localhost-remote #:mode 'result cmd)
+    (error 'run/remote-shell-check "command failed: ~a" cmd)))
+
+(define (current-utc-stamp #:for-filename? [for-filename? #f])
+  (parameterize ([date-display-format 'iso-8601])
+    (define base (date->string (seconds->date (current-seconds) #t) #t))
+    (if for-filename?
+        (string-replace (string-replace base ":" "") "-" "")
+        base)))
+
+(define (git-head-commit)
+  (string-trim
+   (with-output-to-string
+     (lambda ()
+       (run/remote-shell-check
+        (format "git -C ~a rev-parse HEAD" (sh-quote (path->string root-dir))))))))
+
+(define (transcript-header #:image image-tag
+                           #:host-racket host-racket
+                           #:trace trace)
+  (string-join (list "rackup expanded docker transcript"
+                     (format "commit: ~a" (git-head-commit))
+                     (format "generated: ~a" (current-utc-stamp))
+                     (format "image: ~a" image-tag)
+                     (format "host_racket: ~a" host-racket)
+                     (format "trace: ~a" trace)
+                     "")
+               "\n"))
+
+(define (standard-container-env #:home home
+                                #:workdir [workdir "/work"]
+                                #:trace [trace #f]
+                                #:extra [extra '()])
+  (append (list (cons "HOME" home)
+                (cons "WORKDIR" workdir)
+                (cons "TMPDIR" "/tmp")
+                (cons "PATH" "/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin"))
+          (if trace
+              (list (cons "RACKUP_TRANSCRIPT_TRACE" trace))
+              '())
+          extra))
+
+(define (docker-run-argv #:image image-tag
+                         #:command command-args
+                         #:platform [platform #f]
+                         #:user [user uid-gid]
+                         #:home [home "/tmp/rackup-e2e-home"]
+                         #:volumes [volumes '()]
+                         #:env-vars [env-vars '()]
+                         #:extra-args [extra-args '()]
+                         #:workdir [workdir "/work"])
+  (append (list "docker" "run" "--rm")
+          (if platform (list "--platform" platform) '())
+          (list "--user" user)
+          (append-map (lambda (v) (list "-v" v)) volumes)
+          (append-map (lambda (e) (list "-e" (format "~a=~a" (car e) (cdr e)))) env-vars)
+          (list "-e" (format "HOME=~a" home))
+          (list "-w" workdir)
+          extra-args
+          (list image-tag)
+          command-args))
+
+(define (run/container->transcript #:image image-tag
+                                   #:command command-args
+                                   #:transcript-path transcript-path
+                                   #:header header
+                                   #:platform [platform #f]
+                                   #:user [user uid-gid]
+                                   #:home [home "/tmp/rackup-e2e-home"]
+                                   #:volumes [volumes '()]
+                                   #:env-vars [env-vars '()]
+                                   #:extra-args [extra-args '()]
+                                   #:workdir [workdir "/work"])
+  (call-with-output-file transcript-path
+    (lambda (out)
+      (display header out))
+    #:exists 'truncate/replace)
+  (define docker-cmd
+    (docker-run-argv #:image image-tag
+                     #:command command-args
+                     #:platform platform
+                     #:user user
+                     #:home home
+                     #:volumes volumes
+                     #:env-vars env-vars
+                     #:extra-args extra-args
+                     #:workdir workdir))
+  (run/remote-shell-check
+   (format "~a 2>&1 | tee -a ~a"
+           (string-join (map sh-quote docker-cmd) " ")
+           (sh-quote (path->string transcript-path)))))
 
 ;; Run a command, raising an error on failure.
 (define (run/check prog . args)
@@ -89,8 +194,8 @@
           image-tag
           base-image
           (or platform "native"))
-  (unless (apply system* full-cmd)
-    (error 'docker-build-e2e-image "docker build failed"))
+  (run/remote-shell-check
+   (string-join (map sh-quote full-cmd) " "))
   image-tag)
 
 ;; Run a container with standard options.
@@ -107,16 +212,13 @@
                               #:extra-args [extra-args '()]
                               #:workdir [workdir "/work"])
   (define cmd
-    (append (list "docker" "run" "--rm")
-            (if platform
-                (list "--platform" platform)
-                '())
-            (list "--user" user)
-            (append-map (lambda (v) (list "-v" v)) volumes)
-            (append-map (lambda (e) (list "-e" (format "~a=~a" (car e) (cdr e)))) env-vars)
-            (list "-e" (format "HOME=~a" home))
-            (list "-w" workdir)
-            extra-args
-            (list image-tag)
-            command-args))
-  (apply system* cmd))
+    (docker-run-argv #:image image-tag
+                     #:command command-args
+                     #:platform platform
+                     #:user user
+                     #:home home
+                     #:volumes volumes
+                     #:env-vars env-vars
+                     #:extra-args extra-args
+                     #:workdir workdir))
+  (ssh localhost-remote #:mode 'result (string-join (map sh-quote cmd) " ")) )

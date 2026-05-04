@@ -13,7 +13,6 @@ INSTALL_TIMEOUT="${RACKUP_TRANSCRIPT_INSTALL_TIMEOUT:-900}"
 UNINSTALL_AT_END="${RACKUP_TRANSCRIPT_UNINSTALL_AT_END:-1}"
 
 export TMPDIR="${TMPDIR:-/tmp}"
-export PATH="/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin"
 export RACKUP_HOME
 
 note() {

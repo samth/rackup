@@ -3,9 +3,6 @@
 (require racket/cmdline
          racket/file
          racket/format
-         racket/port
-         racket/string
-         racket/system
          "docker-e2e.rkt")
 
 (define host-racket "absent")
@@ -35,8 +32,7 @@
   (set! image-tag (format "rackup-e2e:~a" host-racket)))
 
 (unless transcript-path
-  (define stamp
-    (string-trim (with-output-to-string (lambda () (system "date -u '+%Y%m%dT%H%M%SZ'")))))
+  (define stamp (current-utc-stamp #:for-filename? #t))
   (set! transcript-path
         (path->string (build-path root-dir
                                   "artifacts"
@@ -48,48 +44,16 @@
 (when build?
   (docker-build-e2e-image #:image-tag image-tag #:host-racket host-racket))
 
-;; Write transcript header and run container, teeing to file.
-(define commit
-  (string-trim (with-output-to-string
-                (lambda () (system (format "git -C ~a rev-parse HEAD" (path->string root-dir)))))))
-
 (define header
-  (string-join (list "rackup expanded docker transcript"
-                     (format "commit: ~a" commit)
-                     (format "generated: ~a"
-                             (string-trim (with-output-to-string
-                                           (lambda () (system "date -u '+%Y-%m-%dT%H:%M:%SZ'")))))
-                     (format "image: ~a" image-tag)
-                     (format "host_racket: ~a" host-racket)
-                     (format "trace: ~a" trace)
-                     "")
-               "\n"))
+  (transcript-header #:image image-tag #:host-racket host-racket #:trace trace))
 
-;; Use shell pipeline to tee output to the transcript file,
-;; matching the original: { header; docker run ... } 2>&1 | tee PATH
-(define shell-cmd
-  (format "{ printf '~a\\n' ; ~a ; } 2>&1 | tee ~a"
-          (regexp-replace* #rx"'" header "'\\\\''")
-          (string-join (list "docker"
-                             "run"
-                             "--rm"
-                             "--user"
-                             (format "'~a'" uid-gid)
-                             "-e"
-                             "HOME=/tmp/rackup-transcript-home"
-                             "-e"
-                             (format "RACKUP_TRANSCRIPT_TRACE=~a" trace)
-                             "-v"
-                             (format "'~a:/work'" (path->string root-dir))
-                             "-w"
-                             "/work"
-                             image-tag
-                             "bash"
-                             "/work/test/e2e-transcript-matrix-container.sh")
-                       " ")
-          transcript-path))
-
-(unless (system shell-cmd)
-  (error 'docker-run-transcript-matrix "container run failed"))
+(run/container->transcript
+ #:image image-tag
+ #:command (list "bash" "/work/test/e2e-transcript-matrix-container.sh")
+ #:transcript-path transcript-path
+ #:header header
+ #:home "/tmp/rackup-transcript-home"
+ #:volumes (list (format "~a:/work" (path->string root-dir)))
+ #:env-vars (standard-container-env #:home "/tmp/rackup-transcript-home" #:trace trace))
 
 (printf "Transcript written to ~a\n" transcript-path)

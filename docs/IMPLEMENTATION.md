@@ -280,3 +280,12 @@ The install site at `samth.github.io/rackup` is built and deployed by two workfl
 **Deployment.** `pages.yml` is triggered by pushes to main. It rebuilds the site, runs a `bootstrap-curl` smoke test (Docker container running `curl | sh` against the built site to verify the full install path works), and only then packages and deploys the Pages artifact.
 
 CI verifies that every user-facing command from `rackup help` appears on the generated webpage, and that the source tarball contains no compiled artifacts.
+
+## E2E architecture
+
+Rackup’s Docker E2E boundary is **Racket-first orchestration** with shell scripts limited to in-container scenario steps.
+
+- **Racket orchestration (`test/docker-*.rkt`) owns**: timestamps, commit metadata capture, transcript headers, Docker `run` argument construction, and standardized environment-variable assembly passed into the container.
+- **Container shell scripts (`test/e2e-*-container.sh`) own**: scenario execution only (install/switch/run/remove flows and assertions inside the container filesystem).
+- **Boundary rule**: container scripts should not duplicate orchestration plumbing (metadata emission, host git/date calls, or generic Docker env assembly) when those can be provided by the Racket caller.
+
