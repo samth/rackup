@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/e2e-lib.sh"
+
 TRACE="${RACKUP_TRANSCRIPT_TRACE:-0}"
 if [[ "$TRACE" == "1" ]]; then
   set -x
@@ -99,18 +101,7 @@ note "Which and prompt commands"
 
 note "Package isolation"
 pkg_dir=/tmp/rackup-extra-pkg
-rm -rf "$pkg_dir"
-mkdir -p "$pkg_dir"
-cat >"$pkg_dir/info.rkt" <<'EOF'
-#lang info
-(define collection "rackup-extra-pkg")
-(define deps '("base"))
-EOF
-cat >"$pkg_dir/main.rkt" <<'EOF'
-#lang racket/base
-(provide marker)
-(define marker "rackup-extra-ok")
-EOF
+create_local_test_package "$pkg_dir" "rackup-extra-pkg" "rackup-extra-ok"
 "$RACKUP_BIN" default "$stable_full_id"
 "$RACKUP_BIN" run "$stable_full_id" -- raco pkg install --auto --batch --no-setup "$pkg_dir"
 "$RACKUP_BIN" run "$stable_full_id" -- racket -e '(require rackup-extra-pkg) (displayln marker)'
@@ -130,42 +121,7 @@ note "Shell commands"
 
 note "Link local source tree"
 local_src=/tmp/rackup-local-src
-rm -rf "$local_src"
-mkdir -p "$local_src/racket/bin" \
-  "$local_src/racket/collects" \
-  "$local_src/pkgs" \
-  "$local_src/racket/src/build/cs/c/ChezScheme/pb/bin/pb"
-cat >"$local_src/racket/bin/racket" <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-if [[ "$#" -ge 2 && "$1" == "-e" ]]; then
-  case "$2" in
-    *"(version)"*) printf "9.99-local"; exit 0 ;;
-    *"system-type 'vm"*) printf "cs"; exit 0 ;;
-  esac
-fi
-printf "LOCAL-RACKET %s\n" "$*"
-EOF
-cat >"$local_src/racket/bin/raco" <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-printf "LOCAL-RACO %s\n" "$*"
-EOF
-cat >"$local_src/racket/src/build/cs/c/ChezScheme/pb/bin/pb/scheme" <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-printf "LOCAL-SCHEME %s\n" "$*"
-EOF
-cat >"$local_src/racket/src/build/cs/c/ChezScheme/pb/bin/pb/petite" <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-printf "LOCAL-PETITE %s\n" "$*"
-EOF
-chmod +x \
-  "$local_src/racket/bin/racket" \
-  "$local_src/racket/bin/raco" \
-  "$local_src/racket/src/build/cs/c/ChezScheme/pb/bin/pb/scheme" \
-  "$local_src/racket/src/build/cs/c/ChezScheme/pb/bin/pb/petite"
+create_simple_local_source_tree "$local_src" "LOCAL" "pb"
 
 "$RACKUP_BIN" link matrix "$local_src" --set-default
 "$RACKUP_BIN" which scheme --toolchain local-matrix
