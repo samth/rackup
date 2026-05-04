@@ -321,16 +321,14 @@
       null))
 
 (define (write-exec-wrapper! dest exe args)
+  (define rendered-args
+    (apply string-append
+           (for/list ([arg (in-list args)])
+             (string-append " " (sh-single-quote arg)))))
   (define body
-    (string-append
-     "#!/usr/bin/env bash\n"
-     "set -euo pipefail\n"
-     "exec "
-     (sh-single-quote (path->string* exe))
-     (apply string-append
-            (for/list ([arg (in-list args)])
-              (string-append " " (sh-single-quote arg))))
-     " \"$@\"\n"))
+    (format "#!/usr/bin/env bash\nset -euo pipefail\nexec ~a~a \"$@\"\n"
+            (sh-single-quote (path->string* exe))
+            rendered-args))
   (write-string-file dest body)
   (file-or-directory-permissions dest #o755))
 
