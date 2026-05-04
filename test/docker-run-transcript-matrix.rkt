@@ -3,9 +3,7 @@
 (require racket/cmdline
          racket/file
          racket/format
-         racket/port
          racket/string
-         racket/system
          "docker-e2e.rkt")
 
 (define host-racket "absent")
@@ -36,7 +34,7 @@
 
 (unless transcript-path
   (define stamp
-    (string-trim (with-output-to-string (lambda () (system "date -u '+%Y%m%dT%H%M%SZ'")))))
+    (command-output/check "date" "-u" "+%Y%m%dT%H%M%SZ"))
   (set! transcript-path
         (path->string (build-path root-dir
                                   "artifacts"
@@ -50,15 +48,13 @@
 
 ;; Write transcript header and run container, teeing to file.
 (define commit
-  (string-trim (with-output-to-string
-                (lambda () (system (format "git -C ~a rev-parse HEAD" (path->string root-dir)))))))
+  (command-output/check "git" "-C" (path->string root-dir) "rev-parse" "HEAD"))
 
 (define header
   (string-join (list "rackup expanded docker transcript"
                      (format "commit: ~a" commit)
                      (format "generated: ~a"
-                             (string-trim (with-output-to-string
-                                           (lambda () (system "date -u '+%Y-%m-%dT%H:%M:%SZ'")))))
+                             (command-output/check "date" "-u" "+%Y-%m-%dT%H:%M:%SZ"))
                      (format "image: ~a" image-tag)
                      (format "host_racket: ~a" host-racket)
                      (format "trace: ~a" trace)

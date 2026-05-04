@@ -3,9 +3,10 @@
 ;; Shared Docker E2E helpers used by the Racket-ported orchestration scripts.
 
 (require racket/format
+         recspecs
+         recspecs/shell
          racket/list
          racket/path
-         racket/port
          racket/runtime-path
          racket/string
          racket/system)
@@ -14,6 +15,7 @@
          docker-build-e2e-image
          docker-run-container
          run/check
+         command-output/check
          uid-gid
          sanitize-tag
          csv-join)
@@ -24,21 +26,48 @@
 ;; Run a command, raising an error on failure.
 (define (run/check prog . args)
   (define cmd (cons prog args))
-  (unless (apply system*
-                 (if (path? prog)
-                     (path->string prog)
-                     prog)
-                 (map (lambda (a)
-                        (if (path? a)
-                            (path->string a)
-                            a))
-                      args))
-    (error 'run/check "command failed: ~a" (string-join (map ~a cmd) " "))))
+  (with-handlers ([exn:fail?
+                   (lambda (_e)
+                     (error 'run/check "command failed: ~a" (string-join (map ~a cmd) " ")))])
+    (expect/shell (map (lambda (a)
+                         (if (path? a)
+                             (path->string a)
+                             a))
+                       cmd)
+                  #:status 0
+                  #:match 'regexp
+                  #px"(?s:.*)")))
+
+;; Run a command and return trimmed stdout, raising an error on failure.
+(define (command-output/check prog . args)
+  (define cmd (cons prog args))
+  (define cmd-text (string-join (map ~a cmd) " "))
+  (define ok? #t)
+  (define-values (out err)
+    (capture-output/split
+     (lambda ()
+       (set! ok?
+             (apply system*
+                    (if (path? prog)
+                        (path->string prog)
+                        prog)
+                    (map (lambda (a)
+                           (if (path? a)
+                               (path->string a)
+                               a))
+                         args))))))
+  (unless ok?
+    (error 'command-output/check
+           "command failed: ~a\nstderr: ~a"
+           cmd-text
+           (string-trim err)))
+  (string-trim out))
 
 ;; Current uid:gid string for --user.
 (define uid-gid
-  (string-trim (with-output-to-string (lambda ()
-                                        (system "printf '%s:%s' \"$(id -u)\" \"$(id -g)\"")))))
+  (format "~a:~a"
+          (command-output/check "id" "-u")
+          (command-output/check "id" "-g")))
 
 ;; Sanitize a string for use as a Docker tag component.
 (define (sanitize-tag s)
