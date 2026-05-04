@@ -3,7 +3,7 @@
 (require racket/list
          racket/match
          racket/string
-         "util.rkt")
+         "error.rkt")
 
 (provide legacy-plt-version-tokens
          legacy-plt-version?

@@ -91,14 +91,14 @@ jobs:
           esac
           mkdir -p /tmp/rackup-exe-test
           tar -xzf "dist/rackup-${{ matrix.artifact_name }}.tar.gz" -C /tmp/rackup-exe-test
-          docker run --rm --platform "$DOCKER_PLATFORM" \
-            -v /tmp/rackup-exe-test/rackup:/rackup:ro \
-            -e RACKUP_HOME=/rackup \
-            "$BASE_IMAGE" /rackup/bin/rackup version
-          docker run --rm --platform "$DOCKER_PLATFORM" \
-            -v /tmp/rackup-exe-test/rackup:/rackup:ro \
-            -e RACKUP_HOME=/rackup \
-            "$BASE_IMAGE" /rackup/bin/rackup help
+          smoke() {
+            docker run --rm --platform "$DOCKER_PLATFORM" \
+              -v /tmp/rackup-exe-test/rackup:/rackup:ro \
+              -e RACKUP_HOME=/rackup \
+              "$BASE_IMAGE" /rackup/bin/rackup "$1"
+          }
+          smoke version
+          smoke help
       - name: Upload exe artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:

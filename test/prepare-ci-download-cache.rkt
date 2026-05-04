@@ -2,12 +2,8 @@
 
 (require racket/cmdline
          racket/file
-         racket/format
-         racket/list
-         racket/match
          racket/path
          racket/string
-         racket/system
          "../libexec/rackup/remote.rkt"
          "../libexec/rackup/util.rkt")
 
@@ -26,50 +22,6 @@
 (define output-root (path->complete-path (string->path output-dir)))
 (define x86_64-dir (build-path output-root "x86_64"))
 (define aarch64-dir (build-path output-root "aarch64"))
-
-(define (system*/capture-string who . args)
-  (define out (open-output-string))
-  (define err (open-output-string))
-  (parameterize ([current-output-port out]
-                 [current-error-port err])
-    (if (apply system* args)
-        (string-trim (get-output-string out))
-        (raise-user-error who
-                          "~a failed: ~a~a"
-                          who
-                          (string-join (map path->string* args) " ")
-                          (let ([details (string-trim (get-output-string err))])
-                            (if (string-blank? details)
-                                ""
-                                (string-append "\n" details)))))))
-
-(define (sha256-exe)
-  (cond
-    [(find-executable-path "sha256sum") => (lambda (p) (cons 'sha256sum p))]
-    [(find-executable-path "shasum") => (lambda (p) (cons 'shasum p))]
-    [(find-executable-path "openssl") => (lambda (p) (cons 'openssl p))]
-    [else #f]))
-
-(define (file-sha256 p)
-  (match (sha256-exe)
-    [(cons 'sha256sum exe)
-     (car (string-split (system*/capture-string 'sha256sum exe p)))]
-    [(cons 'shasum exe)
-     (car (string-split (system*/capture-string 'shasum exe "-a" "256" p)))]
-    [(cons 'openssl exe)
-     (last (string-split (system*/capture-string 'openssl exe "dgst" "-sha256" p)))]
-    [_ (raise-user-error 'prepare-ci-download-cache
-                         "could not find sha256sum, shasum, or openssl to verify downloads")]))
-
-(define (verify-installer-sha256! installer-path expected-sha256)
-  (when expected-sha256
-    (define actual-sha256 (file-sha256 installer-path))
-    (unless (equal? (string-downcase actual-sha256) (string-downcase expected-sha256))
-      (raise-user-error 'prepare-ci-download-cache
-                        "download checksum mismatch for ~a\nexpected: ~a\nactual:   ~a"
-                        (path->string* installer-path)
-                        expected-sha256
-                        actual-sha256))))
 
 (define (hidden-runtime-request arch)
   (with-handlers ([exn:fail?
@@ -96,13 +48,13 @@
   (printf "[~a] ~a -> ~a\n" arch label installer-url)
   (cond
     [(file-exists? cache-path)
-     (verify-installer-sha256! cache-path expected-sha256)
+     (verify-installer-checksum! cache-path #:sha256 expected-sha256)
      (printf "  reusing ~a\n" (path->string* cache-path))]
     [else
      (download-url->file installer-url cache-path)
      (when (regexp-match? #px"[.]sh$" (string-downcase (path->string* cache-path)))
        (file-or-directory-permissions cache-path #o755))
-     (verify-installer-sha256! cache-path expected-sha256)
+     (verify-installer-checksum! cache-path #:sha256 expected-sha256)
      (printf "  cached  ~a\n" (path->string* cache-path))]))
 
 (define (prepare-arch! arch cache-dir specs)

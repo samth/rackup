@@ -26,7 +26,12 @@
          "shims.rkt"
          "state.rkt"
          "state-lock.rkt"
-         "util.rkt"
+         "checksum.rkt"
+         "env.rkt"
+         "error.rkt"
+         "process.rkt"
+         "security.rkt"
+         "text.rkt"
          "versioning.rkt")
 
 (provide main
@@ -469,12 +474,12 @@
      (environment-variables-set! env #"PATH" (string->bytes/utf-8 runtime-path))
      (define cmd (car tail))
      (define cmd-args (cdr tail))
-     (define exe
-       (or (resolve-executable-path cmd id)
-           (resolve-command-path cmd runtime-path)
-           cmd))
      (exit
       (parameterize ([current-environment-variables env])
+        (define exe
+          (or (resolve-executable-path cmd id)
+              (find-executable-path cmd)
+              cmd))
         (if (apply system* exe cmd-args) 0 1)))]
     [_ (rackup-error "usage: rackup run <toolchain> -- <command> [args...]")]))
 
@@ -996,8 +1001,7 @@
               (parse-sha256-sidecar (http-get-string checksum-url)))]))
        (define p (make-temporary-file "rackup-self-upgrade-~a.sh"))
        (download-url->file source p)
-       (when expected-sha
-         (verify-installer-sha256! p expected-sha))
+       (verify-installer-checksum! p #:sha256 expected-sha)
        (file-or-directory-permissions p #o755)
        p]
       [else (string->path source)]))

@@ -6,10 +6,7 @@
 ;; completion scripts cannot drift apart.
 
 (provide rackup-commands
-         rackup-hidden-commands
-         rackup-manual-dispatch-commands
-         rackup-public-commands
-         rackup-public-command-names)
+         rackup-manual-dispatch-commands)
 
 ;; Each entry: (cons name description).  Order is the order in which
 ;; commands appear in `rackup --help` and in completion menus.
@@ -26,7 +23,7 @@
     ("shell"        . "Emit shell code to activate/deactivate a toolchain")
     ("run"          . "Run a command using a specific toolchain")
     ("prompt"       . "Print prompt info for PS1")
-    ("upgrade"      . "Deprecated: alias for self-upgrade")
+    ("upgrade"      . "Upgrade channel-based toolchains to latest version")
     ("remove"       . "Remove an installed or linked toolchain")
     ("reshim"       . "Rebuild executable shims")
     ("init"         . "Install/update shell integration")
@@ -37,21 +34,8 @@
     ("version"      . "Print version info")
     ("help"         . "Show help")))
 
-;; Commands accepted by the dispatcher but hidden from top-level
-;; completion suggestions (typically deprecated aliases).  Their
-;; per-command completion cases still work if a user types them.
-(define rackup-hidden-commands '("upgrade"))
-
 ;; Commands handled by hand-written match clauses in main.rkt's
 ;; dispatcher rather than by the auto-generated `(list n rest ...)`
 ;; clause.  `help` recurses into other commands so it doesn't fit the
 ;; uniform pattern.
 (define rackup-manual-dispatch-commands '("help"))
-
-(define rackup-public-commands
-  (for/list ([entry (in-list rackup-commands)]
-             #:unless (member (car entry) rackup-hidden-commands))
-    entry))
-
-(define rackup-public-command-names
-  (map car rackup-public-commands))

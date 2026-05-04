@@ -2,8 +2,7 @@
 
 (require rackunit
          racket/file
-         "../libexec/rackup/lock.rkt"
-         "../libexec/rackup/util.rkt")
+         "../libexec/rackup/lock.rkt")
 
 ;; ---- Set up a test lock ----
 

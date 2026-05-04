@@ -106,7 +106,18 @@ if [ -n "$COMMIT" ]; then
   echo "Baked version: $(cat "$VERSION_FILE")"
 fi
 
-# Step 1: Compile with raco exe
+# Step 1: Ensure rackup's compile-time dependencies are available.
+#
+# `scribble/text` (used by libexec/rackup/shell.rkt for the shell-helper
+# templates) lives in `scribble-text-lib`, which isn't part of the
+# raco-cross minimal target. Install it explicitly so cross builds can
+# resolve it.
+if [ -n "$CROSS_TARGET" ]; then
+  "$RACO" cross --target "$CROSS_TARGET" pkg install \
+    --no-docs --auto --skip-installed --batch scribble-text-lib
+fi
+
+# Step 2: Compile with raco exe
 if [ -n "$CROSS_TARGET" ]; then
   echo "Cross-compiling for target: $CROSS_TARGET"
   # Pre-compile for the target to produce .zo files. Without this,
@@ -123,7 +134,7 @@ else
     "$ROOT_DIR/libexec/rackup-core.rkt"
 fi
 
-# Step 2: Create distributable with raco distribute
+# Step 3: Create distributable with raco distribute
 if [ -n "$CROSS_TARGET" ]; then
   "$RACO" cross --target "$CROSS_TARGET" distribute \
     "$DIST_DIR" \
@@ -132,7 +143,7 @@ else
   "$RACO" distribute "$DIST_DIR" "$BUILD_DIR/rackup-core"
 fi
 
-# Step 3: Assemble the final distribution layout
+# Step 4: Assemble the final distribution layout
 #   rackup/
 #     bin/rackup          (shell wrapper)
 #     bin/rackup-core     (compiled binary)
@@ -164,7 +175,7 @@ chmod +x "$STAGE_DIR/bin/rackup"
 cp "$ROOT_DIR/libexec/rackup-bootstrap.sh" "$STAGE_DIR/libexec/rackup-bootstrap.sh"
 chmod +x "$STAGE_DIR/libexec/rackup-bootstrap.sh"
 
-# Step 4: Create tarball
+# Step 5: Create tarball
 OUTPUT_DIR="$(cd "$(dirname "$OUTPUT")" && pwd)"
 OUTPUT_NAME="$(basename "$OUTPUT")"
 mkdir -p "$OUTPUT_DIR"

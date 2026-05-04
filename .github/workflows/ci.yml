@@ -24,7 +24,7 @@ jobs:
           version: stable
       - name: Install Pages build deps
         shell: bash
-        run: raco pkg install --auto plt-web
+        run: raco pkg install --auto --skip-installed --batch plt-web
       - name: Download all exe artifacts
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
@@ -316,7 +316,7 @@ jobs:
         run: raco pkg install --auto recspecs
       - name: Test (includes local-link unit coverage)
         shell: bash
-        run: TMPDIR=/tmp raco test test/copy-filtered-tree.rkt test/install-prefix.rkt test/rktd-io.rkt test/util.rkt test/versioning.rkt test/remote.rkt test/platform-targets.rkt test/state-shims.rkt test/uninstall.rkt test/rebuild.rkt
+        run: TMPDIR=/tmp raco test -y test/all.rkt
 
   docker-e2e-linux-distros:
     name: "Docker E2E (native ${{ matrix.arch_name }} / ${{ matrix.base_image }})"
