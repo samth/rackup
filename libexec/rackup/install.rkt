@@ -1,13 +1,15 @@
-#lang racket/base
+#lang at-exp racket/base
 
 (require racket/cmdline
          racket/file
+         racket/format
          racket/list
          racket/match
          racket/path
          racket/port
          racket/string
          racket/system
+         "installer-backend.rkt"
          "legacy.rkt"
          "paths.rkt"
          "remote.rkt"
@@ -16,7 +18,12 @@
          "shims.rkt"
          "state.rkt"
          "state-lock.rkt"
-         "util.rkt"
+         "checksum.rkt"
+         "error.rkt"
+         "fs.rkt"
+         "process.rkt"
+         "security.rkt"
+         "text.rkt"
          "versioning.rkt")
 
 (provide install-toolchain!
@@ -24,8 +31,6 @@
          remove-toolchain!
          upgrade-toolchain!
          run-linux-installer!
-         run-tgz-installer!
-         run-macos-dmg-installer!
          enumerate-toolchain-executables
          doctor-report
          commit-state-change!
@@ -183,71 +188,6 @@
                       (format "--create-dir --in-place --dest ~a" (path->string* dest)))))
   (delete-log!))
 
-(define (tar-exe)
-  (or (find-executable-path "tar") (string->path "/bin/tar")))
-
-(define (run-tgz-installer! installer-file install-root)
-  (define archive (path->complete-path installer-file))
-  (define dest (path->complete-path install-root))
-  (install-verbose "Extracting archive into ~a" (path->string dest))
-  (make-directory* dest)
-  (system*/check 'linux-tgz-installer (tar-exe) "-xzf" archive "-C" dest))
-
-(define (run-macos-dmg-installer! installer-file install-root)
-  (define dmg (path->complete-path installer-file))
-  (define dest (path->complete-path install-root))
-  (define mount-point (make-temporary-file "rackup-dmg-~a" 'directory))
-  (install-verbose "Mounting DMG and extracting into ~a" (path->string dest))
-  (dynamic-wind
-   (lambda ()
-     (system*/check 'hdiutil-attach
-                    "/usr/bin/hdiutil" "attach"
-                    "-nobrowse" "-noverify" "-noautoopen" "-quiet"
-                    "-mountpoint" (path->string* mount-point)
-                    (path->string* dmg)))
-   (lambda ()
-     ;; Racket .dmg files are drag-and-drop installers containing:
-     ;; - A directory like "Racket v9.1/" with bin/, lib/, share/ inside
-     ;; - A symlink to /Applications (for drag-and-drop UX)
-     ;; We must skip symlinks to avoid copying the system /Applications.
-     (define top-dirs
-       (for/list ([p (directory-list mount-point #:build? #t)]
-                  #:when (and (directory-exists? p)
-                              (not (link-exists? p))))
-         p))
-     (define src-dir
-       (cond
-         [(for/or ([d (in-list top-dirs)])
-            (and (directory-exists? (build-path d "bin")) d))]
-         [(directory-exists? (build-path mount-point "bin"))
-          mount-point]
-         [(= (length top-dirs) 1) (car top-dirs)]
-         [else mount-point]))
-     (make-directory* dest)
-     (system*/check 'ditto "/usr/bin/ditto" (path->string* src-dir) (path->string* dest)))
-   (lambda ()
-     (system* "/usr/bin/hdiutil" "detach" (path->string* mount-point) "-quiet")
-     (when (directory-exists? mount-point)
-       (delete-directory mount-point)))))
-
-(define (installer-filename-extension s)
-  (define low (string-downcase s))
-  (cond
-    [(regexp-match? #px"[.]sh$" low) "sh"]
-    [(regexp-match? #px"[.]tgz$" low) "tgz"]
-    [(regexp-match? #px"[.]dmg$" low) "dmg"]
-    [else #f]))
-
-(define (detect-bin-dir install-root)
-  (define p1 (build-path install-root "bin"))
-  (define p2 (build-path install-root "racket" "bin"))
-  (define p3 (build-path install-root "plt" "bin"))
-  (cond
-    [(directory-exists? p1) p1]
-    [(directory-exists? p2) p2]
-    [(directory-exists? p3) p3]
-    [else (rackup-error "could not find Racket bin dir under ~a" (path->string* install-root))]))
-
 (define (file-executable?/safe p)
   (and (file-exists? p)
        (with-handlers ([exn:fail? (lambda (_) #f)])
@@ -261,21 +201,13 @@
 
 (define (make-bin-link! id real-bin-dir)
   (define link (rackup-toolchain-bin-link id))
-  (cond
-    [(link-exists? link) (delete-file link)]
-    [(file-exists? link) (delete-file link)]
-    [(directory-exists? link) (delete-directory/files link)])
-  (make-file-or-directory-link real-bin-dir link)
+  (replace-path! link real-bin-dir #:mode 'link)
   link)
 
 (define (link-executable-into-dir! dir src [name #f])
   (define dst-name (or name (path-basename-string src)))
   (define dst (build-path dir dst-name))
-  (cond
-    [(link-exists? dst) (delete-file dst)]
-    [(file-exists? dst) (delete-file dst)]
-    [(directory-exists? dst) (delete-directory/files dst)])
-  (make-file-or-directory-link src dst)
+  (replace-path! dst src #:mode 'link)
   dst)
 
 (define (make-bin-overlay! id real-bin-dir extra-exes)
@@ -321,16 +253,14 @@
       null))
 
 (define (write-exec-wrapper! dest exe args)
+  (define quoted-exe (sh-single-quote (path->string* exe)))
+  (define quoted-args (string-join (map sh-single-quote args) " "))
+  (define args-suffix (if (equal? quoted-args "") "" (string-append " " quoted-args)))
   (define body
-    (string-append
-     "#!/usr/bin/env bash\n"
-     "set -euo pipefail\n"
-     "exec "
-     (sh-single-quote (path->string* exe))
-     (apply string-append
-            (for/list ([arg (in-list args)])
-              (string-append " " (sh-single-quote arg))))
-     " \"$@\"\n"))
+    @~a{#!/usr/bin/env bash
+        set -euo pipefail
+        exec @|quoted-exe|@|args-suffix| "$@"@""
+        })
   (write-string-file dest body)
   (file-or-directory-permissions dest #o755))
 
@@ -957,7 +887,7 @@
                                    #:sha256 (hash-ref request 'installer-sha256 #f)
                                    #:sha1 (hash-ref request 'installer-sha1 #f)))
        (define installer-ext
-         (installer-filename-extension
+         (detect-installer-type
           (hash-ref request
                     'installer-filename
                     (path-basename-string (string->path (path->string* installer-path))))))
@@ -980,18 +910,25 @@
             (make-file-or-directory-link real tc-dir)]
            [else
             (make-directory* tc-dir)])
-         (cond
-           [(equal? installer-ext "sh")
+         (match installer-ext
+           ["sh"
             (run-linux-installer! installer-path
                                   install-root
                                   #:legacy-install-kind (hash-ref request 'legacy-install-kind #f))]
-           [(equal? installer-ext "tgz") (run-tgz-installer! installer-path install-root)]
-           [(equal? installer-ext "dmg") (run-macos-dmg-installer! installer-path install-root)]
-           [else
+           ["tgz"
+            (extract-tgz-installer! installer-path install-root
+                                    #:check-label 'linux-tgz-installer
+                                    #:announce (lambda (msg) (install-verbose "~a" msg)))]
+           ["dmg"
+            (install-from-dmg! installer-path install-root
+                               #:attach-label 'hdiutil-attach
+                               #:copy-label 'ditto
+                               #:announce (lambda (msg) (install-verbose "~a" msg)))]
+           [_
             (rackup-error "unsupported installer format for ~a: ~a"
                           (host-platform-token)
                           (or installer-ext "unknown"))])
-         (define real-bin-dir (detect-bin-dir install-root))
+         (define real-bin-dir (discover-bin-dir install-root))
          (maybe-modernize-legacy-archsys! real-bin-dir)
          (make-bin-link! id real-bin-dir)
          (define env-vars (installed-toolchain-env-vars real-bin-dir request))
@@ -1394,7 +1331,7 @@
             prefix-note)))
 
 (module+ for-testing
-  (provide detect-bin-dir
+  (provide discover-bin-dir
            installed-toolchain-env-vars
            ensure-installer-cached!
            parse-pkg-show-output
