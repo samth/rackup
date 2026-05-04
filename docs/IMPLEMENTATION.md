@@ -46,30 +46,6 @@ Short aliases (`r` for `racket`, `dr` for `drracket`) are opt-in, enabled via `r
 
 The dispatcher detects 32-bit ELF binaries (by reading the first 5 bytes with `od`) and provides diagnostic messages when the host lacks 32-bit loader support. If `od` is not available (checked via `command -v`), the detection silently skips. It also detects qemu-i386 binfmt_misc configurations and warns about ASLR-sensitive ancient PLT Scheme releases (053, 103, 103p1) that cannot run under QEMU user-mode emulation.
 
-## Upgrade
-
-`rackup upgrade` upgrades channel-based toolchains (stable, pre-release, snapshot) to the latest available version. Version-pinned installs (e.g., `rackup install 8.18`, which has kind `release`) are never upgraded.
-
-**Invocation.** `rackup upgrade` with no arguments upgrades all channel-based toolchains. `rackup upgrade stable` upgrades only stable. `--force` reinstalls even if the currently installed version matches the latest. `--no-cache` re-downloads the installer.
-
-**Channel detection.** `upgradeable-toolchains` in `state.rkt` iterates installed toolchains and filters to those that are channel-based. The `kind` metadata field cannot distinguish stable from version-pinned installs because `release-request-hash` in `remote.rkt` hardcodes `kind` to `'release` for all release-type requests. Instead, `upgradeable-meta?` checks the `requested-spec` field (e.g., `"stable"`, `"pre-release"`, `"snapshot"`) which records the original user request. The `kind` field is still used as a fallback for pre-release and snapshot toolchains (where `kind` is `'pre-release` or `'snapshot`). An optional filter spec restricts to a single channel.
-
-**Version comparison.** For stable and pre-release toolchains, `check-upgrade-available` in `install.rkt` resolves the latest version via `resolve-install-request` (using the same spec, variant, distribution, and architecture as the installed toolchain) and compares resolved versions using `cmp-versions`. For snapshots, the comparison uses the `snapshot-stamp` string (a date-based identifier), since snapshot versions may not change monotonically.
-
-**Upgrade sequence.** When a newer version is available (or `--force` is set), `upgrade-toolchain!` performs the following steps in order:
-
-1. Records whether the old toolchain is the current default.
-2. Installs the new toolchain via `install-toolchain!` with options reconstructed from the old toolchain's metadata (variant, distribution, snapshot-site). This produces a new canonical ID because the version component changes (e.g., `release-9.1-cs-x86_64-linux-full` to `release-9.2-cs-x86_64-linux-full`).
-3. Migrates user-scoped packages from the old toolchain to the new one.
-4. If the old toolchain was the default, sets the new toolchain as default.
-5. Removes the old toolchain and its addon directory.
-
-If the install step fails, the old toolchain is untouched.
-
-**Package migration.** `migrate-user-packages!` lists user-scoped packages from the old toolchain by running `raco pkg show --user` with `PLTADDONDIR` pointing to the old addon directory, parses the output to extract package names, then installs them in the new toolchain by running `raco pkg install --auto --skip-installed` with `PLTADDONDIR` pointing to the new addon directory. This is the same logic as `raco pkg migrate` but adapted to rackup's per-toolchain addon directory layout, where the standard `raco pkg migrate <version>` cannot locate the old packages. If package installation fails, a warning is printed but the upgrade proceeds; the new toolchain remains functional.
-
-**Limitations of the current package migration.** Standard `raco pkg migrate <version>` preserves whether each package was explicitly installed vs. auto-installed as a dependency. The list+reinstall approach used here does not preserve this distinction. See `docs/raco-pkg-migrate-improvements.md` for a proposal to add `--from-dir` to `raco pkg migrate`, which would let rackup use the official migration tool and preserve this metadata.
-
 ## File-based locking with compile-time enforcement
 
 Concurrent rackup processes (e.g., two shells running `rackup install` simultaneously) must not corrupt shared state. The lock mechanism uses `make-directory` as an atomic mutex: directory creation is atomic on both POSIX and Windows, so exactly one of two racing processes will succeed and the other will get `exn:fail:filesystem?`.
@@ -118,7 +94,7 @@ Each toolchain has a `meta.rktd` file under `~/.rackup/toolchains/<id>/` recordi
 
 By default the on-disk directory for a toolchain is the same as its logical location, `~/.rackup/toolchains/<id>/`. With `rackup install --prefix <path>` (or `RACKUP_TOOLCHAIN_PREFIX=<path>`), the install routine places the real directory at `<path>/<id>/` and creates `~/.rackup/toolchains/<id>` as an absolute symlink pointing to it. All path-derived helpers in `paths.rkt` continue to return the symlinked location, so the rest of the codebase is oblivious to the indirection — the OS resolves through the link.
 
-The prefix is recorded in `meta.rktd` under `'toolchain-prefix` so `rackup upgrade` reinstalls in the same prefix without the user having to repeat the flag. `delete-toolchain-dir!` (in `install.rkt`) detects the symlink form and cleans up both the link target and the link itself; `toolchain-dir-occupied?` treats a dangling link as occupied so `--force` can recover when the prefix target is gone (e.g., after `/tmp` is wiped on reboot). `rackup doctor` annotates each toolchain with its prefix or flags broken links.
+The prefix is recorded in `meta.rktd` under `'toolchain-prefix` so reinstall paths can preserve it without the user having to repeat the flag. `delete-toolchain-dir!` (in `install.rkt`) detects the symlink form and cleans up both the link target and the link itself; `toolchain-dir-occupied?` treats a dangling link as occupied so `--force` can recover when the prefix target is gone (e.g., after `/tmp` is wiped on reboot). `rackup doctor` annotates each toolchain with its prefix or flags broken links.
 
 ### Atomic file writes
 
@@ -131,7 +107,7 @@ The `.rktd` reader disables `read-accept-reader`, `read-accept-lang`, and `read-
 Several inputs from the environment are validated before use:
 
 - **`RACKUP_HOME`** is checked for control characters in `paths.rkt:rackup-home` before any path is derived from it.
-- **Toolchain IDs** (from `RACKUP_TOOLCHAIN`, the `default-toolchain` file, or install arguments) are validated against `^[A-Za-z0-9._-]+$` in `util.rkt:ensure-valid-toolchain-id!`. This is enforced in both the bash shim dispatcher and at Racket-level state read/write sites (`get-default-toolchain`, `set-default-toolchain!`, `register-toolchain!`, `unregister-toolchain!`, `resolve-active-toolchain-id`).
+- **Toolchain IDs** (from `RACKUP_TOOLCHAIN`, the `default-toolchain` file, or install arguments) are validated against `^[A-Za-z0-9._-]+$` in `security.rkt:ensure-valid-toolchain-id!`. This is enforced in both the bash shim dispatcher and at Racket-level state read/write sites (`get-default-toolchain`, `set-default-toolchain!`, `register-toolchain!`, `unregister-toolchain!`, `resolve-active-toolchain-id`).
 - **Install prefix** (`scripts/install.sh`) rejects `/`, `$HOME`, the current directory, paths with control characters, and ~20 shared system directories. The `--allow-unsafe-prefix` flag overrides this.
 - **Uninstall target** rejects paths with control characters, `/`, `$HOME`, and the current directory.
 
@@ -139,7 +115,7 @@ Several inputs from the environment are validated before use:
 
 When `bin/rackup` starts, it saves any user-set Racket environment variables (`PLTCOLLECTS`, `PLTADDONDIR`, `PLTCOMPILEDROOTS`, `PLTUSERHOME`, `RACKET_XPATCH`, `PLT_COMPILED_FILE_CHECK`) as `_RACKUP_ORIG_*` and then unsets the originals. This prevents the user's Racket environment from interfering with rackup's own runtime (whether hidden runtime or embedded exe). `PLTHOME` is not included because it is not a Racket environment variable (it is a convention from the `plt-bin` script in `racket-dev-goodies`).
 
-When `rackup run` spawns a subprocess, `restore-saved-racket-env-vars!` in `util.rkt` first restores the user's original Racket environment variables from the `_RACKUP_ORIG_*` copies. Then `cmd-run` overlays the target toolchain's managed environment variables on top (`PLTADDONDIR`, and `PLTCOMPILEDROOTS` unless the user has set their own). This means a user-set `PLTCOLLECTS` passes through to the toolchain's Racket, allowing users to add collection directories that are available regardless of which toolchain is active.
+When `rackup run` spawns a subprocess, `restore-saved-racket-env-vars!` in `env.rkt` first restores the user's original Racket environment variables from the `_RACKUP_ORIG_*` copies. Then `cmd-run` overlays the target toolchain's managed environment variables on top (`PLTADDONDIR`, and `PLTCOMPILEDROOTS` unless the user has set their own). This means a user-set `PLTCOLLECTS` passes through to the toolchain's Racket, allowing users to add collection directories that are available regardless of which toolchain is active.
 
 ## Per-toolchain env.sh
 
@@ -163,11 +139,11 @@ At toolchain install or link time, `compiled-roots-value` in `state.rkt` constru
 
 The `'same` symbol in `current-compiled-file-roots` cannot be spelled directly in PLTCOMPILEDROOTS because `path-list-string->path-list` converts all entries to path objects. However, `.` is a relative path that `(build-path dir ".")` resolves to `dir` itself, which is functionally equivalent.
 
-For linked toolchains where version or variant cannot be probed, PLTCOMPILEDROOTS is omitted. The value flows through the existing `env-vars` metadata pipeline: `write-env-file!`/`write-toolchain-env-file!` emits an unconditional export in env.sh (sourced per-invocation by the shim dispatcher), and `cmd-run` in `main.rkt` preserves a user-restored value before overlaying toolchain env vars. Racket-specific env vars are **not** exported into the user's shell by `rackup switch` — only `RACKUP_TOOLCHAIN` and `PATH` are set in the shell, to avoid leaking into non-rackup commands like `make install` in a source checkout.
+For linked toolchains where version or variant cannot be probed, PLTCOMPILEDROOTS is omitted. The value flows through the existing `env-vars` metadata pipeline: `write-env-file!`/`write-toolchain-env-file!` emits an unconditional export in env.sh, and `cmd-run` in `main.rkt` preserves a user-restored value before overlaying toolchain env vars.
 
 ### Migration for existing installs
 
-Toolchains installed by an older rackup do not have PLTCOMPILEDROOTS in their `meta.rktd`. `regenerate-env-files!` in `shims.rkt` backfills it: on every `reshim!` call (which runs as part of `commit-state-change!` for any state-modifying command), each installed toolchain's metadata is checked, and if it lacks PLTCOMPILEDROOTS but the version+variant yield a value, the entry is added to `meta.rktd` and `env.sh` is rewritten. The backfill is idempotent — subsequent reshims see the entry and do nothing. Users only need to run any state-changing command (e.g., `rackup reshim`, `rackup install`, `rackup upgrade`) after upgrading rackup to pick up the new PLTCOMPILEDROOTS for existing toolchains.
+Toolchains installed by an older rackup do not have PLTCOMPILEDROOTS in their `meta.rktd`. `regenerate-env-files!` in `shims.rkt` backfills it: on every `reshim!` call (which runs as part of `commit-state-change!` for any state-modifying command), each installed toolchain's metadata is checked, and if it lacks PLTCOMPILEDROOTS but the version+variant yield a value, the entry is added to `meta.rktd` and `env.sh` is rewritten. The backfill is idempotent — subsequent reshims see the entry and do nothing. Users only need to run any state-changing command (e.g., `rackup reshim`, `rackup install`) after upgrading rackup to pick up the new PLTCOMPILEDROOTS for existing toolchains.
 
 ### Cleaning up on removal
 
@@ -190,9 +166,9 @@ Tab completion scripts for bash and zsh are generated by `shell.rkt` and written
 
 `remote.rkt` handles all network communication for resolving and downloading toolchain installers.
 
-**HTTP handling.** `http-open/input` follows redirects (up to 5 hops) and works with both HTTPS and HTTP URLs. Redirects are only followed to hosts in a trusted allowlist defined in `remote.rkt` (`trusted-download-hosts`); redirects to untrusted hosts are rejected. HTTP downloads are refused unless a hardcoded SHA-256 checksum is provided (`require-checksummed-http-installer!` in `util.rkt`). This matters for legacy PLT Scheme installers served from `http://download.plt-scheme.org/`.
+**HTTP handling.** `http-open/input` follows redirects (up to 5 hops) and works with both HTTPS and HTTP URLs. Redirects are only followed to hosts in a trusted allowlist defined in `remote.rkt` (`trusted-download-hosts`); redirects to untrusted hosts are rejected. HTTP downloads are refused unless a hardcoded SHA-256 checksum is provided (`require-checksummed-http-installer!` in `security.rkt`). This matters for legacy PLT Scheme installers served from `http://download.plt-scheme.org/`.
 
-**Installer checksum verification.** When resolving an installer, `remote.rkt` fetches the Racket release download page and parses out SHA-256 (or SHA-1 for releases before 8.2) checksums for each installer. These are included in the install request and verified after download by `verify-installer-checksum!` in `util.rkt`. The hidden runtime bootstrap path (`rackup-bootstrap.sh`) uses checksums embedded in `install.sh` at Pages build time via the `@@RACKUP_RUNTIME_CHECKSUMS@@` token.
+**Installer checksum verification.** When resolving an installer, `remote.rkt` fetches the Racket release download page and parses out SHA-256 (or SHA-1 for releases before 8.2) checksums for each installer. These are included in the install request and verified after download by `verify-installer-checksum!` in `checksum.rkt`. The hidden runtime bootstrap path (`rackup-bootstrap.sh`) uses checksums embedded in `install.sh` at Pages build time via the `@@RACKUP_RUNTIME_CHECKSUMS@@` token.
 
 **Version resolution:**
 - `stable` queries `https://download.racket-lang.org/version.txt`.
