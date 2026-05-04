@@ -8,6 +8,8 @@
          "shell-completion.rkt"
          "upgrade.rkt"
          "util.rkt"
+         "env.rkt"
+         "checksum.rkt"
          "version.rkt"
          "versioning.rkt"
          "remote.rkt"

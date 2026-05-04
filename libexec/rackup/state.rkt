@@ -8,7 +8,8 @@
          "paths.rkt"
          "rktd-io.rkt"
          "state-lock.rkt"
-         "util.rkt")
+         "security.rkt"
+         "text.rkt")
 
 (provide load-index
          save-index!

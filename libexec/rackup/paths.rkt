@@ -2,7 +2,9 @@
 
 (require racket/file
          racket/path
-         "util.rkt")
+         "process.rkt"
+         "security.rkt"
+         "text.rkt")
 
 (provide running-as-exe?
          rackup-home

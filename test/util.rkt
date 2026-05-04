@@ -2,7 +2,9 @@
 
 (require rackunit
          racket/path
-         "../libexec/rackup/util.rkt")
+         "../libexec/rackup/text.rkt"
+         "../libexec/rackup/security.rkt"
+         "../libexec/rackup/process.rkt")
 
 (module+ test
   (check-true (string-blank? ""))
