@@ -25,6 +25,7 @@
          read-toolchain-meta
          write-toolchain-meta!
          toolchain-env-vars
+         toolchain-runtime-env-vars
          meta->env-vars
          compiled-roots-value
          read-toolchain-compiled-file-roots
@@ -129,6 +130,13 @@
 
 (define (toolchain-env-vars id)
   (meta->env-vars (read-toolchain-meta id)))
+
+;; The full set of environment variables to apply when running a tool in
+;; toolchain `id`: the toolchain's recorded env vars plus the synthesized
+;; per-toolchain PLTADDONDIR (matching what the shim dispatcher sets).
+(define (toolchain-runtime-env-vars id)
+  (append (toolchain-env-vars id)
+          (list (cons "PLTADDONDIR" (path->string (rackup-addon-dir id))))))
 
 ;; Read the compiled-file-roots from a toolchain's config.rktd.
 ;; Returns a list like (same) or ("/usr/lib/racket/compiled"), or

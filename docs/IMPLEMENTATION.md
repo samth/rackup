@@ -151,6 +151,24 @@ Toolchains installed by an older rackup do not have PLTCOMPILEDROOTS in their `m
 
 The implementation runs the toolchain's own `racket -e` with a small program that uses `pkg/lib`'s `installed-pkg-table` and `pkg-directory` to print the absolute source directory of every user-scope package, then walks each directory to find and delete `compiled/<key>/` subdirectories.
 
+## Package migration across addon dirs
+
+`raco pkg migrate <from>` re-installs the user-scope packages of a previous Racket. It reads the old package list from, and installs the new packages into, subdirectories of a *single* addon directory: the from-list comes from `<addon>/<from>/pkgs/pkgs.rktd` and the install target is `<addon>/<current>/pkgs/`, where `<addon>` is `(find-system-path 'addon-dir)`. Stock Racket relies on every version sharing one addon dir with per-version subdirs, so `migrate` can hop between versions inside it.
+
+rackup gives each toolchain its own isolated addon dir (`~/.rackup/addons/<id>`, set as `PLTADDONDIR` by the shim dispatcher). A bare `raco pkg migrate` run inside a rackup toolchain therefore never finds packages installed by a non-rackup Racket (which used the OS-default addon dir, e.g. `~/Library/Racket` on macOS) or by a *different* rackup toolchain — it only ever looks under the active toolchain's own addon dir, which has no `<from>` subdir.
+
+`rackup migrate` (in `migrate.rkt`) bridges this. It:
+
+1. Resolves the target toolchain (default: active).
+2. Resolves the source addon dir: `--from-addon <dir>`, or `--from-toolchain <id>`'s addon dir, or — by default — the OS-default addon dir. The default is detected by probing the target toolchain's own `racket` (via `probe-local-racket-version+variant+addon-dir`, run with a clean env so no `PLTADDONDIR`/`-A` overrides it), which yields the same base location a non-rackup install on this OS would have used. The detection is behind the `current-native-addon-dir-proc` parameter so tests can stub it.
+3. Verifies `<source-addon>/<from>/pkgs/pkgs.rktd` exists; if not, it lists the versions that *are* present there (`migrate-source-versions`, mirroring `pkg-migrate-available-versions`).
+4. Stages the source package db into the target addon dir at `<target-addon>/<from>/pkgs/pkgs.rktd` (a copy, so the source is never written to). A `dynamic-wind` guarantees the staged `<from>` directory is removed afterward, even on error. If `<target-addon>/<from>` already exists (e.g. `from` equals the target's own version), it refuses rather than clobbering.
+5. Runs the target toolchain's `raco pkg migrate <from>` with `PLTADDONDIR` pointing at the target addon dir (built by `build-target-env`, the same env construction `rackup run` uses, behind the `current-migrate-system*-proc` seam). `raco` now finds the staged from-list and installs into `<target-addon>/<current>/pkgs/`, where the rackup toolchain can see the results. Flags after `--` pass through to `raco pkg migrate`; `--dry-run` is forwarded directly.
+
+Because the from-list is read by the real `raco pkg migrate`, auto-package filtering and dependency resolution match stock behavior exactly. Catalog packages migrate cleanly; `link`/`clone`/`static-link` packages recorded with *relative* source paths are the one caveat, since `raco pkg migrate` resolves them against the destination dir, which now sits at a different location than the original source.
+
+A cleaner long-term fix would be an upstream `raco pkg migrate` flag to point the *source* at a different location independent of the destination addon dir (`pkg/path.rkt`'s `read-pkgs-db` already accepts a complete-path scope), which would remove the need to stage anything.
+
 ## Shell integration
 
 `rackup init` writes a managed block into `~/.bashrc` or `~/.zshrc` delimited by marker comments (`# >>> rackup initialize >>>`). The managed block:

@@ -36,12 +36,24 @@
   (define bash-command-cases (include/text "templates/bash-command-cases.scrbl"))
   (output (include/text "templates/bash-completion.scrbl")))
 
+;; Escape a command description for use in a zsh `_describe`
+;; `'name:description'` entry.  Two layers: `:` and `\` are special to
+;; `_describe` (so backslash-escape them), and the whole thing sits inside a
+;; single-quoted shell string (so turn `'` into the `'\''` idiom).  Without
+;; this, a description like "Racket's ..." closes the quote early and breaks
+;; zsh parsing of the entire completion file.
+(define (zsh-describe-escape s)
+  (let* ([s (string-replace s "\\" "\\\\")]
+         [s (string-replace s ":" "\\:")]
+         [s (string-replace s "'" "'\\''")])
+    s))
+
 (define (write-zsh-completion-script)
   (define command-describe-list
     ;; '_describe'-format `'name:description'` lines, one per command.
     (apply string-append
            (for/list ([e (in-list rackup-commands)])
-             (string-append "    '" (car e) ":" (cdr e) "'\n"))))
+             (string-append "    '" (car e) ":" (zsh-describe-escape (cdr e)) "'\n"))))
   (output (include/text "templates/zsh-completion.scrbl")))
 
 ;; Write the shell helper to current-output-port.  Production callers
@@ -164,7 +176,8 @@
   rc)
 
 (module+ for-testing
-  (provide shell-helper-script)
+  (provide shell-helper-script
+           zsh-describe-escape)
   (define (shell-helper-script shell-name)
     (with-output-to-string
       (lambda () (write-shell-helper-script shell-name)))))
