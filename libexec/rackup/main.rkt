@@ -17,6 +17,7 @@
          "commands-data.rkt"
          "install.rkt"
          "legacy-plt-catalog.rkt"
+         "migrate.rkt"
          "paths.rkt"
          "rebuild.rkt"
          "remote.rkt"
@@ -98,6 +99,8 @@
               "Low-level: emit shell code to activate/deactivate a toolchain.")
   (usage-line "run <toolchain> -- <command> [args...]"
               "Run a command using a specific toolchain without changing defaults.")
+  (usage-line "migrate <from-version> [flags]"
+              "Re-install an older Racket's user packages into a rackup toolchain.")
   (usage-line "prompt [--long|--short|--raw|--source]"
               "Print fast prompt info for PS1 (default: compact label).")
   (usage-line "upgrade [version] [--force]" "Upgrade channel-based toolchains to latest version.")
@@ -437,10 +440,6 @@
       [(equal? (car rest) "--") (values (reverse left) (cdr rest))]
       [else (loop (cons (car rest) left) (cdr rest))])))
 
-(define (toolchain-runtime-env-vars id)
-  (append (toolchain-env-vars id)
-          (list (cons "PLTADDONDIR" (path->string (rackup-addon-dir id))))))
-
 (define (cmd-run rest)
   (ensure-index!)
   (define all-args
@@ -482,6 +481,57 @@
               cmd))
         (if (apply system* exe cmd-args) 0 1)))]
     [_ (rackup-error "usage: rackup run <toolchain> -- <command> [args...]")]))
+
+(define (cmd-migrate rest)
+  (ensure-index!)
+  (define toolchain-arg #f)
+  (define from-addon-arg #f)
+  (define from-toolchain-arg #f)
+  (define dry-run? #f)
+  (define-values (head tail) (split-on-double-dash rest))
+  (define from-version
+    (command-line
+     #:program "rackup migrate"
+     #:argv (reorder-args head '("--toolchain" "--from-addon" "--from-toolchain"))
+     #:usage-help
+     "Re-install the user packages of an older Racket into a rackup toolchain."
+     "<from-version> is the version/installation name to migrate from (e.g. 8.18)."
+     "By default the source is the OS-default addon dir (a non-rackup install);"
+     "use --from-toolchain to migrate from another rackup toolchain instead."
+     "Extra flags after -- are passed through to `raco pkg migrate`."
+     #:once-each
+     [("--toolchain") id "Target toolchain to install into (default: active)"
+                      (set! toolchain-arg id)]
+     [("--dry-run") "Show what would be migrated without installing"
+                    (set! dry-run? #t)]
+     #:once-any
+     [("--from-addon") dir "Source addon dir (default: OS-default addon dir)"
+                       (set! from-addon-arg dir)]
+     [("--from-toolchain") id "Migrate from another rackup toolchain's packages"
+                           (set! from-toolchain-arg id)]
+     #:args (from-version)
+     from-version))
+  (define target-id
+    (if toolchain-arg
+        (resolve-toolchain-or-die toolchain-arg)
+        (or (resolve-active-toolchain-id)
+            (rackup-error
+             (string-append
+              "no active or default toolchain configured\n"
+              "  pass --toolchain <id>, or set a default with: rackup default <toolchain>")))))
+  (define source-addon
+    (cond
+      [from-addon-arg (string->path from-addon-arg)]
+      [from-toolchain-arg (rackup-addon-dir (resolve-toolchain-or-die from-toolchain-arg))]
+      [else (detect-native-addon-dir target-id)]))
+  (define code
+    (run-migrate! #:target-id target-id
+                  #:source-addon source-addon
+                  #:from-version from-version
+                  #:dry-run? dry-run?
+                  #:extra-args tail))
+  (unless (zero? code)
+    (exit code)))
 
 (define (cmd-upgrade rest)
   (ensure-index!)
@@ -1134,6 +1184,7 @@
 
 (module+ for-testing
   (provide cmd-uninstall
+           cmd-migrate
            cmd-rebuild
            validate-uninstall-home-path!
            delete-rackup-home!/external

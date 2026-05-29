@@ -430,6 +430,7 @@ sh install.sh && rm install.sh})
           @tr{@td{@code{rackup current}} @td{Show the active toolchain and its source}}
           @tr{@td{@code{rackup switch @i{name}}} @td{Switch the active toolchain in this shell}}
           @tr{@td{@code{rackup run @i{name} -- @i{cmd}}} @td{Run a command using a specific toolchain}}
+          @tr{@td{@code{rackup migrate @i{version}}} @td{Re-install an older Racket's user packages}}
           @tr{@td{@code{rackup which @i{cmd}}} @td{Show path for a shimmed command}}
           @tr{@td{@code{rackup link @i{name} @i{path}}} @td{Link a local source tree}}
           @tr{@td{@code{rackup rebuild}} @td{Rebuild a linked source toolchain in place}}

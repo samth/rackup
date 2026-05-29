@@ -5,6 +5,7 @@
          "copy-filtered-tree.rkt"
          "env.rkt"
          "install-prefix.rkt"
+         "migrate.rkt"
          "paths.rkt"
          "process.rkt"
          "rebuild.rkt"

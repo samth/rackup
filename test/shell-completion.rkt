@@ -11,9 +11,42 @@
 (define (contains? haystack needle)
   (regexp-match? (regexp-quote needle) haystack))
 
+;; Track shell single-quote state across `s`, honoring the `'\''` idiom
+;; (close, backslash-escaped literal quote, reopen).  Returns #t if every
+;; single quote is balanced — i.e. the fragment would not leave zsh parsing
+;; inside an unterminated string.  Only valid for fragments that use single
+;; quoting exclusively (no double-quoted regions).
+(define (single-quotes-balanced? s)
+  (let loop ([chars (string->list s)] [in-quote? #f])
+    (cond
+      [(null? chars) (not in-quote?)]
+      [(and in-quote? (char=? (car chars) #\')) (loop (cdr chars) #f)]
+      [(and (not in-quote?) (char=? (car chars) #\')) (loop (cdr chars) #t)]
+      [(and (not in-quote?) (char=? (car chars) #\\) (pair? (cdr chars)))
+       (loop (cddr chars) #f)]
+      [else (loop (cdr chars) in-quote?)])))
+
 (module+ test
   (define bash-output (shell-helper-script "bash"))
   (define zsh-output (shell-helper-script "zsh"))
+
+  ;; zsh-describe-escape makes descriptions safe inside the `'name:desc'`
+  ;; entries of the `_describe` command list.  An apostrophe (e.g.
+  ;; "Racket's") would otherwise close the quote early and break parsing of
+  ;; the whole completion file.
+  (check-equal? (zsh-describe-escape "plain") "plain")
+  (check-equal? (zsh-describe-escape "Racket's build") "Racket'\\''s build")
+  (check-equal? (zsh-describe-escape "a:b") "a\\:b")
+  (check-equal? (zsh-describe-escape "a\\b") "a\\\\b")
+
+  ;; The generated `commands=( ... )` array must be single-quote balanced,
+  ;; so a description containing an apostrophe cannot break the script.
+  (define cmd-block
+    (let ([m (regexp-match #px"(?s:commands=\\(.*?\n  \\))" zsh-output)])
+      (and m (car m))))
+  (check-true (and cmd-block #t) "could not locate zsh commands=() block")
+  (check-true (single-quotes-balanced? cmd-block)
+              "zsh commands=() block has unbalanced single quotes")
 
   ;; Record full output for each shell helper script.
   ;; These expectations auto-update with RECSPECS_UPDATE=1.
