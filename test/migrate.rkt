@@ -8,7 +8,9 @@
          (only-in (submod "../libexec/rackup/main.rkt" for-testing) cmd-migrate)
          "../libexec/rackup/install.rkt"
          "../libexec/rackup/migrate.rkt"
-         "../libexec/rackup/paths.rkt")
+         (submod "../libexec/rackup/migrate.rkt" for-testing)
+         "../libexec/rackup/paths.rkt"
+         "../libexec/rackup/rktd-io.rkt")
 
 (module+ test
   (define (with-temp-dir proc)
@@ -18,11 +20,42 @@
      (lambda () (proc dir))
      (lambda () (delete-directory/files dir #:must-exist? #f))))
 
-  (define (write-pkgs-db! addon version)
+  (define (write-pkgs-db! addon version [db (hash)])
     (define pkgs (build-path addon version "pkgs"))
     (make-directory* pkgs)
     (call-with-output-file (build-path pkgs "pkgs.rktd") #:exists 'replace
-      (lambda (out) (write (hash) out))))
+      (lambda (out) (write db out))))
+
+  (define (pkg-info orig-pkg [auto? #f])
+    (make-prefab-struct 'pkg-info orig-pkg #f auto?))
+
+  ;; ---- absolutize-orig-pkg / absolutize-pkg-info ----------------------
+
+  (let ([base (string->path "/home/u/Library/Racket/9.1/pkgs")])
+    ;; Relative link/static-link/clone paths become absolute; the source
+    ;; spec's other fields (url) are preserved.
+    (check-equal? (absolutize-orig-pkg '(link "../../../../code/x") base)
+                  '(link "/home/u/code/x"))
+    (check-equal? (absolutize-orig-pkg '(static-link "../../../../code/y") base)
+                  '(static-link "/home/u/code/y"))
+    (check-equal? (absolutize-orig-pkg '(clone "../../../../code/z" "git://h/z") base)
+                  '(clone "/home/u/code/z" "git://h/z"))
+    ;; Already-absolute paths are left intact.
+    (check-equal? (absolutize-orig-pkg '(link "/abs/path") base)
+                  '(link "/abs/path"))
+    ;; Catalog/url/git specs (no local path) are untouched.
+    (check-equal? (absolutize-orig-pkg '(catalog "foo" "git://h/foo") base)
+                  '(catalog "foo" "git://h/foo"))
+    (check-equal? (absolutize-orig-pkg '(url "https://h/u.zip") base)
+                  '(url "https://h/u.zip"))
+    ;; A derived prefab (sc-pkg-info: extra `collect` field) keeps its
+    ;; subtype and trailing fields while orig-pkg (field 0) is rewritten.
+    (define sc (make-prefab-struct '(sc-pkg-info pkg-info 3)
+                                   '(link "../../../../code/x") "chk" #t "x"))
+    (define sc* (absolutize-pkg-info sc base))
+    (check-equal? (prefab-struct-key sc*) '(sc-pkg-info pkg-info 3))
+    (check-equal? (vector->list (struct->vector sc*))
+                  (list 'struct:sc-pkg-info '(link "/home/u/code/x") "chk" #t "x")))
 
   ;; ---- migrate-source-versions ----------------------------------------
 
@@ -67,17 +100,23 @@
      (with-fake-target home "tc"
        (lambda ()
          (define native (build-path home "native"))
-         (write-pkgs-db! native "9.1")
+         ;; Source db: a catalog package and a locally-linked package whose
+         ;; source is stored relative to the source `pkgs` dir.
+         (write-pkgs-db! native "9.1"
+                         (hash "catpkg" (pkg-info '(catalog "catpkg"))
+                               "linkpkg" (pkg-info '(link "../../../../somecode/linkpkg"))))
          (define staged-pkgs (build-path home "addons" "tc" "9.1" "pkgs" "pkgs.rktd"))
          (define captured (box #f))
          (define staged-during? (box #f))
          (define addon-during (box #f))
+         (define staged-db (box #f))
          (define code
            (parameterize ([current-migrate-system*-proc
                            (lambda (exe . args)
                              (set-box! captured (cons (path->string exe) args))
                              (set-box! staged-during? (file-exists? staged-pkgs))
                              (set-box! addon-during (getenv "PLTADDONDIR"))
+                             (set-box! staged-db (read-rktd-file staged-pkgs))
                              #t)])
              (define out (open-output-string))
              (parameterize ([current-output-port out])
@@ -95,6 +134,27 @@
          ;; PLTADDONDIR pointed at the target toolchain's addon dir.
          (check-equal? (unbox addon-during)
                        (path->string (rackup-addon-dir "tc")))
+         ;; The staged db rewrote the link's relative path to absolute,
+         ;; resolved against the *source* pkgs dir (so it survives the
+         ;; depth change into the target addon dir).  raco pkg migrate would
+         ;; otherwise resolve it against the dest dir and miss the directory.
+         (define db (unbox staged-db))
+         (define link-orig
+           (let ([info (hash-ref db "linkpkg")])
+             (car (cdr (vector->list (struct->vector info))))))
+         (define expected
+           (path->string
+            (simplify-path
+             (path->complete-path "../../../../somecode/linkpkg"
+                                  (build-path native "9.1" "pkgs"))
+             #f)))
+         (check-equal? link-orig (list 'link expected))
+         (check-true (complete-path? (string->path (cadr link-orig)))
+                     "staged link path must be absolute")
+         ;; Catalog packages are passed through untouched.
+         (let ([info (hash-ref db "catpkg")])
+           (check-equal? (car (cdr (vector->list (struct->vector info))))
+                         '(catalog "catpkg")))
          ;; ...and the staging dir was cleaned up afterward.
          (check-false (directory-exists? (build-path home "addons" "tc" "9.1")))))))
 
