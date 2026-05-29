@@ -18,6 +18,7 @@
 
 (require racket/file
          racket/list
+         racket/match
          racket/path
          racket/string
          racket/system
@@ -25,6 +26,7 @@
          "error.rkt"
          "paths.rkt"
          "process.rkt"
+         "rktd-io.rkt"
          "shims.rkt"
          "state.rkt")
 
@@ -33,6 +35,11 @@
          run-migrate!
          current-native-addon-dir-proc
          current-migrate-system*-proc)
+
+(module+ for-testing
+  (provide absolutize-orig-pkg
+           absolutize-pkg-info
+           stage-pkg-db!))
 
 ;; Stubbable seams for testing.
 (define current-migrate-system*-proc (make-parameter system*))
@@ -109,6 +116,49 @@
   (parameterize ([current-environment-variables (build-target-env target-id)])
     (if (apply (current-migrate-system*-proc) raco args) 0 1)))
 
+;; `raco pkg migrate` resolves a package's `link`/`static-link`/`clone`
+;; source path (stored relative to the source `pkgs` dir) against the
+;; *destination* `pkgs` dir.  In stock Racket the two dirs share an addon
+;; dir at the same depth, so a relative path resolves identically.  rackup's
+;; isolated addon dirs sit at a different depth than the source's
+;; (`~/Library/Racket/9.1/pkgs` vs `~/.rackup/addons/<id>/9.2/pkgs`), so the
+;; relative path would resolve to the wrong directory.  We resolve such paths
+;; to absolute (against the real source `pkgs` dir) while staging, so they
+;; keep pointing at the actual source tree no matter where the dest sits.
+(define (absolutize-orig-pkg orig-pkg base)
+  (define (abs p) (path->string (simplify-path (path->complete-path p base) #f)))
+  (match orig-pkg
+    [(list 'link p)        (list 'link (abs p))]
+    [(list 'static-link p) (list 'static-link (abs p))]
+    [(list 'clone p url)   (list 'clone (abs p) url)]
+    [_ orig-pkg]))
+
+;; Rewrite a pkg-info prefab struct's orig-pkg (always field 0) in place,
+;; preserving the exact prefab subtype and any extra fields (e.g.
+;; sc-pkg-info's collect).  Non-prefab values are returned unchanged.
+(define (absolutize-pkg-info info base)
+  (define key (prefab-struct-key info))
+  (cond
+    [key
+     (define fields (cdr (vector->list (struct->vector info))))
+     (if (pair? fields)
+         (apply make-prefab-struct key
+                (absolutize-orig-pkg (car fields) base)
+                (cdr fields))
+         info)]
+    [else info]))
+
+;; Stage the source package db into `dest-pkgs-file`, rewriting relative
+;; link paths to absolute (resolved against the source `pkgs` dir, `base`).
+(define (stage-pkg-db! source-pkgs-file dest-pkgs-file base)
+  (define db (read-rktd-file source-pkgs-file))
+  (define db*
+    (if (hash? db)
+        (for/hash ([(k v) (in-hash db)])
+          (values k (absolutize-pkg-info v base)))
+        db))
+  (write-rktd-file dest-pkgs-file db*))
+
 ;; Migrate user packages for `from-version` out of `source-addon` into the
 ;; `target-id` toolchain.  Returns the `raco pkg migrate` exit code (0 on
 ;; success).  `extra-args` are passed through to `raco pkg migrate`.
@@ -156,7 +206,9 @@
      (when need-staging?
        (define staged-pkgs (build-path staged-version-dir "pkgs"))
        (make-directory* staged-pkgs)
-       (copy-file source-pkgs-file (build-path staged-pkgs "pkgs.rktd") #t)))
+       (stage-pkg-db! source-pkgs-file
+                      (build-path staged-pkgs "pkgs.rktd")
+                      (build-path source-version-dir "pkgs"))))
    (lambda ()
      (set-box! status (exec-raco-migrate target-id from-version dry-run? extra-args)))
    (lambda ()
