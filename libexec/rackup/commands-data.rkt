@@ -22,6 +22,7 @@
     ("switch"       . "Switch the active toolchain in this shell")
     ("shell"        . "Emit shell code to activate/deactivate a toolchain")
     ("run"          . "Run a command using a specific toolchain")
+    ("migrate"      . "Re-install an older Racket's user packages into a toolchain")
     ("prompt"       . "Print prompt info for PS1")
     ("upgrade"      . "Upgrade channel-based toolchains to latest version")
     ("remove"       . "Remove an installed or linked toolchain")
