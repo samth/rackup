@@ -10,6 +10,7 @@
          "state.rkt"
          "state-lock.rkt"
          "error.rkt"
+         "mac-apps.rkt"
          "rktd-io.rkt"
          "fs.rkt"
          "process.rkt"
@@ -487,4 +488,6 @@ EOF
   (for ([p (in-list (directory-list shims-dir #:build? #t))])
     (define name (path-basename-string p))
     (when (and (not (set-member? desired name)) (rackup-managed-shim? p))
-      (delete-file p))))
+      (delete-file p)))
+  ;; Keep macOS GUI app wrappers in sync (no-op off macOS / when disabled).
+  (regenerate-mac-apps!))

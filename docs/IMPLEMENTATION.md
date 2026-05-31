@@ -46,6 +46,16 @@ Short aliases (`r` for `racket`, `dr` for `drracket`) are opt-in, enabled via `r
 
 The dispatcher detects 32-bit ELF binaries (by reading the first 5 bytes with `od`) and provides diagnostic messages when the host lacks 32-bit loader support. If `od` is not available (checked via `command -v`), the detection silently skips. It also detects qemu-i386 binfmt_misc configurations and warns about ASLR-sensitive ancient PLT Scheme releases (053, 103, 103p1) that cannot run under QEMU user-mode emulation.
 
+## macOS GUI app wrappers
+
+rackup-managed GUI tools (DrRacket) live deep under `~/.rackup` and are normally launched through shims from the command line, so they are invisible to Finder, Spotlight, and the Dock. The `mac-apps` feature (in `mac-apps.rkt`) writes small wrapper `.app` bundles into `~/Applications` so they can be opened like any other macOS app. It is opt-in, persisted as the `mac-apps` flag in `state/config` (the same mechanism as short aliases), and enabled via `rackup install --mac-apps` / `rackup reshim --mac-apps` (and removed via `--no-mac-apps`).
+
+Each wrapper's `Contents/MacOS/<Name>` is a shell script that `exec`s the corresponding rackup shim (`~/.rackup/shims/drracket`). Routing through the shim — rather than pointing at the toolchain's GUI binary directly — has three benefits: the app always launches the *default* toolchain's tool (re-resolved at launch time), the toolchain's environment is set up, and the launch goes through the dispatcher's `cd -P` bin-symlink resolution. That last point is essential: as documented in #37, a GUI Racket binary launched through a symlinked parent directory crashes on aarch64 macOS with an `invalid memory reference` in `cocoa/queue.rkt`; the shim resolves the symlink so the binary sees a canonical `argv[0]`. A wrapper that pointed at a symlinked path directly would reintroduce that crash.
+
+`regenerate-mac-apps!` runs at the end of `reshim!` (a no-op off macOS or when the flag is unset). When enabled, it writes one wrapper per GUI tool whose shim exists; if a tool's shim is absent (e.g. a minimal distribution without DrRacket), any stale wrapper is removed. Wrappers carry a marker file (`Contents/Resources/.rackup-managed`), so rackup only ever overwrites or deletes bundles it created — a user's own `~/Applications/DrRacket.app` is left untouched, and a non-managed bundle blocks generation with a warning. `cmd-uninstall` calls `remove-mac-apps!` so the wrappers (which exec shims under `RACKUP_HOME`) are not left dangling after the home is deleted. An icon is copied from the default toolchain's `DrRacket.app` when one can be located (best-effort).
+
+The macOS-only behavior and the `~/Applications` location are behind the `current-mac-apps-os?` and `current-user-applications-dir` parameters so the generation/removal logic is exercised by the unit tests on any host.
+
 ## File-based locking with compile-time enforcement
 
 Concurrent rackup processes (e.g., two shells running `rackup install` simultaneously) must not corrupt shared state. The lock mechanism uses `make-directory` as an atomic mutex: directory creation is atomic on both POSIX and Windows, so exactly one of two racing processes will succeed and the other will get `exn:fail:filesystem?`.
