@@ -18,6 +18,7 @@
          "commands-data.rkt"
          "install.rkt"
          "legacy-plt-catalog.rkt"
+         "mac-apps.rkt"
          "paths.rkt"
          "rebuild.rkt"
          "remote.rkt"
@@ -104,7 +105,8 @@
               "Print fast prompt info for PS1 (default: compact label).")
   (usage-line "upgrade [version] [--force]" "Upgrade channel-based toolchains to latest version.")
   (usage-line "remove <toolchain>" "Remove an installed or linked toolchain and its addon dir.")
-  (usage-line "reshim" "Rebuild executable shims from installed toolchains.")
+  (usage-line "reshim [--short-aliases|--mac-apps]"
+              "Rebuild executable shims (and, with --mac-apps, macOS GUI app wrappers).")
   (usage-line "init [--shell bash|zsh]" "Install/update shell integration in ~/.bashrc or ~/.zshrc.")
   (usage-line "uninstall [--dangerously-delete-without-prompting]"
               "Remove rackup, its toolchains/runtime, and shell init blocks (destructive).")
@@ -563,6 +565,8 @@
 (define (cmd-reshim rest)
   (define aliases? #f)
   (define no-aliases? #f)
+  (define mac-apps? #f)
+  (define no-mac-apps? #f)
   (command-line #:program "rackup reshim"
                 #:argv rest
                 #:once-any
@@ -570,12 +574,19 @@
                  (set! aliases? #t)]
                 [("--no-short-aliases") "Remove short aliases"
                  (set! no-aliases? #t)]
+                #:once-any
+                [("--mac-apps") "Install macOS ~/Applications wrappers for GUI tools (DrRacket)"
+                 (set! mac-apps? #t)]
+                [("--no-mac-apps") "Remove macOS ~/Applications GUI wrappers"
+                 (set! no-mac-apps? #t)]
                 #:args ()
                 (void))
   (ensure-index!)
   (commit-state-change!
    (when aliases? (install-shim-aliases!))
-   (when no-aliases? (remove-shim-aliases!)))
+   (when no-aliases? (remove-shim-aliases!))
+   (when mac-apps? (install-mac-apps!))
+   (when no-mac-apps? (remove-mac-apps-flag!)))
   ;; Keep installed shell helper scripts in sync with the running rackup
   ;; code so new subcommands and flags become tab-completable without
   ;; requiring the user to rerun `rackup init`.
@@ -599,6 +610,7 @@
 
 (define (cmd-install rest)
   (define short-aliases? #f)
+  (define mac-apps? #f)
   (define opts-rev '())
   (define (flag! . args) (set! opts-rev (append (reverse args) opts-rev)))
   (define version
@@ -623,15 +635,18 @@
                    (flag! "--prefix" p)]
                   [("--short-aliases") "Install short aliases: r (racket), dr (drracket)"
                    (set! short-aliases? #t)]
+                  [("--mac-apps") "Install macOS ~/Applications wrappers for GUI tools (DrRacket)"
+                   (set! mac-apps? #t)]
                   #:once-any
                   [("--quiet") "Show minimal output" (flag! "--quiet")]
                   [("--verbose") "Show detailed output" (flag! "--verbose")]
                   #:args (version)
                   version))
   (void (install-toolchain! version (reverse opts-rev)))
-  (when short-aliases?
+  (when (or short-aliases? mac-apps?)
     (commit-state-change!
-     (install-shim-aliases!))))
+     (when short-aliases? (install-shim-aliases!))
+     (when mac-apps? (install-mac-apps!)))))
 
 (define (prompt-short-label id)
   (define meta (and id (read-toolchain-meta id)))
@@ -922,6 +937,12 @@
                                           (exn-message e))
                                  null)])
       ((current-remove-shell-init-blocks-proc))))
+  ;; The ~/Applications wrappers exec shims under RACKUP_HOME, which is about
+  ;; to be deleted; remove them so no broken bundles are left behind.
+  (with-handlers ([exn:fail? (lambda (e)
+                               (eprintf "rackup: warning: failed to remove macOS app wrappers: ~a\n"
+                                        (exn-message e)))])
+    (remove-mac-apps!))
   (displayln "rackup uninstalled.")
   (when (pair? removed-rcs)
     (displayln "Removed rackup shell init blocks from:")

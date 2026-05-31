@@ -6,6 +6,7 @@
          (submod "copy-filtered-tree.rkt" test)
          (submod "env.rkt" test)
          (submod "install-prefix.rkt" test)
+         (submod "mac-apps.rkt" test)
          (submod "paths.rkt" test)
          (submod "process.rkt" test)
          (submod "rebuild.rkt" test)
