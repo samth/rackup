@@ -6,6 +6,7 @@
          "../libexec/rackup/mac-apps.rkt"
          (submod "../libexec/rackup/mac-apps.rkt" for-testing)
          "../libexec/rackup/paths.rkt"
+         "../libexec/rackup/rktd-io.rkt"
          "../libexec/rackup/state.rkt")
 
 (module+ test
@@ -17,6 +18,17 @@
   (define (read-file p) (file->string p))
   (define (app-dir apps display) (build-path apps (string-append display ".app")))
 
+  (define (touch p [content ""])
+    (make-directory* (let-values ([(d _ __) (split-path p)]) d))
+    (call-with-output-file p #:exists 'replace (lambda (o) (display content o))))
+
+  ;; Create a fake `.app` bundle under `root`; optionally with an icon.
+  (define (make-fake-app! root name #:icon? [icon? #f])
+    (define res (build-path root (string-append name ".app") "Contents" "Resources"))
+    (make-directory* res)
+    (when icon? (touch (build-path res (string-append name ".icns")) "icns"))
+    (build-path root (string-append name ".app")))
+
   ;; ---- info-plist -----------------------------------------------------
 
   (let ([pl (info-plist "DrRacket" "drracket" #f)])
@@ -24,10 +36,47 @@
     (check-true (string-contains? pl "<string>DrRacket</string>"))
     (check-true (string-contains? pl "org.racket-lang.rackup.drracket"))
     (check-true (string-contains? pl "<string>APPL</string>"))
-    ;; No icon key unless an icon was written.
     (check-false (string-contains? pl "CFBundleIconFile")))
   (check-true (string-contains? (info-plist "DrRacket" "drracket" #t)
                                 "<key>CFBundleIconFile</key>"))
+
+  ;; ---- resolve-launcher ----------------------------------------------
+
+  (with-temp-dir
+   (lambda (shims)
+     (for ([n '("drracket" "gracket" "plt-games")]) (touch (build-path shims n)))
+     ;; lowercase mapping
+     (check-equal? (resolve-launcher "DrRacket" shims) "drracket")
+     (check-equal? (resolve-launcher "GRacket" shims) "gracket")
+     ;; multi-word: space -> '-'
+     (check-equal? (resolve-launcher "PLT Games" shims) "plt-games")
+     ;; no matching shim -> #f
+     (check-false (resolve-launcher "Nonesuch" shims))))
+
+  ;; ---- find-gui-apps: discover all shipped GUI apps -------------------
+
+  (with-temp-dir
+   (lambda (root)
+     (define install (build-path root "install"))
+     (define shims (build-path root "shims"))
+     (make-directory* shims)
+     ;; Three top-level apps + one under lib/.
+     (make-fake-app! install "DrRacket" #:icon? #t)
+     (make-fake-app! install "GRacket")
+     (make-fake-app! install "NoLauncher")       ; has no shim -> skipped
+     (make-fake-app! (build-path install "lib") "Slideshow")
+     (for ([n '("drracket" "gracket" "slideshow")]) (touch (build-path shims n)))
+     (define apps (find-gui-apps install shims))
+     (define by-name
+       (for/hash ([a (in-list apps)]) (values (gui-app-display a) a)))
+     ;; DrRacket, GRacket, Slideshow discovered; NoLauncher skipped.
+     (check-equal? (sort (hash-keys by-name) string<?)
+                   '("DrRacket" "GRacket" "Slideshow"))
+     (check-equal? (gui-app-launcher (hash-ref by-name "DrRacket")) "drracket")
+     (check-equal? (gui-app-launcher (hash-ref by-name "Slideshow")) "slideshow")
+     ;; Icon discovered for DrRacket, not for GRacket.
+     (check-true (and (gui-app-icon (hash-ref by-name "DrRacket")) #t))
+     (check-false (gui-app-icon (hash-ref by-name "GRacket")))))
 
   ;; ---- write-mac-app! bundle structure --------------------------------
 
@@ -37,18 +86,15 @@
      (define result (write-mac-app! apps "DrRacket" "drracket" shim))
      (define dir (app-dir apps "DrRacket"))
      (check-equal? result dir)
-     ;; Bundle layout.
      (check-true (file-exists? (build-path dir "Contents" "Info.plist")))
      (check-true (file-exists? (build-path dir "Contents" "PkgInfo")))
      (define exe (build-path dir "Contents" "MacOS" "DrRacket"))
      (check-true (file-exists? exe))
-     ;; Launcher is executable and execs the shim.
      (check-true (and (memq 'execute (file-or-directory-permissions exe)) #t)
                  "launcher must be executable")
      (define script (read-file exe))
      (check-true (string-prefix? script "#!/bin/sh"))
      (check-true (string-contains? script "exec '/home/u/.rackup/shims/drracket' \"$@\""))
-     ;; Marker present -> recognized as ours.
      (check-true (rackup-managed-app? dir))))
 
   ;; ---- non-clobber: leave a user-owned bundle alone -------------------
@@ -56,18 +102,18 @@
   (with-temp-dir
    (lambda (apps)
      (define dir (app-dir apps "DrRacket"))
-     (make-directory* (build-path dir "Contents" "MacOS"))
      (define exe (build-path dir "Contents" "MacOS" "DrRacket"))
-     (call-with-output-file exe (lambda (o) (display "user's own app" o)))
+     (touch exe "user's own app")
      (check-false (rackup-managed-app? dir))
      (define result
        (parameterize ([current-error-port (open-output-string)])
          (write-mac-app! apps "DrRacket" "drracket" "/x/shims/drracket")))
-     ;; Refused, and the user's file is untouched.
      (check-false result)
      (check-equal? (read-file exe) "user's own app")))
 
   ;; ---- regenerate / remove integration --------------------------------
+
+  (define test-tc "release-9.9-cs-x86_64-macosx-full")
 
   (define (with-temp-rackup-home proc)
     (define home (make-temporary-file "rackup-macapps-home~a" 'directory))
@@ -81,30 +127,35 @@
   (with-temp-rackup-home
    (lambda (home)
      (ensure-index!)
+     ;; A default toolchain whose install tree ships DrRacket + Slideshow.
+     (write-string-file (rackup-default-file) test-tc)
+     (define install (rackup-toolchain-install-dir test-tc))
+     (make-fake-app! install "DrRacket" #:icon? #t)
+     (make-fake-app! install "Slideshow")
+     (for ([n '("drracket" "slideshow")])
+       (touch (build-path (rackup-shims-dir) n)))
      (define apps (build-path home "Applications"))
      (define drr (app-dir apps "DrRacket"))
-     ;; A drracket shim exists for the GUI wrapper to point at.
-     (call-with-output-file (build-path (rackup-shims-dir) "drracket")
-       (lambda (o) (display "#!/bin/sh\n" o)))
+     (define slide (app-dir apps "Slideshow"))
      (parameterize ([current-mac-apps-os? #t]
                     [current-user-applications-dir apps])
        ;; Flag off -> nothing generated.
        (regenerate-mac-apps!)
        (check-false (directory-exists? drr))
-       ;; Flag on -> wrapper generated.
+       ;; Flag on -> a wrapper per discovered GUI app, with marker + icon.
        (set-config-flag! "mac-apps")
        (regenerate-mac-apps!)
        (check-true (directory-exists? drr))
+       (check-true (directory-exists? slide))
        (check-true (rackup-managed-app? drr))
-       ;; Flag on but shim gone -> stale wrapper removed.
-       (delete-file (build-path (rackup-shims-dir) "drracket"))
-       (regenerate-mac-apps!)
-       (check-false (directory-exists? drr))
-       ;; Regenerate (shim back), then clearing the flag removes it.
-       (call-with-output-file (build-path (rackup-shims-dir) "drracket")
-         (lambda (o) (display "#!/bin/sh\n" o)))
+       (check-true (file-exists? (build-path drr "Contents" "Resources" "DrRacket.icns")))
+       (check-equal? (length (managed-app-dirs apps)) 2)
+       ;; Stop shipping Slideshow -> its stale wrapper is pruned, DrRacket stays.
+       (delete-directory/files (build-path install "Slideshow.app"))
        (regenerate-mac-apps!)
        (check-true (directory-exists? drr))
+       (check-false (directory-exists? slide))
+       ;; Clearing the flag removes all managed wrappers.
        (clear-config-flag! "mac-apps")
        (regenerate-mac-apps!)
        (check-false (directory-exists? drr)))))
@@ -117,11 +168,10 @@
      (make-directory* apps)
      (parameterize ([current-mac-apps-os? #t]
                     [current-user-applications-dir apps])
-       ;; Our managed wrapper.
        (write-mac-app! apps "DrRacket" "drracket" "/x/shims/drracket")
-       ;; A user-owned bundle with the same conventional name space.
-       (define mine (app-dir apps "Slideshow"))
+       (define mine (app-dir apps "MyOwnEditor"))
        (make-directory* (build-path mine "Contents"))
+       (check-equal? (length (managed-app-dirs apps)) 1)
        (remove-mac-apps!)
        (check-false (directory-exists? (app-dir apps "DrRacket"))
                     "managed wrapper removed")

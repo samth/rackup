@@ -2,18 +2,25 @@
 
 ;; macOS `.app` wrappers for GUI tools (issue #10).
 ;;
-;; rackup-managed GUI tools (DrRacket) live deep under `~/.rackup` and are
-;; launched from the command line via shims, so they are invisible to Finder,
-;; Spotlight, and the Dock.  When the `mac-apps` config flag is set (via
-;; `rackup install --mac-apps` / `rackup reshim --mac-apps`), rackup writes
-;; small wrapper bundles into `~/Applications` so the GUI tools can be opened
-;; like any other macOS app.
+;; rackup-managed GUI tools (DrRacket and any other GUI apps the macOS
+;; installer ships) live deep under `~/.rackup` and are launched from the
+;; command line via shims, so they are invisible to Finder, Spotlight, and
+;; the Dock.  When the `mac-apps` config flag is set (via `rackup install
+;; --mac-apps` / `rackup reshim --mac-apps`), rackup writes small wrapper
+;; bundles into `~/Applications` so the GUI tools can be opened like any
+;; other macOS app.
+;;
+;; The set of wrappers is discovered, not hardcoded: at reshim time we scan
+;; the default toolchain's install tree for `*.app` bundles (this is where
+;; the macOS DMG/tgz distribution drops `DrRacket.app` et al.) and generate a
+;; wrapper for each one that has a corresponding `bin/` launcher (shim).  So
+;; whatever GUI apps a given Racket distribution ships are handled.
 ;;
 ;; Each wrapper's `Contents/MacOS/<Name>` is a shell script that execs the
-;; corresponding rackup shim (e.g. `~/.rackup/shims/drracket`).  Routing
-;; through the shim means the app always launches the *default* toolchain's
-;; tool, with the toolchain's environment set up, and — crucially — through
-;; the shim's `cd -P` bin-symlink resolution (issue #37), which a GUI Racket
+;; matching rackup shim (e.g. `~/.rackup/shims/drracket`).  Routing through
+;; the shim means the app always launches the *default* toolchain's tool,
+;; with the toolchain's environment set up, and — crucially — through the
+;; shim's `cd -P` bin-symlink resolution (issue #37), which a GUI Racket
 ;; binary requires on aarch64 macOS to avoid an `invalid memory reference`
 ;; crash in `cocoa/queue.rkt`.  A wrapper that pointed at a symlinked path
 ;; directly would reintroduce that crash.
@@ -23,7 +30,10 @@
 ;; `~/Applications/DrRacket.app` is left untouched.
 
 (require racket/file
+         racket/list
          racket/path
+         racket/set
+         racket/string
          "error.rkt"
          "paths.rkt"
          "rktd-io.rkt"
@@ -38,15 +48,17 @@
          remove-mac-apps!)
 
 (module+ for-testing
-  (provide gui-apps
+  (provide (struct-out gui-app)
            current-mac-apps-os?
            current-user-applications-dir
+           find-gui-apps
+           resolve-launcher
+           managed-app-dirs
            write-mac-app!
            rackup-managed-app?
            info-plist))
 
-;; (launcher-name . display-name): the shim to exec and the `.app` name.
-(define gui-apps '(("drracket" . "DrRacket")))
+(struct gui-app (display launcher icon) #:transparent)
 
 (define mac-apps-flag "mac-apps")
 (define managed-marker ".rackup-managed")
@@ -69,6 +81,60 @@
 
 (define/state-locked (remove-mac-apps-flag!)
   (clear-config-flag! mac-apps-flag))
+
+;; ---- discovery ------------------------------------------------------
+
+(define (app-bundle? p)
+  (and (directory-exists? p)
+       (equal? (path-get-extension p) #".app")))
+
+(define (app-display-name app-path)
+  (regexp-replace #rx"[.]app$" (path-basename-string app-path) ""))
+
+;; `*.app` bundles directly under `dir` (not recursive).
+(define (app-bundles-in dir)
+  (if (directory-exists? dir)
+      (filter app-bundle? (directory-list dir #:build? #t))
+      '()))
+
+;; Map a bundle display name to a `bin/` launcher that has a shim.  The
+;; macOS launcher for an app is the lowercased app name (DrRacket ->
+;; drracket, GRacket -> gracket); also try space->`-` and space-stripped
+;; forms for multi-word names.  Returns the launcher string or #f.
+(define (resolve-launcher display shims-dir)
+  (define lower (string-downcase display))
+  (for/or ([cand (in-list (remove-duplicates
+                           (list lower
+                                 (regexp-replace* #px"\\s+" lower "-")
+                                 (regexp-replace* #px"\\s+" lower ""))))])
+    (and (not (string=? cand ""))
+         (file-exists? (build-path shims-dir cand))
+         cand)))
+
+(define (find-icns app-path)
+  (define res (build-path app-path "Contents" "Resources"))
+  (and (directory-exists? res)
+       (for/or ([p (in-list (directory-list res #:build? #t))]
+                #:when (equal? (path-get-extension p) #".icns"))
+         p)))
+
+;; All GUI apps to wrap for a toolchain: each `*.app` under `install-dir`
+;; (and its `lib/`) whose launcher has a shim, de-duplicated by name.
+(define (find-gui-apps install-dir shims-dir)
+  (define roots (list install-dir (build-path install-dir "lib")))
+  (let loop ([apps (append-map app-bundles-in roots)] [seen (set)] [acc '()])
+    (cond
+      [(null? apps) (reverse acc)]
+      [else
+       (define app (car apps))
+       (define display (app-display-name app))
+       (define launcher (resolve-launcher display shims-dir))
+       (if (or (set-member? seen display) (not launcher))
+           (loop (cdr apps) seen acc)
+           (loop (cdr apps) (set-add seen display)
+                 (cons (gui-app display launcher (find-icns app)) acc)))])))
+
+;; ---- bundle writing -------------------------------------------------
 
 (define (app-bundle-dir apps-dir display)
   (build-path apps-dir (string-append display ".app")))
@@ -105,23 +171,6 @@
   (string-append "#!/bin/sh\n"
                  "exec " (sh-single-quote shim-path) " \"$@\"\n"))
 
-;; Best-effort: find a `.icns` icon for `display` inside the default
-;; toolchain's install tree.  The macOS DMG layout places `DrRacket.app` at
-;; the install root; we also check `lib/`.  Returns a path or #f.
-(define (find-app-icon display)
-  (define default-id (get-default-toolchain))
-  (and default-id
-       (let ([install (rackup-toolchain-install-dir default-id)])
-         (for/or ([rel (in-list (list (build-path (string-append display ".app")
-                                                  "Contents" "Resources")
-                                      (build-path "lib" (string-append display ".app")
-                                                  "Contents" "Resources")))])
-           (define dir (build-path install rel))
-           (and (directory-exists? dir)
-                (for/or ([p (in-list (directory-list dir #:build? #t))]
-                         #:when (equal? (path-get-extension p) #".icns"))
-                  p))))))
-
 ;; Write (or refresh) a wrapper bundle at <apps-dir>/<display>.app that execs
 ;; `shim-path`.  Refuses to touch a bundle that is not rackup-managed.
 ;; Returns the bundle path on success, #f if skipped.
@@ -154,36 +203,43 @@
                         (string-append "rackup-managed:" launcher))
      app-dir]))
 
-(define (delete-managed-app! app-dir)
-  (when (and (directory-exists? app-dir) (rackup-managed-app? app-dir))
-    (delete-directory/files app-dir #:must-exist? #f)))
+;; ---- regenerate / remove --------------------------------------------
 
-;; (Re)generate the wrapper bundles to match current state: one per GUI tool
-;; whose shim exists, when the `mac-apps` flag is set; otherwise remove ours.
-;; No-op off macOS.
+;; `*.app` bundles under `apps-dir` that carry our marker.
+(define (managed-app-dirs apps-dir)
+  (if (directory-exists? apps-dir)
+      (filter (lambda (p) (and (app-bundle? p) (rackup-managed-app? p)))
+              (directory-list apps-dir #:build? #t))
+      '()))
+
+;; (Re)generate wrapper bundles to match current state: one per GUI app the
+;; default toolchain ships (whose launcher has a shim), when the `mac-apps`
+;; flag is set; otherwise remove ours.  Stale managed wrappers (apps no
+;; longer shipped, or after the flag/default changes) are pruned.  No-op off
+;; macOS.
 (define (regenerate-mac-apps!)
   (when (current-mac-apps-os?)
+    (define apps-dir (current-user-applications-dir))
+    (define default-id (get-default-toolchain))
     (cond
-      [(mac-apps-enabled?)
-       (define apps-dir (current-user-applications-dir))
+      [(and (mac-apps-enabled?) default-id)
        (make-directory* apps-dir)
        (define shims-dir (rackup-shims-dir))
-       (for ([entry (in-list gui-apps)])
-         (define launcher (car entry))
-         (define display (cdr entry))
-         (define shim (build-path shims-dir launcher))
-         (cond
-           [(file-exists? shim)
-            (write-mac-app! apps-dir display launcher (path->string shim)
-                            #:icon-src (find-app-icon display))]
-           ;; Shim gone (e.g. minimal distribution): drop our stale wrapper.
-           [else (delete-managed-app! (app-bundle-dir apps-dir display))]))]
+       (define apps (find-gui-apps (rackup-toolchain-install-dir default-id) shims-dir))
+       (for ([a (in-list apps)])
+         (write-mac-app! apps-dir (gui-app-display a) (gui-app-launcher a)
+                         (path->string (build-path shims-dir (gui-app-launcher a)))
+                         #:icon-src (gui-app-icon a)))
+       (define desired
+         (list->set (for/list ([a (in-list apps)])
+                      (string-append (gui-app-display a) ".app"))))
+       (for ([p (in-list (managed-app-dirs apps-dir))]
+             #:unless (set-member? desired (path-basename-string p)))
+         (delete-directory/files p #:must-exist? #f))]
       [else (remove-mac-apps!)])))
 
 ;; Remove every wrapper bundle we manage.  No-op off macOS.
 (define (remove-mac-apps!)
   (when (current-mac-apps-os?)
-    (define apps-dir (current-user-applications-dir))
-    (when (directory-exists? apps-dir)
-      (for ([entry (in-list gui-apps)])
-        (delete-managed-app! (app-bundle-dir apps-dir (cdr entry)))))))
+    (for ([p (in-list (managed-app-dirs (current-user-applications-dir)))])
+      (delete-directory/files p #:must-exist? #f))))
