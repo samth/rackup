@@ -85,4 +85,7 @@ behavior:
 - **macOS E2E (runs on the real macos-15 / macos-15-intel runners):** the
   feature is exercised against a real full Racket install — including
   *launching DrRacket through the generated wrapper*, which is the only way to
-  confirm the wrapper→shim→`bin/drracket` path avoids the #37 aarch64 crash.
+  confirm the wrapper→shim→`bin/drracket` path avoids the #37 aarch64 crash,
+  and asserting the DrRacket wrapper carries a copied `.icns` referenced from
+  its `Info.plist` (the icon path could not be verified on Linux because it
+  depends on the real bundle's contents).
