@@ -599,6 +599,52 @@ jobs:
             echo "DrRacket crashed or exited early (status $DR_STATUS)" >&2
             exit 1
           fi
+          # --- mac-apps: ~/Applications GUI wrappers (issue #10) ---
+          APPS="$HOME/Applications"
+          TC_ID="$(bin/rackup list --ids | head -1)"
+          INSTALL="$RACKUP_HOME/toolchains/$TC_ID/install"
+          echo "GUI .app bundles shipped by the toolchain:"
+          ls -d "$INSTALL"/*.app "$INSTALL"/lib/*.app 2>/dev/null || true
+          bin/rackup reshim --mac-apps
+          echo "Wrappers generated in ~/Applications:"
+          ls -d "$APPS"/*.app 2>/dev/null || true
+          # DrRacket must be wrapped: managed marker + executable launcher.
+          test -d "$APPS/DrRacket.app" || { echo "DrRacket.app wrapper missing" >&2; exit 1; }
+          test -f "$APPS/DrRacket.app/Contents/Resources/.rackup-managed" \
+            || { echo "DrRacket.app missing rackup-managed marker" >&2; exit 1; }
+          test -x "$APPS/DrRacket.app/Contents/MacOS/DrRacket" \
+            || { echo "DrRacket.app launcher not executable" >&2; exit 1; }
+          # Every shipped GUI .app that has a bin launcher must get a wrapper.
+          for app in "$INSTALL"/*.app "$INSTALL"/lib/*.app; do
+            [ -d "$app" ] || continue
+            name="$(basename "$app" .app)"
+            launcher="$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]')"
+            if [ -e "$RACKUP_HOME/shims/$launcher" ]; then
+              test -d "$APPS/$name.app" \
+                || { echo "no wrapper for shipped GUI app $name (launcher $launcher)" >&2; exit 1; }
+              echo "  wrapper OK: $name -> shims/$launcher"
+            else
+              echo "  (no bin launcher for $name; not wrapped)"
+            fi
+          done
+          # Launch DrRacket THROUGH THE WRAPPER (not just the shim) to confirm
+          # the wrapper -> shim -> bin/drracket path avoids the #37 crash.
+          "$APPS/DrRacket.app/Contents/MacOS/DrRacket" &
+          DRW_PID=$!
+          sleep 10
+          if kill -0 "$DRW_PID" 2>/dev/null; then
+            echo "DrRacket launched via ~/Applications wrapper"
+            kill "$DRW_PID" || true
+            wait "$DRW_PID" 2>/dev/null || true
+          else
+            wait "$DRW_PID" 2>/dev/null
+            echo "DrRacket wrapper launch crashed or exited early" >&2
+            exit 1
+          fi
+          # Disabling removes our wrappers.
+          bin/rackup reshim --no-mac-apps
+          test ! -e "$APPS/DrRacket.app" \
+            || { echo "--no-mac-apps did not remove DrRacket.app" >&2; exit 1; }
           bin/rackup remove "$(bin/rackup list --ids | head -1)"
       - name: Legacy PLT Scheme DMG install (4.2.5, 4.0, 350)
         if: matrix.setup_racket_arch == 'x64'

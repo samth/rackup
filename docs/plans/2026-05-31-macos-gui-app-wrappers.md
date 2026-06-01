@@ -49,22 +49,40 @@ toolchain's GUI binary or symlinking the real `DrRacket.app`. Reasons:
 
 ## Implementation
 
-- `libexec/rackup/mac-apps.rkt`: flag get/set, `regenerate-mac-apps!`,
-  `remove-mac-apps!`, `write-mac-app!` (Info.plist + launcher script + marker
-  + best-effort `.icns`), non-clobber check. Two test seams:
-  `current-mac-apps-os?`, `current-user-applications-dir`.
+- `libexec/rackup/mac-apps.rkt`: flag get/set, `find-gui-apps` (discovers
+  `*.app` bundles in the default toolchain's install tree and maps each to a
+  shim launcher), `regenerate-mac-apps!`, `remove-mac-apps!`, `write-mac-app!`
+  (Info.plist + launcher script + marker + `.icns`), non-clobber check. Test
+  seams: `current-mac-apps-os?`, `current-user-applications-dir`.
 - `shims.rkt`: `reshim!` calls `regenerate-mac-apps!` at the end.
 - `main.rkt`: `--mac-apps`/`--no-mac-apps` on `reshim`; `--mac-apps` on
   `install`; `remove-mac-apps!` in `cmd-uninstall`.
-- `test/mac-apps.rkt`: bundle structure, launcher contents, non-clobber,
-  regenerate/remove integration, marker-based removal.
+- `test/mac-apps.rkt`: discovery (`find-gui-apps`, launcher resolution, icon),
+  bundle structure, launcher contents, non-clobber, regenerate/prune/remove
+  integration, marker-based removal.
+- `ci.yml` macOS E2E: after the full-distribution DMG install, enable
+  `--mac-apps`, assert a wrapper exists for every shipped GUI `.app` that has a
+  launcher, launch DrRacket *through the wrapper*, and verify `--no-mac-apps`
+  removes them.
 
-## Scope / follow-ups
+## Handling all GUI apps
 
-- v1 ships a single GUI app (`DrRacket`); `gui-apps` is a data list so more
-  tools can be added.
-- Icon copying is best-effort (locates `DrRacket.app/Contents/Resources/*.icns`
-  in the default toolchain's install tree).
-- Could not run live on macOS from this host; the generation/removal logic is
-  validated by unit tests on Linux via the OS/apps-dir parameters, and the
-  shim launch path is the one #37 confirmed working on macOS CI.
+The set of wrappers is discovered at reshim time rather than hardcoded:
+`find-gui-apps` scans `<toolchain>/install/` (and `lib/`) for `*.app` bundles
+and wraps each one whose lowercased name resolves to a `bin/` launcher with a
+shim. So whatever GUI apps a distribution ships (DrRacket and any others) are
+handled automatically, present and future.
+
+## Testing what couldn't be run locally
+
+This was developed on Linux, so two layers of tests cover the macOS-specific
+behavior:
+
+- **Unit tests (run on every host, including Linux CI):** the OS gate and
+  `~/Applications` location are parameters, so `find-gui-apps`,
+  `regenerate-mac-apps!`, pruning, and `remove-mac-apps!` are exercised
+  end-to-end against fake install trees.
+- **macOS E2E (runs on the real macos-15 / macos-15-intel runners):** the
+  feature is exercised against a real full Racket install — including
+  *launching DrRacket through the generated wrapper*, which is the only way to
+  confirm the wrapper→shim→`bin/drracket` path avoids the #37 aarch64 crash.
