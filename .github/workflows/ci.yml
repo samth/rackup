@@ -636,6 +636,14 @@ jobs:
               echo "  (no bin launcher for $name; not wrapped)"
             fi
           done
+          # Icon: the real DrRacket.app ships an .icns; confirm our wrapper
+          # actually copied one in and references it in Info.plist, so Finder
+          # and the Dock render it (this is the part not verifiable on Linux).
+          ls "$APPS/DrRacket.app/Contents/Resources/"*.icns >/dev/null 2>&1 \
+            || { echo "DrRacket.app wrapper has no .icns (icon not copied from source bundle)" >&2; exit 1; }
+          grep -q "CFBundleIconFile" "$APPS/DrRacket.app/Contents/Info.plist" \
+            || { echo "DrRacket.app Info.plist does not reference an icon" >&2; exit 1; }
+          echo "DrRacket.app wrapper icon copied and referenced in Info.plist"
           # Launch DrRacket THROUGH THE WRAPPER (not just the shim) to confirm
           # the wrapper -> shim -> bin/drracket path avoids the #37 crash.
           "$APPS/DrRacket.app/Contents/MacOS/DrRacket" &

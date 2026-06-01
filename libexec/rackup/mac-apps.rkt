@@ -111,12 +111,20 @@
          (file-exists? (build-path shims-dir cand))
          cand)))
 
-(define (find-icns app-path)
+;; The app's icon, from its `Contents/Resources`.  Prefer `<display>.icns`
+;; (the app icon by Racket/macOS convention, e.g. DrRacket.icns); fall back
+;; to the first `.icns` so we still pick *some* icon — a bundle may also ship
+;; document-type icons, but a matching name is the app icon.
+(define (find-icns app-path display)
   (define res (build-path app-path "Contents" "Resources"))
   (and (directory-exists? res)
-       (for/or ([p (in-list (directory-list res #:build? #t))]
-                #:when (equal? (path-get-extension p) #".icns"))
-         p)))
+       (let ([named (build-path res (string-append display ".icns"))])
+         (if (file-exists? named)
+             named
+             (for/or ([p (in-list (sort (directory-list res #:build? #t)
+                                        string<? #:key path->string))]
+                      #:when (equal? (path-get-extension p) #".icns"))
+               p)))))
 
 ;; All GUI apps to wrap for a toolchain: each `*.app` under `install-dir`
 ;; (and its `lib/`) whose launcher has a shim, de-duplicated by name.
@@ -132,7 +140,7 @@
        (if (or (set-member? seen display) (not launcher))
            (loop (cdr apps) seen acc)
            (loop (cdr apps) (set-add seen display)
-                 (cons (gui-app display launcher (find-icns app)) acc)))])))
+                 (cons (gui-app display launcher (find-icns app display)) acc)))])))
 
 ;; ---- bundle writing -------------------------------------------------
 

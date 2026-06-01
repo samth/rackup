@@ -2,6 +2,7 @@
 
 (require rackunit
          racket/file
+         racket/path
          racket/string
          "../libexec/rackup/mac-apps.rkt"
          (submod "../libexec/rackup/mac-apps.rkt" for-testing)
@@ -22,12 +23,16 @@
     (make-directory* (let-values ([(d _ __) (split-path p)]) d))
     (call-with-output-file p #:exists 'replace (lambda (o) (display content o))))
 
-  ;; Create a fake `.app` bundle under `root`; optionally with an icon.
-  (define (make-fake-app! root name #:icon? [icon? #f])
+  ;; Create a fake `.app` bundle under `root`.  `icons` is a list of icns
+  ;; basenames to drop in Contents/Resources (e.g. '("DrRacket.icns")).
+  (define (make-fake-app! root name #:icon? [icon? #f] #:icons [icons '()])
     (define res (build-path root (string-append name ".app") "Contents" "Resources"))
     (make-directory* res)
     (when icon? (touch (build-path res (string-append name ".icns")) "icns"))
+    (for ([i (in-list icons)]) (touch (build-path res i) "icns"))
     (build-path root (string-append name ".app")))
+
+  (define (icns-basename p) (and p (path->string (file-name-from-path p))))
 
   ;; ---- info-plist -----------------------------------------------------
 
@@ -60,9 +65,11 @@
      (define install (build-path root "install"))
      (define shims (build-path root "shims"))
      (make-directory* shims)
-     ;; Three top-level apps + one under lib/.
-     (make-fake-app! install "DrRacket" #:icon? #t)
-     (make-fake-app! install "GRacket")
+     ;; Three top-level apps + one under lib/.  DrRacket ships several
+     ;; icons (incl. document-type ones); GRacket ships only a non-matching
+     ;; icon; Slideshow ships none.
+     (make-fake-app! install "DrRacket" #:icons '("Document.icns" "DrRacket.icns" "Zebra.icns"))
+     (make-fake-app! install "GRacket" #:icons '("misc-doc.icns"))
      (make-fake-app! install "NoLauncher")       ; has no shim -> skipped
      (make-fake-app! (build-path install "lib") "Slideshow")
      (for ([n '("drracket" "gracket" "slideshow")]) (touch (build-path shims n)))
@@ -74,9 +81,15 @@
                    '("DrRacket" "GRacket" "Slideshow"))
      (check-equal? (gui-app-launcher (hash-ref by-name "DrRacket")) "drracket")
      (check-equal? (gui-app-launcher (hash-ref by-name "Slideshow")) "slideshow")
-     ;; Icon discovered for DrRacket, not for GRacket.
-     (check-true (and (gui-app-icon (hash-ref by-name "DrRacket")) #t))
-     (check-false (gui-app-icon (hash-ref by-name "GRacket")))))
+     ;; Icon selection: the app-named `.icns` wins over document icons even
+     ;; when it is not alphabetically first.
+     (check-equal? (icns-basename (gui-app-icon (hash-ref by-name "DrRacket")))
+                   "DrRacket.icns")
+     ;; No name-matching icon -> fall back to the bundle's only `.icns`.
+     (check-equal? (icns-basename (gui-app-icon (hash-ref by-name "GRacket")))
+                   "misc-doc.icns")
+     ;; No icon shipped -> none selected.
+     (check-false (gui-app-icon (hash-ref by-name "Slideshow")))))
 
   ;; ---- write-mac-app! bundle structure --------------------------------
 
@@ -148,7 +161,17 @@
        (check-true (directory-exists? drr))
        (check-true (directory-exists? slide))
        (check-true (rackup-managed-app? drr))
+       ;; The source bundle's icon was copied in AND the Info.plist
+       ;; references it (so Finder/Dock actually render it).  Slideshow
+       ;; shipped no icon, so its wrapper has none and no icon key.
        (check-true (file-exists? (build-path drr "Contents" "Resources" "DrRacket.icns")))
+       (check-true (string-contains? (read-file (build-path drr "Contents" "Info.plist"))
+                                     "<key>CFBundleIconFile</key>")
+                   "DrRacket wrapper Info.plist must reference its icon")
+       (check-false (file-exists? (build-path slide "Contents" "Resources" "Slideshow.icns")))
+       (check-false (string-contains? (read-file (build-path slide "Contents" "Info.plist"))
+                                      "CFBundleIconFile")
+                    "Slideshow wrapper has no icon, so no icon key")
        (check-equal? (length (managed-app-dirs apps)) 2)
        ;; Stop shipping Slideshow -> its stale wrapper is pruned, DrRacket stays.
        (delete-directory/files (build-path install "Slideshow.app"))
