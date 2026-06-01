@@ -615,11 +615,20 @@ jobs:
           test -x "$APPS/DrRacket.app/Contents/MacOS/DrRacket" \
             || { echo "DrRacket.app launcher not executable" >&2; exit 1; }
           # Every shipped GUI .app that has a bin launcher must get a wrapper.
+          # Mirror mac-apps.rkt's launcher resolution: lowercase the app name,
+          # also trying space->'-' and space-stripped forms (e.g. "PLT Games"
+          # -> plt-games).
           for app in "$INSTALL"/*.app "$INSTALL"/lib/*.app; do
             [ -d "$app" ] || continue
             name="$(basename "$app" .app)"
-            launcher="$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]')"
-            if [ -e "$RACKUP_HOME/shims/$launcher" ]; then
+            lower="$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]')"
+            launcher=""
+            for cand in "$lower" "${lower// /-}" "${lower// /}"; do
+              if [ -n "$cand" ] && [ -e "$RACKUP_HOME/shims/$cand" ]; then
+                launcher="$cand"; break
+              fi
+            done
+            if [ -n "$launcher" ]; then
               test -d "$APPS/$name.app" \
                 || { echo "no wrapper for shipped GUI app $name (launcher $launcher)" >&2; exit 1; }
               echo "  wrapper OK: $name -> shims/$launcher"
