@@ -87,6 +87,30 @@ Add toolchain info to your prompt:
 PS1='$(rackup prompt) '$PS1
 ```
 
+## macOS: GUI apps in Finder (opt-in)
+
+rackup launches GUI tools like DrRacket through shims from the command line,
+so by default they don't show up in Finder, Spotlight, or the Dock. Opt in to
+wrapper apps in `~/Applications`:
+
+```bash
+rackup install stable --mac-apps   # at install time
+rackup reshim --mac-apps            # or enable any time afterward
+```
+
+This creates a wrapper `.app` in `~/Applications` for each GUI app the
+toolchain ships (DrRacket, GRacket, Slideshow, …). The wrappers launch the
+**default** toolchain's tools, so they follow `rackup default`. rackup only
+manages bundles it created (marked internally); your own apps are never
+touched. To delete the wrappers rackup created:
+
+```bash
+rackup reshim --remove-mac-apps
+```
+
+This is off by default and macOS-only; `rackup uninstall` removes the wrappers
+along with everything else.
+
 ## Migrating from racket-dev-goodies
 
 If you previously used [racket-dev-goodies](https://github.com/takikawa/racket-dev-goodies)
