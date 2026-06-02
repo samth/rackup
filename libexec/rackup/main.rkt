@@ -566,7 +566,7 @@
   (define aliases? #f)
   (define no-aliases? #f)
   (define mac-apps? #f)
-  (define no-mac-apps? #f)
+  (define remove-mac-apps? #f)
   (command-line #:program "rackup reshim"
                 #:argv rest
                 #:once-any
@@ -577,8 +577,8 @@
                 #:once-any
                 [("--mac-apps") "Install macOS ~/Applications wrappers for GUI tools (DrRacket)"
                  (set! mac-apps? #t)]
-                [("--no-mac-apps") "Remove macOS ~/Applications GUI wrappers"
-                 (set! no-mac-apps? #t)]
+                [("--remove-mac-apps") "Delete the macOS ~/Applications GUI wrappers rackup created"
+                 (set! remove-mac-apps? #t)]
                 #:args ()
                 (void))
   (ensure-index!)
@@ -586,7 +586,7 @@
    (when aliases? (install-shim-aliases!))
    (when no-aliases? (remove-shim-aliases!))
    (when mac-apps? (install-mac-apps!))
-   (when no-mac-apps? (remove-mac-apps-flag!)))
+   (when remove-mac-apps? (remove-mac-apps-flag!)))
   ;; Keep installed shell helper scripts in sync with the running rackup
   ;; code so new subcommands and flags become tab-completable without
   ;; requiring the user to rerun `rackup init`.

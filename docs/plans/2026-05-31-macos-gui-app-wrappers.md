@@ -18,7 +18,7 @@ Add an opt-in `mac-apps` feature that writes wrapper `.app` bundles into
 `~/Applications`, mirroring the existing `short-aliases` opt-in mechanism:
 
 - Flag `mac-apps` in `state/config`, set via `rackup install --mac-apps` /
-  `rackup reshim --mac-apps`, cleared via `rackup reshim --no-mac-apps`.
+  `rackup reshim --mac-apps`, cleared via `rackup reshim --remove-mac-apps`.
 - `reshim!` (re)generates the bundles via `regenerate-mac-apps!`.
 
 ### Key design choice: exec the shim, not the GUI binary
@@ -55,15 +55,15 @@ toolchain's GUI binary or symlinking the real `DrRacket.app`. Reasons:
   (Info.plist + launcher script + marker + `.icns`), non-clobber check. Test
   seams: `current-mac-apps-os?`, `current-user-applications-dir`.
 - `shims.rkt`: `reshim!` calls `regenerate-mac-apps!` at the end.
-- `main.rkt`: `--mac-apps`/`--no-mac-apps` on `reshim`; `--mac-apps` on
+- `main.rkt`: `--mac-apps`/`--remove-mac-apps` on `reshim`; `--mac-apps` on
   `install`; `remove-mac-apps!` in `cmd-uninstall`.
 - `test/mac-apps.rkt`: discovery (`find-gui-apps`, launcher resolution, icon),
   bundle structure, launcher contents, non-clobber, regenerate/prune/remove
   integration, marker-based removal.
 - `ci.yml` macOS E2E: after the full-distribution DMG install, enable
   `--mac-apps`, assert a wrapper exists for every shipped GUI `.app` that has a
-  launcher, launch DrRacket *through the wrapper*, and verify `--no-mac-apps`
-  removes them.
+  launcher, launch DrRacket *through the wrapper*, and verify
+  `--remove-mac-apps` deletes them.
 
 ## Handling all GUI apps
 

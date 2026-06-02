@@ -390,6 +390,23 @@ sh install.sh && rm install.sh})
           @div{@(shell-block "workflow-cmd" "$ rackup install stable\n$ rackup install pre-release\n$ rackup default stable\n$ racket -e '(displayln (version))'\n$ raco pkg install gregor")}}}
 
       @div[class: "rackup-section"]{
+        @h2{macOS apps in Finder}
+        @div[class: "rackup-two-col"]{
+          @div{
+            @p{
+              On macOS, GUI tools run through shims and don't appear in Finder,
+              Spotlight, or the Dock. Opt in to wrapper apps in
+              @code{~/Applications} for every GUI app a toolchain ships
+              (@code{DrRacket}, @code{GRacket}, @code{Slideshow}, …).
+            }
+            @p{
+              The wrappers launch the @i{default} toolchain's tools, so they
+              follow @code{rackup default}. rackup only manages the bundles it
+              creates; your own apps are untouched. It is off by default.
+            }}
+          @div{@(shell-block "macapps-cmd" "$ rackup install stable --mac-apps\n$ rackup reshim --mac-apps\n$ rackup reshim --remove-mac-apps")}}}
+
+      @div[class: "rackup-section"]{
         @h2{Quick start by use case}
         @p{
           Pick the guide that matches your situation.

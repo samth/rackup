@@ -658,10 +658,10 @@ jobs:
             echo "DrRacket wrapper launch crashed or exited early" >&2
             exit 1
           fi
-          # Disabling removes our wrappers.
-          bin/rackup reshim --no-mac-apps
+          # Removing deletes our wrappers.
+          bin/rackup reshim --remove-mac-apps
           test ! -e "$APPS/DrRacket.app" \
-            || { echo "--no-mac-apps did not remove DrRacket.app" >&2; exit 1; }
+            || { echo "--remove-mac-apps did not remove DrRacket.app" >&2; exit 1; }
           bin/rackup remove "$(bin/rackup list --ids | head -1)"
       - name: Legacy PLT Scheme DMG install (4.2.5, 4.0, 350)
         if: matrix.setup_racket_arch == 'x64'
