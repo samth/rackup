@@ -100,9 +100,12 @@ rackup reshim --mac-apps            # or enable any time afterward
 
 This creates a wrapper `.app` in `~/Applications` for each GUI app the
 toolchain ships (DrRacket, GRacket, Slideshow, …). The wrappers launch the
-**default** toolchain's tools, so they follow `rackup default`. rackup only
-manages bundles it created (marked internally); your own apps are never
-touched. To delete the wrappers rackup created:
+**default** toolchain's tools, so they follow `rackup default`. They also work
+as drag-and-drop targets and file handlers: drop a `.rkt` on the DrRacket
+wrapper, or double-click one in Finder, and it opens in DrRacket — the same
+file associations the standard DrRacket install registers. rackup only manages
+bundles it created (marked internally); your own apps are never touched. To
+delete the wrappers rackup created:
 
 ```bash
 rackup reshim --remove-mac-apps
