@@ -89,3 +89,57 @@ behavior:
   and asserting the DrRacket wrapper carries a copied `.icns` referenced from
   its `Info.plist` (the icon path could not be verified on Linux because it
   depends on the real bundle's contents).
+
+## 2026-06-09 update: drag-and-drop + double-click parity (AppleScript droplets)
+
+Follow-up to a further #10 comment from otherjoel: the wrappers should also be
+**drag-and-drop targets** for `.rkt` files (and, by extension, double-click
+file handlers), matching what the standard DrRacket DMG install does.
+
+### Why the shell-script launcher could not do this
+
+A plain shell-script `CFBundleExecutable` never receives the files. When macOS
+opens a document with an app it sends an `odoc` Apple Event, not `argv`; a
+POSIX executable with no run loop ignores it. Getting the dropped/opened paths
+requires something that handles `odoc` and re-emits them as a command line.
+
+### Decision: AppleScript droplet via `osacompile`
+
+Replace the shell-script launcher with an **AppleScript droplet** compiled by
+`osacompile`. Its `on open theItems` handler turns each file into a
+shell-quoted argument and runs the shim (`drracket file.rkt …`); `on run`
+launches with none. The shim-routing rationale above is unchanged — the droplet
+still calls the shim, so #37's `cd -P` fix still applies.
+
+`osacompile` was chosen over the alternatives because it is **always present**
+on macOS (a compiled Cocoa/Swift handler would need the Xcode command-line
+tools, which many Macs lack) and because the bundle is **generated locally**, so
+it carries no quarantine attribute and needs no codesigning/notarization to
+launch under Gatekeeper (a prebuilt shipped binary would). `osacompile` has no
+flags for bundle identity/types/icon, so those are patched afterward with
+`PlistBuddy` — that is the cost of declaring file associations with any tool,
+not an AppleScript tax.
+
+### Double-click parity by mirroring, not hardcoding
+
+The standard `DrRacket.app` registers as the **Editor** for
+`rkt rktl rktd scrbl scm ss rhm` (and Viewer for `plt`), via the `drracket`
+collection's `drracket.filetypes`. Only DrRacket among the shipped GUI apps
+declares any types. So instead of hardcoding extensions, `mirror-document-types!`
+copies the source bundle's `CFBundleDocumentTypes` (and its document `.icns`)
+straight into the wrapper, replacing `osacompile`'s accept-all default. Apps
+with no declared types keep the accept-all droplet behavior, so they remain
+plain drop targets.
+
+### Testing changes
+
+- The bundle builder is now a parameter (`current-build-bundle!`) so unit tests
+  stub the macOS-only `osacompile`/`plutil`/`PlistBuddy` step while still
+  exercising discovery/prune/removal and verifying `write-mac-app!` forwards the
+  right shim path (asserted via the generated droplet source), icon, and source
+  bundle. `droplet-applescript` is a pure function tested directly.
+- macOS E2E now asserts the wrapper is a droplet (`on open` in its compiled
+  script), registers the Racket-source document types, and — via a recorder
+  shim — that `open -a DrRacket.app file.rkt` forwards the file to the shim as
+  an argument. The shim→`bin/drracket` launch / #37 crash stays covered by the
+  direct-shim smoke test in the same step.

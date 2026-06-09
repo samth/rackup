@@ -608,12 +608,25 @@ jobs:
           bin/rackup reshim --mac-apps
           echo "Wrappers generated in ~/Applications:"
           ls -d "$APPS"/*.app 2>/dev/null || true
-          # DrRacket must be wrapped: managed marker + executable launcher.
+          # DrRacket must be wrapped: managed marker + droplet applet.
           test -d "$APPS/DrRacket.app" || { echo "DrRacket.app wrapper missing" >&2; exit 1; }
           test -f "$APPS/DrRacket.app/Contents/Resources/.rackup-managed" \
             || { echo "DrRacket.app missing rackup-managed marker" >&2; exit 1; }
-          test -x "$APPS/DrRacket.app/Contents/MacOS/DrRacket" \
-            || { echo "DrRacket.app launcher not executable" >&2; exit 1; }
+          # The wrapper is an AppleScript droplet: its executable (the
+          # osacompile stub, named `droplet` or `applet` depending on the OS)
+          # must be present and runnable, and its compiled script must have an
+          # `on open` handler (the drag-and-drop / double-click entry point).
+          DRR_EXE="$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" \
+            "$APPS/DrRacket.app/Contents/Info.plist" 2>/dev/null)"
+          test -n "$DRR_EXE" && test -x "$APPS/DrRacket.app/Contents/MacOS/$DRR_EXE" \
+            || { echo "DrRacket.app executable ('$DRR_EXE') missing or not runnable" >&2; exit 1; }
+          osadecompile "$APPS/DrRacket.app/Contents/Resources/Scripts/main.scpt" 2>/dev/null \
+            | grep -q "on open" \
+            || { echo "DrRacket.app is not a droplet (no 'on open' handler)" >&2; exit 1; }
+          # The bundle must carry a valid (ad-hoc) signature after our edits,
+          # or aarch64 macOS refuses to launch it.
+          codesign --verify --deep "$APPS/DrRacket.app" 2>/dev/null \
+            || { echo "DrRacket.app signature is invalid after generation" >&2; exit 1; }
           # Every shipped GUI .app that has a bin launcher must get a wrapper.
           # Mirror mac-apps.rkt's launcher resolution: lowercase the app name,
           # also trying space->'-' and space-stripped forms (e.g. "PLT Games"
@@ -636,28 +649,82 @@ jobs:
               echo "  (no bin launcher for $name; not wrapped)"
             fi
           done
-          # Icon: the real DrRacket.app ships an .icns; confirm our wrapper
-          # actually copied one in and references it in Info.plist, so Finder
-          # and the Dock render it (this is the part not verifiable on Linux).
-          ls "$APPS/DrRacket.app/Contents/Resources/"*.icns >/dev/null 2>&1 \
-            || { echo "DrRacket.app wrapper has no .icns (icon not copied from source bundle)" >&2; exit 1; }
-          grep -q "CFBundleIconFile" "$APPS/DrRacket.app/Contents/Info.plist" \
+          # Icons: the real DrRacket.app ships an app .icns plus document-type
+          # icons (doc/pltdoc); the wrapper must copy in *all* of them (so the
+          # mirrored document types render) and reference the app icon. So it
+          # carries more than one .icns. (Not verifiable on Linux.)
+          DRR_ICNS=$(ls "$APPS/DrRacket.app/Contents/Resources/"*.icns 2>/dev/null | wc -l | tr -d ' ')
+          [ "$DRR_ICNS" -ge 2 ] \
+            || { echo "DrRacket.app expected app icon + mirrored document icons, found $DRR_ICNS .icns" >&2; exit 1; }
+          /usr/libexec/PlistBuddy -c "Print :CFBundleIconFile" \
+            "$APPS/DrRacket.app/Contents/Info.plist" >/dev/null 2>&1 \
             || { echo "DrRacket.app Info.plist does not reference an icon" >&2; exit 1; }
-          echo "DrRacket.app wrapper icon copied and referenced in Info.plist"
-          # Launch DrRacket THROUGH THE WRAPPER (not just the shim) to confirm
-          # the wrapper -> shim -> bin/drracket path avoids the #37 crash.
-          "$APPS/DrRacket.app/Contents/MacOS/DrRacket" &
-          DRW_PID=$!
-          sleep 10
-          if kill -0 "$DRW_PID" 2>/dev/null; then
-            echo "DrRacket launched via ~/Applications wrapper"
-            kill "$DRW_PID" || true
-            wait "$DRW_PID" 2>/dev/null || true
-          else
-            wait "$DRW_PID" 2>/dev/null
-            echo "DrRacket wrapper launch crashed or exited early" >&2
-            exit 1
+          echo "DrRacket.app app + document icons copied and referenced ($DRR_ICNS .icns)"
+          # Identity: the wrapper carries its own bundle id, distinct from the
+          # real DrRacket.app (org.racket-lang.drracket) so the two don't clash.
+          DRR_ID="$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" \
+            "$APPS/DrRacket.app/Contents/Info.plist" 2>/dev/null)"
+          [ "$DRR_ID" = "org.racket-lang.rackup.drracket" ] \
+            || { echo "DrRacket.app has unexpected bundle id '$DRR_ID'" >&2; exit 1; }
+          # Double-click parity: the wrapper must register, as Editor, for the
+          # same file types the real DrRacket.app does (.rkt/.scrbl/...),
+          # mirrored out of the shipped bundle's CFBundleDocumentTypes.
+          /usr/libexec/PlistBuddy -c "Print :CFBundleDocumentTypes" \
+            "$APPS/DrRacket.app/Contents/Info.plist" > /tmp/drr-doctypes.txt 2>/dev/null \
+            || { echo "DrRacket.app declares no document types (double-click parity missing)" >&2; exit 1; }
+          grep -qi "rkt" /tmp/drr-doctypes.txt \
+            || { echo "DrRacket.app document types do not include .rkt" >&2; cat /tmp/drr-doctypes.txt; exit 1; }
+          grep -qi "Editor" /tmp/drr-doctypes.txt \
+            || { echo "DrRacket.app does not register as an Editor for its types" >&2; cat /tmp/drr-doctypes.txt; exit 1; }
+          echo "DrRacket.app registers Racket source document types as Editor"
+          # Forwarding: launching/opening through a wrapper must run the shim.
+          # Point shims at a recorder so we can assert without a GUI. (The shim
+          # -> DrRacket launch, including the #37 crash path, is covered by the
+          # direct-shim smoke test above.)
+          make_recorder() {  # $1 = shim path, $2 = log file
+            rm -f "$1"
+            printf '#!/bin/sh\necho INVOKED >> %s\nfor a in "$@"; do printf "ARG:%%s\\n" "$a" >> %s; done\n' "$2" "$2" > "$1"
+            chmod +x "$1"
+          }
+          wait_for() {  # $1 = log file, $2 = pattern (grep -F)
+            for _ in $(seq 1 20); do grep -Fq "$2" "$1" 2>/dev/null && return 0; sleep 1; done
+            return 1
+          }
+          PROBE="$HOME/drop probe.rkt"   # the space exercises path quoting
+          echo '#lang racket/base' > "$PROBE"
+          # (a) on open: a dropped / double-clicked document reaches the shim as
+          #     an argument.
+          OPEN_LOG="$(mktemp)"; make_recorder "$RACKUP_HOME/shims/drracket" "$OPEN_LOG"
+          open -a "$APPS/DrRacket.app" "$PROBE"
+          wait_for "$OPEN_LOG" "drop probe.rkt" || true
+          grep -F "drop probe.rkt" "$OPEN_LOG" 2>/dev/null | grep -q "^ARG:" \
+            || { echo "opened document was not forwarded to the shim" >&2; echo "log:"; cat "$OPEN_LOG"; exit 1; }
+          echo "drag-and-drop: opened document forwarded to the shim as an argument"
+          # (b) on run: a plain launch (double-clicking the app icon, no
+          #     document) runs the shim with no file argument.
+          RUN_LOG="$(mktemp)"; make_recorder "$RACKUP_HOME/shims/drracket" "$RUN_LOG"
+          open "$APPS/DrRacket.app"
+          wait_for "$RUN_LOG" "INVOKED" \
+            || { echo "plain launch did not invoke the shim" >&2; exit 1; }
+          ! grep -q "^ARG:" "$RUN_LOG" \
+            || { echo "plain launch unexpectedly passed a file argument" >&2; cat "$RUN_LOG"; exit 1; }
+          echo "plain launch: shim invoked with no document"
+          # (c) an app that declares no document types (Slideshow) still gets a
+          #     droplet that forwards opened files — the mirror is skipped, not
+          #     the drop handling.
+          if [ -d "$APPS/Slideshow.app" ]; then
+            osadecompile "$APPS/Slideshow.app/Contents/Resources/Scripts/main.scpt" 2>/dev/null \
+              | grep -q "on open" \
+              || { echo "Slideshow.app is not a droplet" >&2; exit 1; }
+            SS_LOG="$(mktemp)"; make_recorder "$RACKUP_HOME/shims/slideshow" "$SS_LOG"
+            open -a "$APPS/Slideshow.app" "$PROBE"
+            wait_for "$SS_LOG" "drop probe.rkt" || true
+            grep -F "drop probe.rkt" "$SS_LOG" 2>/dev/null | grep -q "^ARG:" \
+              || { echo "Slideshow (no declared types) did not forward an opened file" >&2; cat "$SS_LOG"; exit 1; }
+            echo "no-declared-types wrapper still forwards opens (Slideshow)"
           fi
+          rm -f "$PROBE"
+          bin/rackup reshim >/dev/null   # restore the real shims
           # Removing deletes our wrappers.
           bin/rackup reshim --remove-mac-apps
           test ! -e "$APPS/DrRacket.app" \

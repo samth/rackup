@@ -16,14 +16,25 @@
 ;; wrapper for each one that has a corresponding `bin/` launcher (shim).  So
 ;; whatever GUI apps a given Racket distribution ships are handled.
 ;;
-;; Each wrapper's `Contents/MacOS/<Name>` is a shell script that execs the
-;; matching rackup shim (e.g. `~/.rackup/shims/drracket`).  Routing through
-;; the shim means the app always launches the *default* toolchain's tool,
-;; with the toolchain's environment set up, and — crucially — through the
-;; shim's `cd -P` bin-symlink resolution (issue #37), which a GUI Racket
-;; binary requires on aarch64 macOS to avoid an `invalid memory reference`
-;; crash in `cocoa/queue.rkt`.  A wrapper that pointed at a symlinked path
-;; directly would reintroduce that crash.
+;; Each wrapper is an AppleScript *droplet* built with `osacompile`.  Its
+;; `on open` handler turns files dropped on the Dock/Finder icon (or
+;; double-clicked) into a command line and runs the matching rackup shim
+;; (e.g. `~/.rackup/shims/drracket file.rkt`); `on run` (a plain launch)
+;; runs the shim with no file.  Routing through the shim means the app
+;; always launches the *default* toolchain's tool, with the toolchain's
+;; environment set up, and — crucially — through the shim's `cd -P`
+;; bin-symlink resolution (issue #37), which a GUI Racket binary requires on
+;; aarch64 macOS to avoid an `invalid memory reference` crash in
+;; `cocoa/queue.rkt`.  A wrapper that pointed at a symlinked path directly
+;; would reintroduce that crash.
+;;
+;; For double-click parity with the real DMG install, we mirror the source
+;; bundle's `CFBundleDocumentTypes` into the wrapper (copied straight out of
+;; the shipped `.app`), so e.g. DrRacket's wrapper registers as the editor
+;; for `.rkt`/`.scrbl`/etc. just as the real `DrRacket.app` does.  Apps that
+;; declare no document types (Slideshow, PLT Games) keep `osacompile`'s
+;; default accept-any-file droplet behavior, so they still work as plain
+;; drop targets.
 ;;
 ;; Wrappers carry a marker file (`Contents/Resources/.rackup-managed`) so we
 ;; only ever overwrite or delete bundles we created — a user's own
@@ -34,8 +45,10 @@
          racket/path
          racket/set
          racket/string
+         racket/system
          "error.rkt"
          "paths.rkt"
+         "process.rkt"
          "rktd-io.rkt"
          "state.rkt"
          "state-lock.rkt"
@@ -51,14 +64,15 @@
   (provide (struct-out gui-app)
            current-mac-apps-os?
            current-user-applications-dir
+           current-build-bundle!
            find-gui-apps
            resolve-launcher
            managed-app-dirs
+           droplet-applescript
            write-mac-app!
-           rackup-managed-app?
-           info-plist))
+           rackup-managed-app?))
 
-(struct gui-app (display launcher icon) #:transparent)
+(struct gui-app (display launcher icon src) #:transparent)
 
 (define mac-apps-flag "mac-apps")
 (define managed-marker ".rackup-managed")
@@ -140,7 +154,42 @@
        (if (or (set-member? seen display) (not launcher))
            (loop (cdr apps) seen acc)
            (loop (cdr apps) (set-add seen display)
-                 (cons (gui-app display launcher (find-icns app display)) acc)))])))
+                 (cons (gui-app display launcher (find-icns app display) app) acc)))])))
+
+;; ---- droplet AppleScript --------------------------------------------
+
+(define (applescript-escape s)
+  (apply string-append
+         (for/list ([c (in-string s)])
+           (cond
+             [(char=? c #\\) "\\\\"]
+             [(char=? c #\") "\\\""]
+             [else (string c)]))))
+
+;; AppleScript source for a droplet that forwards dropped/opened files to
+;; `shim-path`.  `on open` fires for documents dropped on the icon or
+;; double-clicked; `on run` is a plain launch.  Each file becomes a
+;; shell-quoted argument, so DrRacket et al. open them just as on the
+;; command line.  The shell command is backgrounded and detached so the
+;; applet returns immediately while the GUI tool keeps running.
+(define (droplet-applescript shim-path)
+  (define lit (applescript-escape shim-path))
+  (string-append
+   "on run\n"
+   "\tmy launchItems({})\n"
+   "end run\n"
+   "\n"
+   "on open theItems\n"
+   "\tmy launchItems(theItems)\n"
+   "end open\n"
+   "\n"
+   "on launchItems(theItems)\n"
+   "\tset shimCmd to quoted form of \"" lit "\"\n"
+   "\trepeat with anItem in theItems\n"
+   "\t\tset shimCmd to shimCmd & \" \" & quoted form of POSIX path of anItem\n"
+   "\tend repeat\n"
+   "\tdo shell script shimCmd & \" > /dev/null 2>&1 &\"\n"
+   "end launchItems\n"))
 
 ;; ---- bundle writing -------------------------------------------------
 
@@ -150,39 +199,112 @@
 (define (rackup-managed-app? app-dir)
   (file-exists? (build-path app-dir "Contents" "Resources" managed-marker)))
 
-(define (xml-escape s)
-  (regexp-replace* #rx"<" (regexp-replace* #rx"&" s "\\&amp;") "\\&lt;"))
+;; Generation-time macOS tools.  Only invoked through `real-build-bundle!`,
+;; which the OS gate keeps off non-macOS hosts (and tests stub out).
+(define (osacompile-path) (find-executable-path/default "osacompile" "/usr/bin/osacompile"))
+(define (plutil-path) (find-executable-path/default "plutil" "/usr/bin/plutil"))
+(define (codesign-path) (find-executable-path/default "codesign" "/usr/bin/codesign"))
+(define plistbuddy-path (string->path "/usr/libexec/PlistBuddy"))
 
-(define (plist-string key value)
-  (format "  <key>~a</key>\n  <string>~a</string>\n"
-          (xml-escape key) (xml-escape value)))
+;; osacompile ad-hoc signs the droplet stub; editing the Info.plist and
+;; resources afterward breaks that seal, which aarch64 macOS rejects at
+;; launch.  Re-sign ad-hoc as the final step.  Best-effort: a signing
+;; failure must not abort reshim.
+(define (codesign-adhoc! app-dir)
+  (system* (codesign-path) "--force" "--sign" "-" (path->string app-dir)))
 
-(define (info-plist display launcher icon?)
-  (string-append
-   "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-   "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\""
-   " \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n"
-   "<plist version=\"1.0\">\n<dict>\n"
-   (plist-string "CFBundleName" display)
-   (plist-string "CFBundleDisplayName" display)
-   (plist-string "CFBundleExecutable" display)
-   (plist-string "CFBundleIdentifier" (string-append "org.racket-lang.rackup." launcher))
-   (plist-string "CFBundlePackageType" "APPL")
-   (plist-string "CFBundleInfoDictionaryVersion" "6.0")
-   (plist-string "CFBundleShortVersionString" "1.0")
-   (plist-string "CFBundleVersion" "1.0")
-   (if icon? (plist-string "CFBundleIconFile" display) "")
-   "  <key>NSHighResolutionCapable</key>\n  <true/>\n"
-   "</dict>\n</plist>\n"))
+(define (plist-file app-dir) (build-path app-dir "Contents" "Info.plist"))
 
-(define (launcher-script shim-path)
-  (string-append "#!/bin/sh\n"
-                 "exec " (sh-single-quote shim-path) " \"$@\"\n"))
+;; Set a string key, creating it if `osacompile`'s default plist lacks it.
+(define (plist-set-string! plist key value)
+  (define p (path->string plist))
+  (or (system* plistbuddy-path "-c" (format "Set :~a ~a" key value) p)
+      (system* plistbuddy-path "-c" (format "Add :~a string ~a" key value) p)))
+
+(define (compile-droplet! app-dir shim-path)
+  (define tmp (make-temporary-file "rackup-droplet-~a.applescript"))
+  (dynamic-wind
+   void
+   (lambda ()
+     (write-string-file tmp (droplet-applescript shim-path))
+     (system*/check "osacompile"
+                    (osacompile-path) "-o" (path->string app-dir) (path->string tmp)))
+   (lambda () (delete-file tmp))))
+
+;; Copy every `.icns` from `src-res` into `dst-res` (document-type icons the
+;; mirrored `CFBundleDocumentTypes` reference, e.g. DrRacket's doc/pltdoc).
+(define (copy-icns! src-res dst-res)
+  (when (directory-exists? src-res)
+    (make-directory* dst-res)
+    (for ([p (in-list (directory-list src-res #:build? #t))]
+          #:when (equal? (path-get-extension p) #".icns"))
+      (copy-file p (build-path dst-res (file-name-from-path p)) #t))))
+
+;; Mirror the source bundle's `CFBundleDocumentTypes` into the wrapper so it
+;; registers for exactly the file types the real app does (double-click
+;; parity).  Replaces `osacompile`'s accept-all droplet types.  A bundle
+;; that declares none keeps the accept-all default, so it still takes drops.
+(define (mirror-document-types! app-dir src-app)
+  (define src-plist (build-path src-app "Contents" "Info.plist"))
+  (define wrap-plist (path->string (plist-file app-dir)))
+  (when (file-exists? src-plist)
+    (define tmp (make-temporary-file "rackup-doctypes-~a.plist"))
+    (dynamic-wind
+     void
+     (lambda ()
+       (when (and (system* (plutil-path) "-extract" "CFBundleDocumentTypes" "xml1"
+                           "-o" (path->string tmp) (path->string src-plist))
+                  (file-exists? tmp)
+                  (> (file-size tmp) 0))
+         ;; Drop osacompile's accept-all entry, then graft the source's.
+         (system* plistbuddy-path "-c" "Delete :CFBundleDocumentTypes" wrap-plist)
+         (system*/check "PlistBuddy add CFBundleDocumentTypes"
+                        plistbuddy-path "-c" "Add :CFBundleDocumentTypes array" wrap-plist)
+         (system*/check "PlistBuddy merge CFBundleDocumentTypes"
+                        plistbuddy-path
+                        "-c" (format "Merge ~a :CFBundleDocumentTypes" (path->string tmp))
+                        wrap-plist)
+         (copy-icns! (build-path src-app "Contents" "Resources")
+                     (build-path app-dir "Contents" "Resources"))))
+     (lambda () (delete-file tmp)))))
+
+;; Write the rackup-managed marker into a bundle's Resources.  This is what
+;; `rackup-managed-app?` keys on, so it must land before the bundle is
+;; sealed (any later change would invalidate the signature).
+(define (write-managed-marker! app-dir launcher)
+  (define resources (build-path app-dir "Contents" "Resources"))
+  (make-directory* resources)
+  (write-string-file (build-path resources managed-marker)
+                     (string-append "rackup-managed:" launcher)))
+
+;; The real (macOS) bundle builder: compile the droplet, patch its
+;; identity/icon, mirror document types, drop the marker, and re-sign.
+;; Tests swap this out.
+(define (real-build-bundle! app-dir display launcher shim-path icon-src src-app)
+  (compile-droplet! app-dir shim-path)
+  (define plist (plist-file app-dir))
+  (plist-set-string! plist "CFBundleName" display)
+  (plist-set-string! plist "CFBundleDisplayName" display)
+  (plist-set-string! plist "CFBundleIdentifier"
+                     (string-append "org.racket-lang.rackup." launcher))
+  (when (and icon-src (file-exists? icon-src))
+    (define res (build-path app-dir "Contents" "Resources"))
+    (make-directory* res)
+    (copy-file icon-src (build-path res (string-append display ".icns")) #t)
+    (plist-set-string! plist "CFBundleIconFile" display))
+  (when src-app (mirror-document-types! app-dir src-app))
+  (write-managed-marker! app-dir launcher)
+  (codesign-adhoc! app-dir))
+
+;; Seam: the procedure that materializes a bundle at `app-dir`.  Default
+;; runs osacompile + plist tools (macOS only); tests parameterize it.
+(define current-build-bundle! (make-parameter real-build-bundle!))
 
 ;; Write (or refresh) a wrapper bundle at <apps-dir>/<display>.app that execs
 ;; `shim-path`.  Refuses to touch a bundle that is not rackup-managed.
 ;; Returns the bundle path on success, #f if skipped.
-(define (write-mac-app! apps-dir display launcher shim-path #:icon-src [icon-src #f])
+(define (write-mac-app! apps-dir display launcher shim-path
+                        #:icon-src [icon-src #f] #:src-app [src-app #f])
   (define app-dir (app-bundle-dir apps-dir display))
   (cond
     [(and (path-exists? app-dir) (not (rackup-managed-app? app-dir)))
@@ -190,25 +312,11 @@
               (path->string app-dir))
      #f]
     [else
-     (define contents (build-path app-dir "Contents"))
-     (define macos (build-path contents "MacOS"))
-     (define resources (build-path contents "Resources"))
-     (make-directory* macos)
-     (make-directory* resources)
-     (define icon?
-       (and icon-src (file-exists? icon-src)
-            (begin (copy-file icon-src
-                              (build-path resources (string-append display ".icns"))
-                              #t)
-                   #t)))
-     (write-string-file (build-path contents "Info.plist")
-                        (info-plist display launcher icon?))
-     (write-string-file (build-path contents "PkgInfo") "APPL????")
-     (define exe (build-path macos display))
-     (write-string-file exe (launcher-script shim-path))
-     (file-or-directory-permissions exe #o755)
-     (write-string-file (build-path resources managed-marker)
-                        (string-append "rackup-managed:" launcher))
+     ;; Build fresh so osacompile never merges into a stale bundle.  The
+     ;; builder writes the managed marker (so it is sealed into the signed
+     ;; bundle) and re-signs.
+     (delete-directory/files app-dir #:must-exist? #f)
+     ((current-build-bundle!) app-dir display launcher shim-path icon-src src-app)
      app-dir]))
 
 ;; ---- regenerate / remove --------------------------------------------
@@ -237,7 +345,8 @@
        (for ([a (in-list apps)])
          (write-mac-app! apps-dir (gui-app-display a) (gui-app-launcher a)
                          (path->string (build-path shims-dir (gui-app-launcher a)))
-                         #:icon-src (gui-app-icon a)))
+                         #:icon-src (gui-app-icon a)
+                         #:src-app (gui-app-src a)))
        (define desired
          (list->set (for/list ([a (in-list apps)])
                       (string-append (gui-app-display a) ".app"))))
