@@ -25,7 +25,9 @@
          shim-aliases-installed?
          install-shim-aliases!
          remove-shim-aliases!
-         reprobe-local-toolchain)
+         reprobe-local-toolchain
+         write-toolchain-env-file!
+         sync-toolchain-env-file!)
 
 (define bootstrap-shim-names
   '("racket" "raco"))
@@ -350,7 +352,7 @@ EOF
 (define/state-locked (remove-shim-aliases!)
   (clear-config-flag! "short-aliases"))
 
-(define (write-env-file! id env-vars)
+(define (write-toolchain-env-file! id env-vars)
   (define p (rackup-toolchain-env-file id))
   (define body
     (string-append "#!/usr/bin/env bash\n"
@@ -360,16 +362,18 @@ EOF
                             (env-var-export-line (car kv) (cdr kv))))))
   (define existing
     (and (file-exists? p)
-         (with-handlers ([exn:fail? (lambda (_) #f)])
+         (try-or #f
            (file->string p))))
   (unless (equal? existing body)
     (write-string-file p body)
     (file-or-directory-permissions p #o644)))
 
-(define (delete-env-file! id)
-  (define p (rackup-toolchain-env-file id))
-  (when (file-exists? p)
-    (delete-file p)))
+;; Write env.sh when there are env vars to record, delete it otherwise
+;; (an empty env file is never left behind).
+(define (sync-toolchain-env-file! id env-vars)
+  (if (pair? env-vars)
+      (write-toolchain-env-file! id env-vars)
+      (delete-path! (rackup-toolchain-env-file id))))
 
 ;; Re-probe a linked toolchain's racket binary.  Returns (values
 ;; version variant addon-dir), all #f if the binary is missing or
@@ -409,10 +413,6 @@ EOF
   (define addon-dir
     (or probed-addon
         (lookup-env-var (hash-ref meta 'env-vars '()) "PLTADDONDIR")))
-  (define addon-entry
-    (if (and (string? addon-dir) (not (string-blank? addon-dir)))
-        (list (cons "PLTADDONDIR" addon-dir))
-        null))
   (define existing-roots
     (if real-bin-dir-str
         (read-toolchain-compiled-file-roots (string->path real-bin-dir-str))
@@ -420,13 +420,7 @@ EOF
   (define local-name
     (and (eq? (hash-ref meta 'kind #f) 'local)
          (hash-ref meta 'requested-spec #f)))
-  (define compiled-roots-entry
-    (cond
-      [(compiled-roots-value version variant existing-roots local-name)
-       =>
-       (lambda (v) (list (cons "PLTCOMPILEDROOTS" v)))]
-      [else null]))
-  (values (append addon-entry compiled-roots-entry)
+  (values (toolchain-env-var-entries addon-dir version variant existing-roots local-name)
           version
           variant))
 
@@ -445,11 +439,9 @@ EOF
     (define new-env-vars
       (append current (list (cons "PLTCOMPILEDROOTS" computed-pcr))))
     (define new-meta
-      (hash-set meta 'env-vars
-                (for/list ([kv (in-list new-env-vars)])
-                  (list (car kv) (cdr kv)))))
+      (hash-set meta 'env-vars (env-vars->meta new-env-vars)))
     (write-toolchain-meta! id new-meta)
-    (write-env-file! id new-env-vars)))
+    (write-toolchain-env-file! id new-env-vars)))
 
 (define (regenerate-env-files!)
   (for ([id (in-list (installed-toolchain-ids))])
@@ -464,9 +456,7 @@ EOF
            (compute-local-env-vars meta))
          (define updates
            (filter values
-                   (list (cons 'env-vars
-                               (for/list ([kv (in-list env-vars)])
-                                 (list (car kv) (cdr kv))))
+                   (list (cons 'env-vars (env-vars->meta env-vars))
                          (and new-version (cons 'resolved-version new-version))
                          (and new-variant (cons 'variant new-variant)))))
          (define new-meta
@@ -474,9 +464,7 @@ EOF
              (hash-set m (car u) (cdr u))))
          (unless (equal? new-meta meta)
            (write-toolchain-meta! id new-meta))
-         (if (pair? env-vars)
-             (write-env-file! id env-vars)
-             (delete-env-file! id))]
+         (sync-toolchain-env-file! id env-vars)]
         [else
          (backfill-installed-env-vars! id meta)]))))
 

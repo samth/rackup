@@ -14,11 +14,13 @@
          system*/check
          find-executable-path/default
          shell-exe
+         call-with-env-overlay
          capture-program-output
+         run-quiet-program
          probe-local-racket-version+variant+addon-dir)
 
 (define (executable-file? p)
-  (with-handlers ([exn:fail? (lambda (_) #f)])
+  (try-or #f
     (and (member 'execute (file-or-directory-permissions p)) #t)))
 
 (define (system*/check who . args)
@@ -38,23 +40,42 @@
            v
            (string->bytes/utf-8 (format "~a" v)))))
 
-(define (capture-program-output #:env [env-vars null] exe . args)
+;; Call `thunk` with `env-vars` (an alist; values may be strings,
+;; bytes, or #f to unset) overlaid on a copy of the current
+;; environment, so subprocesses see the overlay but nothing leaks into
+;; the calling process.
+(define (call-with-env-overlay env-vars thunk)
   (define env (environment-variables-copy (current-environment-variables)))
   (for ([kv (in-list env-vars)])
     (environment-variables-set! env
                                 (string->bytes/utf-8 (format "~a" (car kv)))
                                 (->env-bytes (cdr kv))))
-  (define out (open-output-string))
+  (parameterize ([current-environment-variables env])
+    (thunk)))
+
+(define (capture-program-output #:env [env-vars null] exe . args)
+  (call-with-env-overlay
+   env-vars
+   (lambda ()
+     (define out (open-output-string))
+     (parameterize ([current-output-port out]
+                    [current-error-port (open-output-string)])
+       (and (apply system* exe args)
+            (string-trim (get-output-string out)))))))
+
+;; Run a program discarding stdout; returns (values ok? stderr-text)
+;; so the caller can report errors only on failure.
+(define (run-quiet-program exe . args)
   (define err (open-output-string))
-  (parameterize ([current-environment-variables env]
-                 [current-output-port out]
-                 [current-error-port err])
-    (and (apply system* exe args)
-         (string-trim (get-output-string out)))))
+  (define ok?
+    (parameterize ([current-output-port (open-output-nowhere)]
+                   [current-error-port err])
+      (apply system* exe args)))
+  (values ok? (string-trim (get-output-string err))))
 
 (define (string->value s)
   (and (string? s) (not (equal? s ""))
-       (with-handlers ([exn:fail? (lambda (_) #f)])
+       (try-or #f
          (read (open-input-string s)))))
 
 ;; Probe a local Racket binary for its version, variant ("cs"|"bc"), and

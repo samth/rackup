@@ -2,6 +2,7 @@
 
 (require racket/cmdline
          racket/file
+         racket/format
          racket/list
          racket/match
          racket/path
@@ -29,6 +30,7 @@
          "checksum.rkt"
          "env.rkt"
          "error.rkt"
+         "fs.rkt"
          "process.rkt"
          "security.rkt"
          "text.rkt"
@@ -52,7 +54,7 @@
 (define-runtime-path rackup-repo-anchor "../../.gitignore")
 
 (define (usage-line cmd desc)
-  (printf "  ~a~a~a\n" cmd (make-string (max 2 (- 22 (string-length cmd))) #\space) desc))
+  (printf "  ~a  ~a\n" (~a cmd #:min-width 20) desc))
 
 (define version-help
   (string-append
@@ -121,7 +123,7 @@
 ;; If spec is a meta-name like "stable", try resolving it to an actual
 ;; version number and look up locally.  Returns the ID or #f.
 (define (try-resolve-meta-spec spec)
-  (with-handlers ([exn:fail? (lambda (_) #f)])
+  (try-or #f
     (define spec* (parse-install-spec spec))
     (match (hash-ref spec* 'kind)
       ['stable
@@ -137,7 +139,7 @@
   id)
 
 (define (toolchain-dir-ids/safe)
-  (with-handlers ([exn:fail? (lambda (_) null)])
+  (try-or null
     (if (directory-exists? (rackup-toolchains-dir))
         (sort (for/list ([p (in-list (directory-list (rackup-toolchains-dir) #:build? #t))]
                          #:when (or (directory-exists? p) (link-exists? p)))
@@ -168,21 +170,14 @@
 (define (remove-orphan-toolchain! id)
   (define tc-dir (rackup-toolchain-dir id))
   (define addon (rackup-addon-dir id))
-  (unless (or (link-exists? tc-dir) (directory-exists? tc-dir))
+  (unless (dir-or-link-exists? tc-dir)
     (rackup-error "orphan toolchain directory not found: ~a" id))
   (delete-toolchain-dir! tc-dir)
   (when (directory-exists? addon)
     (delete-directory/files addon))
-  (with-handlers ([exn:fail? (lambda (_) (void))])
+  (try-or (void)
     (with-state-lock (reshim!)))
   (displayln (format "Removed orphan/partial toolchain directory ~a" id)))
-
-(define (yes?/default-yes s)
-  (define a
-    (if (string? s)
-        (string-downcase (string-trim s))
-        "__no__"))
-  (or (string=? a "") (member a '("y" "yes"))))
 
 ;; Open the controlling terminal for interactive prompts.  A parameter
 ;; so tests can substitute string ports.
@@ -221,7 +216,7 @@
           (fprintf out "Toolchain '~a' is not installed. Install it now? [Y/n] " spec)
           (flush-output out)
           (read-line in))))
-     (unless (yes?/default-yes answer)
+     (unless (yes-answer? answer #:empty-means-yes? #t)
        (rackup-error "toolchain not installed: ~a" spec))
      (install-toolchain! spec '())]))
 
@@ -451,16 +446,9 @@
   (printf "Initialized shell integration in ~a\n" (path->string rc)))
 
 (define (split-on-double-dash xs)
-  (let loop ([left null]
-             [rest xs])
-    (cond
-      [(null? rest) (values (reverse left) null)]
-      [(equal? (car rest) "--") (values (reverse left) (cdr rest))]
-      [else (loop (cons (car rest) left) (cdr rest))])))
-
-(define (toolchain-runtime-env-vars id)
-  (append (toolchain-env-vars id)
-          (list (cons "PLTADDONDIR" (path->string (rackup-addon-dir id))))))
+  (define-values (head tail)
+    (splitf-at xs (lambda (x) (not (equal? x "--")))))
+  (values head (if (pair? tail) (cdr tail) null)))
 
 (define (cmd-run rest)
   (ensure-index!)
@@ -478,7 +466,7 @@
      (define env (environment-variables-copy (current-environment-variables)))
      (restore-saved-racket-env-vars! env)
      (environment-variables-set! env #"RACKUP_TOOLCHAIN" (string->bytes/utf-8 id))
-     (for ([kv (in-list (toolchain-runtime-env-vars id))])
+     (for ([kv (in-list (toolchain-runtime-env id))])
        (define key (string->bytes/utf-8 (car kv)))
        ;; For PLTCOMPILEDROOTS, respect a user-set value restored above.
        (unless (and (equal? (car kv) "PLTCOMPILEDROOTS")
@@ -832,7 +820,7 @@
   yes?)
 
 (define (installed-toolchain-metas/safe)
-  (with-handlers ([exn:fail? (lambda (_) null)])
+  (try-or null
     (filter hash?
             (for/list ([id (in-list (installed-toolchain-ids))])
               (read-toolchain-meta id)))))
@@ -847,7 +835,7 @@
 (define (warn-uninstall-summary home-path)
   (define home-str (path->string home-path))
   (define ids
-    (with-handlers ([exn:fail? (lambda (_) null)])
+    (try-or null
       (installed-toolchain-ids)))
   (define linked-paths (linked-source-paths/safe))
   (eprintf "WARNING: `rackup uninstall` is destructive.\n")
@@ -998,7 +986,7 @@
   (define repo (hash-ref opts 'repo #f))
   (define custom-source? (or ref repo))
   (define source (self-upgrade-script-source #:ref ref #:repo repo))
-(define (parse-sha256-sidecar text)
+  (define (parse-sha256-sidecar text)
     (for/or ([line (in-list (string-split (string-downcase text) "\n"))])
       (match (regexp-match #px"^([0-9a-f]{64})\\b" (string-trim line))
         [(list _ sha) sha]
@@ -1045,13 +1033,12 @@
             (if ref (list "--ref" ref) null)
             (if repo (list "--repo" repo) null)
             (list "--prefix" home-str)))
-  (define env (environment-variables-copy (current-environment-variables)))
-  (environment-variables-set! env #"RACKUP_BOOTSTRAP_MODE" #"self-upgrade")
   (define ok?
-    (parameterize ([current-environment-variables env])
-      (apply system* (shell-exe) script-path args)))
+    (call-with-env-overlay
+     '(("RACKUP_BOOTSTRAP_MODE" . "self-upgrade"))
+     (lambda () (apply system* (shell-exe) script-path args))))
   (when (and (url-like? source) (file-exists? script-path))
-    (with-handlers ([exn:fail? (lambda (_) (void))])
+    (try-or (void)
       (delete-file script-path)))
   (unless ok?
     (rackup-error "self-upgrade failed"))
@@ -1082,7 +1069,7 @@
      (displayln baked-version)]
     [else
      (define (git-output . args)
-       (with-handlers ([exn:fail? (lambda (_) #f)])
+       (try-or #f
          (define out (open-output-string))
          (define git (find-executable-path "git"))
          (and git

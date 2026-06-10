@@ -63,7 +63,7 @@
     [else
      (parameterize ([current-output-port (open-output-string)]
                     [current-error-port (open-output-string)])
-       (with-handlers ([exn:fail? (lambda (_) #f)])
+       (try-or #f
          (system*-proc git "-C" (~a path) "rev-parse" "--is-inside-work-tree")))]))
 
 (define (run-git-pull! source-root system*-proc displayln-proc)

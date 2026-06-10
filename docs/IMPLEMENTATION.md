@@ -139,7 +139,7 @@ At toolchain install or link time, `compiled-roots-value` in `state.rkt` constru
 
 The `'same` symbol in `current-compiled-file-roots` cannot be spelled directly in PLTCOMPILEDROOTS because `path-list-string->path-list` converts all entries to path objects. However, `.` is a relative path that `(build-path dir ".")` resolves to `dir` itself, which is functionally equivalent.
 
-For linked toolchains where version or variant cannot be probed, PLTCOMPILEDROOTS is omitted. The value flows through the existing `env-vars` metadata pipeline: `write-env-file!`/`write-toolchain-env-file!` emits an unconditional export in env.sh, and `cmd-run` in `main.rkt` preserves a user-restored value before overlaying toolchain env vars.
+For linked toolchains where version or variant cannot be probed, PLTCOMPILEDROOTS is omitted. The value flows through the existing `env-vars` metadata pipeline: `write-toolchain-env-file!` (in `shims.rkt`) emits an unconditional export in env.sh, and `cmd-run` in `main.rkt` preserves a user-restored value before overlaying toolchain env vars.
 
 ### Migration for existing installs
 

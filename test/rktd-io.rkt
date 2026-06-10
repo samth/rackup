@@ -23,7 +23,8 @@
   (define compiled-payload
     (with-output-to-string
       (lambda ()
-        (write (compile '(+ 1 2))))))
+        (parameterize ([current-namespace (make-base-namespace)])
+          (write (compile '(+ 1 2)))))))
   (check-exn exn:fail? (lambda () (read-rktd/port (open-input-string compiled-payload))))
 
   (define good-rktd (make-temp-file-in-tmp "rackup-rktd-good-~a"))

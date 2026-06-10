@@ -1,4 +1,4 @@
-#lang at-exp racket/base
+#lang racket/base
 
 (require racket/file
          racket/format
@@ -57,15 +57,18 @@
     ["zsh" (write-zsh-completion-script)]))
 
 (define path-prepend
-  @~a{if [ -d "${RACKUP_HOME:-$HOME/.rackup}/shims" ]; then
-        case ":$PATH:" in *":${RACKUP_HOME:-$HOME/.rackup}/shims:"*) ;; *) export PATH="${RACKUP_HOME:-$HOME/.rackup}/shims:$PATH" ;; esac
-      fi@"\n"})
+  (string-append
+   "if [ -d \"${RACKUP_HOME:-$HOME/.rackup}/shims\" ]; then\n"
+   "  case \":$PATH:\" in *\":${RACKUP_HOME:-$HOME/.rackup}/shims:\"*) ;;"
+   " *) export PATH=\"${RACKUP_HOME:-$HOME/.rackup}/shims:$PATH\" ;; esac\n"
+   "fi\n"))
 
 (define (managed-rc-block shell-name)
-  (define shell-script @~a{${RACKUP_HOME:-$HOME/.rackup}/shell/rackup.@|shell-name|})
-  @~a{@|start-marker|
-      [ -f "@|shell-script|" ] && . "@|shell-script|"
-      @|end-marker|@"\n"})
+  (define shell-script
+    (string-append "${RACKUP_HOME:-$HOME/.rackup}/shell/rackup." shell-name))
+  (string-append start-marker "\n"
+                 "[ -f \"" shell-script "\" ] && . \"" shell-script "\"\n"
+                 end-marker "\n"))
 
 (define (emit-shell-activation toolchain-id)
   (unless (toolchain-exists? toolchain-id)
@@ -74,7 +77,8 @@
   ;; (PLTCOMPILEDROOTS, PLTADDONDIR, PLTHOME) are set internally by the
   ;; shim dispatcher via env.sh, scoped to each invocation — not exported
   ;; into the user's shell where they would leak into non-rackup commands.
-  @~a{@|path-prepend|export RACKUP_TOOLCHAIN=@(sh-single-quote toolchain-id)@"\n"})
+  (string-append path-prepend
+                 "export RACKUP_TOOLCHAIN=" (sh-single-quote toolchain-id) "\n"))
 
 (define (deactivation-extra-vars)
   (define active (getenv "RACKUP_TOOLCHAIN"))
@@ -90,10 +94,12 @@
     (apply string-append
            (for/list ([k (in-list (deactivation-extra-vars))])
              (~a "unset " k "\n"))))
-  @~a{@|path-prepend|@|extras|unset RACKUP_TOOLCHAIN
-      unset PLTADDONDIR
-      unset PLTCOMPILEDROOTS
-      unset PLTHOME@"\n"})
+  (string-append path-prepend
+                 extras
+                 "unset RACKUP_TOOLCHAIN\n"
+                 "unset PLTADDONDIR\n"
+                 "unset PLTCOMPILEDROOTS\n"
+                 "unset PLTHOME\n"))
 
 (define (guess-shell)
   (if (regexp-match? #px"/zsh$" (or (getenv "SHELL") "")) "zsh" "bash"))
