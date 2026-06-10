@@ -113,7 +113,8 @@
    (lambda ()
      (delete-directory/files tmp-home #:must-exist? #f))))
 
-(with-temp-rackup-home
+(module+ test
+ (with-temp-rackup-home
  (lambda (_tmp-home)
    (define stdout-str (open-output-string))
    (define stderr-str (open-output-string))
@@ -145,4 +146,4 @@
                  (format "non-shell-code line on switch stdout: ~s" line)))
    ;; The progress messages still reach the user, on stderr.
    (check-true (string-contains? err "Installing")
-               (format "install progress missing from stderr: ~s" err))))
+               (format "install progress missing from stderr: ~s" err)))))

@@ -6,7 +6,7 @@
          "../libexec/rackup/main.rkt")
 
 (module+ test
-  (define output (string-trim (with-output-to-string cmd-version)))
+  (define output (string-trim (with-output-to-string (lambda () (cmd-version '())))))
 
   (check-true (string-prefix? output "rackup "))
   ;; In a git repo, we should get a commit hash

@@ -27,7 +27,7 @@
          "../libexec/rackup/versioning.rkt"
          (only-in (submod "../libexec/rackup/install.rkt" for-testing)
                   discover-bin-dir installed-toolchain-env-vars
-                  write-toolchain-env-file! clean-toolchain-compiled-dirs!)
+                  clean-toolchain-compiled-dirs!)
          (only-in (submod "../libexec/rackup/runtime.rkt" for-testing)
                   hidden-runtime-invocation-prefix)
          (submod "../libexec/rackup/shell.rkt" for-testing))
@@ -82,7 +82,30 @@
       fi
       @|fallthrough|})
 
+;; Write an executable fake script for tests.
+(define (write-fake-exe! path body)
+  (write-string-file path body)
+  (file-or-directory-permissions path #o755))
 
+;; Standard toolchain metadata for tests: a release/cs/full toolchain
+;; for x86_64-linux.  Override or extend via key/value pairs, e.g.
+;; (test-toolchain-meta id #:spec "9.0" #:version "9.0" 'variant 'bc).
+(define (test-toolchain-meta id
+                             #:spec [spec "stable"]
+                             #:version [version "9.1"]
+                             . extras)
+  (apply hash-set*
+         (hash 'id id
+               'kind 'release
+               'requested-spec spec
+               'resolved-version version
+               'variant 'cs
+               'distribution 'full
+               'arch "x86_64"
+               'platform "linux"
+               'executables '("racket")
+               'installed-at "2026-02-26T00:00:00Z")
+         extras))
 
 (module+ test
   (with-temp-rackup-home
@@ -116,23 +139,15 @@
      (define install-root (rackup-toolchain-install-dir id))
      (define real-bin (build-path install-root "bin"))
      (make-directory* real-bin)
-     (write-string-file (build-path real-bin "racket")
-                        "#!/usr/bin/env bash\nexit 23\n")
-     (file-or-directory-permissions (build-path real-bin "racket") #o755)
+     (write-fake-exe! (build-path real-bin "racket")
+                      "#!/usr/bin/env bash\nexit 23\n")
      (make-file-or-directory-link real-bin (rackup-toolchain-bin-link id))
      (with-state-lock
        (register-toolchain!
         id
-        (hash 'id id
-              'kind 'release
-              'requested-spec "stable"
-              'resolved-version "8.18"
-              'variant 'cs
-              'distribution 'full
-              'arch "x86_64"
-              'platform "linux"
-              'executables '("racket")
-              'installed-at "2026-02-28T00:00:00Z"))
+        (test-toolchain-meta id
+                             #:version "8.18"
+                             'installed-at "2026-02-28T00:00:00Z"))
        (set-default-toolchain! id)
        (reshim!))
      (expect/shell (list (path->string (build-path (rackup-shims-dir) "racket")) "--version")
@@ -149,18 +164,16 @@
      (define real-bin (build-path install-root "bin"))
      (make-directory* real-bin)
      ;; Create a script that prints the path it was invoked as ($0)
-     (write-string-file (build-path real-bin "racket")
-                        "#!/usr/bin/env bash\necho \"$0\"\n")
-     (file-or-directory-permissions (build-path real-bin "racket") #o755)
+     (write-fake-exe! (build-path real-bin "racket")
+                      "#!/usr/bin/env bash\necho \"$0\"\n")
      ;; Create a launcher script like macOS bin/drracket: resolves symlinks
      ;; on the file but uses `pwd` (not `pwd -P`) for the directory.
      ;; This mimics Racket's make-mred-launcher output.
      (define app-dir (build-path install-root "DrRacket.app"))
      (make-directory* app-dir)
-     (write-string-file (build-path app-dir "DrRacket")
-                        "#!/usr/bin/env bash\necho ok\n")
-     (file-or-directory-permissions (build-path app-dir "DrRacket") #o755)
-     (write-string-file
+     (write-fake-exe! (build-path app-dir "DrRacket")
+                      "#!/usr/bin/env bash\necho ok\n")
+     (write-fake-exe!
       (build-path real-bin "drracket")
       (string-append "#!/bin/sh\n"
                      "# Mimics Racket's make-mred-launcher script.\n"
@@ -172,22 +185,14 @@
                      "cd \"$saveD\"\n"
                      "bindir=\"$D/..\"\n"
                      "exec \"${bindir}/DrRacket.app/DrRacket\" ${1+\"$@\"}\n"))
-     (file-or-directory-permissions (build-path real-bin "drracket") #o755)
      ;; bin is a symlink to install/bin — this is the normal rackup layout
      (make-file-or-directory-link real-bin (rackup-toolchain-bin-link id))
      (with-state-lock
        (register-toolchain!
         id
-        (hash 'id id
-              'kind 'release
-              'requested-spec "stable"
-              'resolved-version "9.1"
-              'variant 'cs
-              'distribution 'full
-              'arch "x86_64"
-              'platform "linux"
-              'executables '("racket" "drracket")
-              'installed-at "2026-03-10T00:00:00Z"))
+        (test-toolchain-meta id
+                             'executables '("racket" "drracket")
+                             'installed-at "2026-03-10T00:00:00Z"))
        (set-default-toolchain! id)
        (reshim!))
      ;; Test 1: racket shim invokes through the resolved path
@@ -229,45 +234,20 @@
                            (define real-bin (build-path install-root "bin"))
                            (make-directory* real-bin)
                            (define racket-exe (build-path real-bin "racket"))
-                           (write-string-file racket-exe "#!/usr/bin/env bash\necho test\n")
-                           (file-or-directory-permissions racket-exe #o755)
+                           (write-fake-exe! racket-exe "#!/usr/bin/env bash\necho test\n")
                            (make-file-or-directory-link real-bin (rackup-toolchain-bin-link id))
 
                            (define meta
-                             (hash 'id
-                                   id
-                                   'kind
-                                   'release
-                                   'requested-spec
-                                   "stable"
-                                   'resolved-version
-                                   "8.18"
-                                   'variant
-                                   'cs
-                                   'distribution
-                                   'full
-                                   'arch
-                                   "x86_64"
-                                   'platform
-                                   "linux"
-                                   'snapshot-site
-                                   #f
-                                   'snapshot-stamp
-                                   #f
-                                   'installer-url
-                                   "https://example.invalid/racket.sh"
-                                   'installer-filename
-                                   "racket.sh"
-                                   'install-root
-                                   (path->string install-root)
-                                   'bin-link
-                                   (path->string (rackup-toolchain-bin-link id))
-                                   'real-bin-dir
-                                   (path->string real-bin)
-                                   'executables
-                                   '("racket")
-                                   'installed-at
-                                   "2026-02-26T00:00:00Z"))
+                             (test-toolchain-meta
+                              id
+                              #:version "8.18"
+                              'snapshot-site #f
+                              'snapshot-stamp #f
+                              'installer-url "https://example.invalid/racket.sh"
+                              'installer-filename "racket.sh"
+                              'install-root (path->string install-root)
+                              'bin-link (path->string (rackup-toolchain-bin-link id))
+                              'real-bin-dir (path->string real-bin)))
                            (with-state-lock (register-toolchain! id meta))
                            (check-equal? (get-default-toolchain) id)
                            (check-equal? (find-local-toolchain "release-8.18") id)
@@ -369,13 +349,12 @@
      (make-directory* (rackup-toolchain-dir id))
      (make-directory* real-bin)
      (define mzscheme-exe (build-path real-bin "mzscheme"))
-     (write-string-file
+     (write-fake-exe!
       mzscheme-exe
       @~a{#!/usr/bin/env bash
           set -euo pipefail
           printf 'PLTHOME=%s\n' "${PLTHOME:-}"
           })
-     (file-or-directory-permissions mzscheme-exe #o755)
      (make-file-or-directory-link real-bin (rackup-toolchain-bin-link id))
      ;; Old PLT Scheme (parent dir named "plt") needs PLTHOME for its
      ;; bin/mzscheme shell wrapper to find .bin/<archsys>/mzscheme.
@@ -386,43 +365,24 @@
                                        "export PLTHOME="
                                        (format "'~a'\n" (path->string plthome))))
      (define meta
-       (hash 'id
-             id
-             'kind
-             'release
-             'requested-spec
-             "103"
-             'resolved-version
-             "103"
-             'variant
-             'bc
-             'distribution
-             'full
-             'arch
-             "i386"
-             'platform
-             "linux"
-             'snapshot-site
-             #f
-             'snapshot-stamp
-             #f
-             'installer-url
-             "http://download.plt-scheme.org/bundles/103/plt/plt-103-bin-i386-linux.tgz"
-             'installer-filename
-             "plt-103-bin-i386-linux.tgz"
-             'install-root
-             (path->string install-root)
-             'bin-link
-             (path->string (rackup-toolchain-bin-link id))
-             'real-bin-dir
-             (path->string real-bin)
-             'env-vars
-             (for/list ([kv (in-list env-vars)])
-               (list (car kv) (cdr kv)))
-             'executables
-             '("mzscheme")
-             'installed-at
-             "2026-02-27T00:00:00Z"))
+       (test-toolchain-meta
+        id
+        #:spec "103"
+        #:version "103"
+        'variant 'bc
+        'arch "i386"
+        'snapshot-site #f
+        'snapshot-stamp #f
+        'installer-url
+        "http://download.plt-scheme.org/bundles/103/plt/plt-103-bin-i386-linux.tgz"
+        'installer-filename "plt-103-bin-i386-linux.tgz"
+        'install-root (path->string install-root)
+        'bin-link (path->string (rackup-toolchain-bin-link id))
+        'real-bin-dir (path->string real-bin)
+        'env-vars (for/list ([kv (in-list env-vars)])
+                    (list (car kv) (cdr kv)))
+        'executables '("mzscheme")
+        'installed-at "2026-02-27T00:00:00Z"))
      (with-state-lock
        (register-toolchain! id meta)
        (reshim!))
@@ -448,10 +408,8 @@
      (make-directory* legacy-bin)
      (make-directory* fake-binfmt-dir)
      (define racket-exe (build-path real-bin "racket"))
-     (write-string-file racket-exe "#!/usr/bin/env bash\nexit 139\n")
-     (file-or-directory-permissions racket-exe #o755)
-     (write-string-file archsys "#!/bin/sh\necho i386-linux\n")
-     (file-or-directory-permissions archsys #o755)
+     (write-fake-exe! racket-exe "#!/usr/bin/env bash\nexit 139\n")
+     (write-fake-exe! archsys "#!/bin/sh\necho i386-linux\n")
      (call-with-output-file (build-path legacy-bin "racket")
        (lambda (out)
          (write-bytes #"\177ELF\1" out)
@@ -464,19 +422,15 @@
      (with-state-lock
        (register-toolchain!
         id
-        (hash 'id id
-              'kind 'release
-              'requested-spec "103p1"
-              'resolved-version "103p1"
-              'variant 'bc
-              'distribution 'full
-              'arch "i386"
-              'platform "linux"
-              'install-root (path->string install-root)
-              'bin-link (path->string (rackup-toolchain-bin-link id))
-              'real-bin-dir (path->string real-bin)
-              'executables '("racket")
-              'installed-at "2026-02-28T00:00:00Z"))
+        (test-toolchain-meta id
+                             #:spec "103p1"
+                             #:version "103p1"
+                             'variant 'bc
+                             'arch "i386"
+                             'install-root (path->string install-root)
+                             'bin-link (path->string (rackup-toolchain-bin-link id))
+                             'real-bin-dir (path->string real-bin)
+                             'installed-at "2026-02-28T00:00:00Z"))
        (set-default-toolchain! id)
        (reshim!))
      (define old-binfmt-dir (getenv "RACKUP_TEST_BINFMT_MISC_DIR"))
@@ -514,10 +468,9 @@
      (define real-bin (build-path tmp "plt" "bin"))
      (make-directory* real-bin)
      (define archsys (build-path real-bin "archsys"))
-     (write-string-file
+     (write-fake-exe!
       archsys
       "#!/bin/sh\nif [ `file /bin/ls | grep ELF | wc -l` = 1 ]; then\n  SYS=i386-linux\nelse\n  SYS=i386-linux-aout\nfi\n")
-     (file-or-directory-permissions archsys #o755)
      (maybe-modernize-legacy-archsys! real-bin)
      (define patched (file->string archsys))
      (check-true (string-contains? patched "file -L /bin/ls 2>/dev/null | grep ELF | wc -l"))
@@ -548,8 +501,7 @@
 
      (define (write-exe name body)
        (define p (build-path bin-dir name))
-       (write-string-file p body)
-       (file-or-directory-permissions p #o755)
+       (write-fake-exe! p body)
        p)
 
      (write-exe "racket"
@@ -568,12 +520,11 @@
                     })
      (for ([name '("scheme" "petite")])
        (define p (build-path chez-bin-dir name))
-       (write-string-file p
-                          @~a{#!/usr/bin/env bash
-                              set -euo pipefail
-                              printf '@|name|-ok %s\n' "$*"
-                              })
-       (file-or-directory-permissions p #o755))
+       (write-fake-exe! p
+                        @~a{#!/usr/bin/env bash
+                            set -euo pipefail
+                            printf '@|name|-ok %s\n' "$*"
+                            }))
 
      (define linked-id (link-toolchain! "devsrc" (path->string src-root) '("--set-default")))
      (check-equal? linked-id "local-devsrc")
@@ -743,8 +694,7 @@
 
      (define (write-bin-exe name body)
        (define p (build-path bin-dir name))
-       (write-string-file p body)
-       (file-or-directory-permissions p #o755)
+       (write-fake-exe! p body)
        p)
 
      (write-bin-exe "racket"
@@ -819,12 +769,11 @@
      (make-file-or-directory-link runtime-version-dir (rackup-runtime-current-link))
      (define racket-bin (build-path bin-dir "racket"))
      (define fake-addon-dir (path->string (build-path tmp "fake-addon")))
-     (write-string-file racket-bin
-                        (fake-racket-script
-                         #:version "9.90"
-                         #:addon-dir fake-addon-dir
-                         #:fallthrough "printf 'linked-toolchain-racket\\n'"))
-     (file-or-directory-permissions racket-bin #o755)
+     (write-fake-exe! racket-bin
+                      (fake-racket-script
+                       #:version "9.90"
+                       #:addon-dir fake-addon-dir
+                       #:fallthrough "printf 'linked-toolchain-racket\\n'"))
      (define linked-id (link-toolchain! "devsrc-wrapper" (path->string src-root) '("--set-default")))
      (define poisoned-collects (build-path tmp "poisoned-collects"))
      (make-directory* (build-path poisoned-collects "racket"))
@@ -864,8 +813,7 @@
      (define real-bin (build-path install-root "bin"))
      (make-directory* real-bin)
      (define racket-exe (build-path real-bin "racket"))
-     (write-string-file racket-exe "#!/usr/bin/env bash\necho hidden-runtime-test\n")
-     (file-or-directory-permissions racket-exe #o755)
+     (write-fake-exe! racket-exe "#!/usr/bin/env bash\necho hidden-runtime-test\n")
      (make-file-or-directory-link real-bin (rackup-runtime-bin-link runtime-id))
      (make-file-or-directory-link version-dir (rackup-runtime-current-link))
      (write-rktd-file (rackup-runtime-meta-file runtime-id)
@@ -935,14 +883,13 @@
      (define captured-argv (build-path tmp "captured-hidden-runtime-argv.txt"))
      (make-directory* fake-bin-dir)
      (define fake-racket (build-path fake-bin-dir "racket"))
-     (write-string-file fake-racket
-                        (string-append
-                         "#!/usr/bin/env bash\n"
-                         "set -euo pipefail\n"
-                         "printf '%s\\n' \"$@\" > "
-                         (path->string captured-argv)
-                         "\n"))
-     (file-or-directory-permissions fake-racket #o755)
+     (write-fake-exe! fake-racket
+                      (string-append
+                       "#!/usr/bin/env bash\n"
+                       "set -euo pipefail\n"
+                       "printf '%s\\n' \"$@\" > "
+                       (path->string captured-argv)
+                       "\n"))
      (make-directory* version-dir)
      (make-file-or-directory-link fake-bin-dir (rackup-runtime-bin-link runtime-id))
      (make-file-or-directory-link version-dir (rackup-runtime-current-link))
@@ -964,20 +911,19 @@
      (define captured-env (build-path tmp "captured-system-runtime-env.txt"))
      (make-directory* fake-bin-dir)
      (define fake-racket (build-path fake-bin-dir "racket"))
-     (write-string-file fake-racket
-                        (string-append
-                         "#!/usr/bin/env bash\n"
-                         "set -euo pipefail\n"
-                         "printf '%s\\n' \"$@\" > "
-                         (path->string captured-argv)
-                         "\n"
-                         "printf 'PLTHOME=%s\\nPLTCOLLECTS=%s\\nPLTADDONDIR=%s\\n' "
-                         "\"${PLTHOME:-}\" "
-                         "\"${PLTCOLLECTS:-}\" "
-                         "\"${PLTADDONDIR:-}\" > "
-                         (path->string captured-env)
-                         "\n"))
-     (file-or-directory-permissions fake-racket #o755)
+     (write-fake-exe! fake-racket
+                      (string-append
+                       "#!/usr/bin/env bash\n"
+                       "set -euo pipefail\n"
+                       "printf '%s\\n' \"$@\" > "
+                       (path->string captured-argv)
+                       "\n"
+                       "printf 'PLTHOME=%s\\nPLTCOLLECTS=%s\\nPLTADDONDIR=%s\\n' "
+                       "\"${PLTHOME:-}\" "
+                       "\"${PLTCOLLECTS:-}\" "
+                       "\"${PLTADDONDIR:-}\" > "
+                       (path->string captured-env)
+                       "\n"))
      (define env (environment-variables-copy (current-environment-variables)))
      (environment-variables-set! env
                                  #"PATH"
@@ -1034,7 +980,7 @@
    (lambda (tmp)
      (define installer (build-path tmp "racket-textual-5.2-bin-x86_64-linux-fake.sh"))
      (define dest (build-path tmp "legacy-install"))
-     (write-string-file
+     (write-fake-exe!
       installer
       @~a{#!/bin/sh
           set -eu
@@ -1054,7 +1000,6 @@
           chmod +x "$where/bin/racket"
           exit 0
           })
-     (file-or-directory-permissions installer #o755)
      (run-linux-installer! installer dest)
      (check-true (directory-exists? (build-path dest "bin")))
      (check-true (directory-exists? (build-path dest "collects")))
@@ -1064,7 +1009,7 @@
    (lambda (tmp)
      (define installer (build-path tmp "racket-6.0-x86_64-linux-fake.sh"))
      (define dest (build-path tmp "legacy-6.0-install"))
-     (write-string-file
+     (write-fake-exe!
       installer
       @~a{#!/bin/sh
           set -eu
@@ -1092,7 +1037,6 @@
           chmod +x "$where/bin/racket"
           exit 0
           })
-     (file-or-directory-permissions installer #o755)
      (run-linux-installer! installer dest)
      (check-true (directory-exists? (build-path dest "bin")))
      (check-true (directory-exists? (build-path dest "collects")))
@@ -1102,7 +1046,7 @@
    (lambda (tmp)
      (define installer (build-path tmp "racket-6.1.1-x86_64-linux-fake.sh"))
      (define dest (build-path tmp "modern-6.1.1-install"))
-     (write-string-file
+     (write-fake-exe!
       installer
       @~a{#!/bin/sh
           set -eu
@@ -1124,7 +1068,6 @@
           chmod +x "$where/bin/racket"
           exit 0
           })
-     (file-or-directory-permissions installer #o755)
      (run-linux-installer! installer dest)
      (check-true (directory-exists? (build-path dest "bin")))
      (check-true (directory-exists? (build-path dest "collects")))
@@ -1134,7 +1077,7 @@
    (lambda (tmp)
      (define installer (build-path tmp "plt-209-bin-i386-linux-fake.sh"))
      (define dest (build-path tmp "legacy-basic-install"))
-     (write-string-file
+     (write-fake-exe!
       installer
       @~a{#!/bin/sh
           set -eu
@@ -1153,7 +1096,6 @@
           chmod +x "$where/bin/mzscheme"
           exit 0
           })
-     (file-or-directory-permissions installer #o755)
      (run-linux-installer! installer dest #:legacy-install-kind 'shell-basic)
      (check-true (directory-exists? (build-path dest "bin")))
      (check-true (directory-exists? (build-path dest "collects")))
@@ -1163,14 +1105,13 @@
    (lambda (tmp)
      (define installer (build-path tmp "plt-209-bin-i386-linux-fail.sh"))
      (define dest (build-path tmp "legacy-fail-install"))
-     (write-string-file
+     (write-fake-exe!
       installer
       @~a{#!/bin/sh
           set -eu
           echo 'bad 100% format %s output' >&2
           exit 9
           })
-     (file-or-directory-permissions installer #o755)
      (define msg
        (with-handlers ([exn:fail? exn-message])
          (run-linux-installer! installer dest #:legacy-install-kind 'shell-basic)
@@ -1187,9 +1128,8 @@
      (define archive (build-path tmp "racket-minimal-9.1-riscv64-linux-cs.tgz"))
      (define dest (build-path tmp "tgz-install"))
      (make-directory* (build-path archive-root "racket" "bin"))
-     (write-string-file (build-path archive-root "racket" "bin" "racket")
-                        "#!/usr/bin/env bash\necho tgz-runtime\n")
-     (file-or-directory-permissions (build-path archive-root "racket" "bin" "racket") #o755)
+     (write-fake-exe! (build-path archive-root "racket" "bin" "racket")
+                      "#!/usr/bin/env bash\necho tgz-runtime\n")
      (check-true (system* tar-exe "-czf" archive "-C" archive-root "."))
      (extract-tgz-installer! archive dest)
      (check-true (directory-exists? (build-path dest "racket" "bin")))
@@ -1289,45 +1229,21 @@
      (define install-root (rackup-toolchain-install-dir id))
      (define real-bin (build-path install-root "bin"))
      (make-directory* real-bin)
-     (write-string-file (build-path real-bin "racket") "#!/usr/bin/env bash\nexit 0\n")
-     (file-or-directory-permissions (build-path real-bin "racket") #o755)
+     (write-fake-exe! (build-path real-bin "racket") "#!/usr/bin/env bash\nexit 0\n")
      (make-file-or-directory-link real-bin (rackup-toolchain-bin-link id))
      (make-directory* tc-dir)
      (define meta
-       (hash 'id
-             id
-             'kind
-             'release
-             'requested-spec
-             "8.18"
-             'resolved-version
-             "8.18"
-             'variant
-             'cs
-             'distribution
-             'full
-             'arch
-             "x86_64"
-             'platform
-             "linux"
-             'snapshot-site
-             #f
-             'snapshot-stamp
-             #f
-             'installer-url
-             "https://example.invalid/racket.sh"
-             'installer-filename
-             "racket.sh"
-             'install-root
-             (path->string install-root)
-             'bin-link
-             (path->string (rackup-toolchain-bin-link id))
-             'real-bin-dir
-             (path->string real-bin)
-             'executables
-             '("racket")
-             'installed-at
-             "2026-02-26T00:00:00Z"))
+       (test-toolchain-meta
+        id
+        #:spec "8.18"
+        #:version "8.18"
+        'snapshot-site #f
+        'snapshot-stamp #f
+        'installer-url "https://example.invalid/racket.sh"
+        'installer-filename "racket.sh"
+        'install-root (path->string install-root)
+        'bin-link (path->string (rackup-toolchain-bin-link id))
+        'real-bin-dir (path->string real-bin)))
      (with-state-lock (register-toolchain! id meta))
      (expect (run-main '("current" "id")) (format "~a\n" id))
      @expect[(run-main '("current" "source"))]{default
@@ -1380,46 +1296,21 @@
      (define real-bin (build-path install-root "bin"))
      (make-directory* real-bin)
      (define racket-exe (build-path real-bin "racket"))
-     (write-string-file racket-exe "#!/usr/bin/env bash\necho test\n")
-     (file-or-directory-permissions racket-exe #o755)
+     (write-fake-exe! racket-exe "#!/usr/bin/env bash\necho test\n")
      (make-file-or-directory-link real-bin (rackup-toolchain-bin-link id))
      (with-state-lock
        (register-toolchain!
         id
-        (hash 'id
-              id
-              'kind
-              'release
-              'requested-spec
-              "stable"
-              'resolved-version
-              "8.18"
-              'variant
-              'cs
-              'distribution
-              'full
-              'arch
-              "x86_64"
-              'platform
-              "linux"
-              'snapshot-site
-              #f
-              'snapshot-stamp
-              #f
-              'installer-url
-              "https://example.invalid/racket.sh"
-              'installer-filename
-              "racket.sh"
-              'install-root
-              (path->string install-root)
-              'bin-link
-              (path->string (rackup-toolchain-bin-link id))
-              'real-bin-dir
-              (path->string real-bin)
-              'executables
-              '("racket")
-              'installed-at
-              "2026-02-26T00:00:00Z"))
+        (test-toolchain-meta
+         id
+         #:version "8.18"
+         'snapshot-site #f
+         'snapshot-stamp #f
+         'installer-url "https://example.invalid/racket.sh"
+         'installer-filename "racket.sh"
+         'install-root (path->string install-root)
+         'bin-link (path->string (rackup-toolchain-bin-link id))
+         'real-bin-dir (path->string real-bin)))
        (reshim!))
      (define old-env-id (getenv "RACKUP_TOOLCHAIN"))
      (dynamic-wind
@@ -1467,13 +1358,12 @@
      (define fake-installer (build-path tmp "fake-install.sh"))
      (define args-log (build-path tmp "self-upgrade-args.log"))
      (define mode-log (build-path tmp "self-upgrade-mode.log"))
-     (write-string-file
+     (write-fake-exe!
       fake-installer
       (format
        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$@\" > ~s\nprintf '%s\\n' \"${RACKUP_BOOTSTRAP_MODE:-}\" > ~s\nexit 0\n"
        (path->string args-log)
        (path->string mode-log)))
-     (file-or-directory-permissions fake-installer #o755)
      (define old-override (getenv "RACKUP_SELF_UPGRADE_INSTALL_SH"))
      (dynamic-wind
       (lambda () (putenv "RACKUP_SELF_UPGRADE_INSTALL_SH" (path->string fake-installer)))
@@ -1501,12 +1391,11 @@
      (define fake-installer (build-path tmp "fake-install-update.sh"))
      (define sha-file (build-path tmp ".installed-sha256"))
      (write-string-file sha-file "old-sha")
-     (write-string-file
+     (write-fake-exe!
       fake-installer
       (format
        "#!/bin/sh\nset -eu\nprintf 'new-sha' > ~s\nexit 0\n"
        (path->string sha-file)))
-     (file-or-directory-permissions fake-installer #o755)
      (define old-override (getenv "RACKUP_SELF_UPGRADE_INSTALL_SH"))
      (dynamic-wind
       (lambda () (putenv "RACKUP_SELF_UPGRADE_INSTALL_SH" (path->string fake-installer)))
@@ -1531,22 +1420,20 @@
      ;; Fake rackup binary at ~/.rackup/bin/rackup that logs invocations
      (make-directory* (build-path tmp "bin"))
      (define fake-rackup (build-path tmp "bin" "rackup"))
-     (write-string-file
+     (write-fake-exe!
       fake-rackup
       (format
        "#!/bin/sh\nprintf '%s\\n' \"$@\" >> ~s\nexit 0\n"
        (path->string reshim-log)))
-     (file-or-directory-permissions fake-rackup #o755)
 
      (define fake-installer (build-path tmp "fake-install-reshim.sh"))
      (define sha-file (build-path tmp ".installed-sha256"))
      (write-string-file sha-file "old-sha")
-     (write-string-file
+     (write-fake-exe!
       fake-installer
       (format
        "#!/bin/sh\nset -eu\nprintf 'new-sha' > ~s\nexit 0\n"
        (path->string sha-file)))
-     (file-or-directory-permissions fake-installer #o755)
      (define old-override (getenv "RACKUP_SELF_UPGRADE_INSTALL_SH"))
      (dynamic-wind
       (lambda () (putenv "RACKUP_SELF_UPGRADE_INSTALL_SH" (path->string fake-installer)))
@@ -1573,12 +1460,11 @@
      (ensure-index!)
      (define fake-installer (build-path tmp "fake-install-exe.sh"))
      (define args-log (build-path tmp "self-upgrade-exe-args.log"))
-     (write-string-file
+     (write-fake-exe!
       fake-installer
       (format
        "#!/bin/sh\nset -eu\nprintf '%s\\n' \"$@\" > ~s\nexit 0\n"
        (path->string args-log)))
-     (file-or-directory-permissions fake-installer #o755)
      (define old-override (getenv "RACKUP_SELF_UPGRADE_INSTALL_SH"))
      (dynamic-wind
       (lambda () (putenv "RACKUP_SELF_UPGRADE_INSTALL_SH" (path->string fake-installer)))
@@ -1607,13 +1493,12 @@
      (ensure-index!)
      (define fake-installer (build-path tmp "fake-install-ref.sh"))
      (define args-log (build-path tmp "self-upgrade-ref-args.log"))
-     (write-string-file
+     (write-fake-exe!
       fake-installer
       (format
        "#!/bin/sh\nset -eu\n: > ~s\nfor a in \"$@\"; do printf '%s\\n' \"$a\" >> ~s; done\nexit 0\n"
        (path->string args-log)
        (path->string args-log)))
-     (file-or-directory-permissions fake-installer #o755)
      (define old-override (getenv "RACKUP_SELF_UPGRADE_INSTALL_SH"))
      (dynamic-wind
       (lambda () (putenv "RACKUP_SELF_UPGRADE_INSTALL_SH" (path->string fake-installer)))
@@ -1655,21 +1540,15 @@
        (define real-bin (build-path install-root "bin"))
        (make-directory* real-bin)
        (define racket-exe (build-path real-bin "racket"))
-       (write-string-file racket-exe "#!/usr/bin/env bash\necho test\n")
-       (file-or-directory-permissions racket-exe #o755)
+       (write-fake-exe! racket-exe "#!/usr/bin/env bash\necho test\n")
        (make-file-or-directory-link real-bin (rackup-toolchain-bin-link id))
        (with-state-lock
          (register-toolchain! id
-                              (hash 'id id
-                                    'kind 'release
-                                    'requested-spec version
-                                    'resolved-version version
-                                    'variant variant
-                                    'distribution distribution
-                                    'arch "x86_64"
-                                    'platform "linux"
-                                    'executables '("racket")
-                                    'installed-at "2026-02-26T00:00:00Z"))))
+                              (test-toolchain-meta id
+                                                   #:spec version
+                                                   #:version version
+                                                   'variant variant
+                                                   'distribution distribution))))
 
      (define id-full "release-9.0-cs-x86_64-linux-full")
      (define id-minimal "release-9.0-cs-x86_64-linux-minimal")
@@ -1741,36 +1620,21 @@
      (define real-bin (build-path install-root "bin"))
      (make-directory* real-bin)
      (define racket-exe (build-path real-bin "racket"))
-     (write-string-file racket-exe "#!/usr/bin/env bash\necho test\n")
-     (file-or-directory-permissions racket-exe #o755)
+     (write-fake-exe! racket-exe "#!/usr/bin/env bash\necho test\n")
      (make-file-or-directory-link real-bin (rackup-toolchain-bin-link id))
      (with-state-lock
        (register-toolchain! id
-                            (hash 'id id 'kind 'release 'requested-spec "9.0"
-                                  'resolved-version "9.0" 'variant 'cs 'distribution 'full
-                                  'arch "x86_64" 'platform "linux"
-                                  'executables '("racket") 'installed-at "2026-02-26T00:00:00Z")))
+                            (test-toolchain-meta id #:spec "9.0" #:version "9.0")))
 
-     ;; Poison all sanitized Racket env vars
-     (define var-names
-       (for/list ([var (in-list sanitized-racket-env-vars)])
-         (bytes->string/utf-8 var)))
-     (define saved-vars
-       (for/list ([name (in-list var-names)])
-         (cons name (getenv name))))
-     (dynamic-wind
-      (lambda ()
-        (for ([name (in-list var-names)])
-          (putenv name "/nonexistent/poisoned")))
-      (lambda ()
-        ;; rackup list should still work
-        (expect (begin (system* rackup-bin "list") (void))
-                "release-9.0" #:match 'contains))
-      (lambda ()
-        (for ([kv (in-list saved-vars)])
-          (if (cdr kv)
-              (putenv (car kv) (cdr kv))
-              (putenv (car kv) "")))))))
+     ;; Poison all sanitized Racket env vars (in a copied environment so
+     ;; nothing leaks into the rest of the test process).
+     (define env (environment-variables-copy (current-environment-variables)))
+     (for ([var (in-list sanitized-racket-env-vars)])
+       (environment-variables-set! env var #"/nonexistent/poisoned"))
+     (parameterize ([current-environment-variables env])
+       ;; rackup list should still work
+       (expect (begin (system* rackup-bin "list") (void))
+               "release-9.0" #:match 'contains))))
 
   ;; ---- Upgrade path tests ----
   ;; Simulate a 9.0 installation, then "upgrade" by adding 9.1 alongside it.
@@ -1784,29 +1648,23 @@
        (define real-bin (build-path install-root "bin"))
        (make-directory* real-bin)
        (define racket-exe (build-path real-bin "racket"))
-       (write-string-file racket-exe
-                          (format "#!/usr/bin/env bash\nprintf '~a'\n" version))
-       (file-or-directory-permissions racket-exe #o755)
+       (write-fake-exe! racket-exe
+                        (format "#!/usr/bin/env bash\nprintf '~a'\n" version))
        (make-file-or-directory-link real-bin (rackup-toolchain-bin-link id))
        (with-state-lock
          (register-toolchain! id
-                              (hash 'id id
-                                    'kind 'release
-                                    'requested-spec spec
-                                    'resolved-version version
-                                    'variant 'cs
-                                    'distribution 'full
-                                    'arch "x86_64"
-                                    'platform "linux"
-                                    'snapshot-site #f
-                                    'snapshot-stamp #f
-                                    'installer-url (format "https://example.invalid/racket-~a.sh" version)
-                                    'installer-filename (format "racket-~a-x86_64-linux-cs.sh" version)
-                                    'install-root (path->string install-root)
-                                    'bin-link (path->string (rackup-toolchain-bin-link id))
-                                    'real-bin-dir (path->string real-bin)
-                                    'executables '("racket")
-                                    'installed-at "2026-01-15T00:00:00Z"))))
+                              (test-toolchain-meta
+                               id
+                               #:spec spec
+                               #:version version
+                               'snapshot-site #f
+                               'snapshot-stamp #f
+                               'installer-url (format "https://example.invalid/racket-~a.sh" version)
+                               'installer-filename (format "racket-~a-x86_64-linux-cs.sh" version)
+                               'install-root (path->string install-root)
+                               'bin-link (path->string (rackup-toolchain-bin-link id))
+                               'real-bin-dir (path->string real-bin)
+                               'installed-at "2026-01-15T00:00:00Z"))))
 
      ;; Step 1: Install 9.0 as the initial toolchain (simulating prior state)
      (define id-90 "release-9.0-cs-x86_64-linux-full")
@@ -1886,15 +1744,12 @@
      (define install-root (rackup-toolchain-install-dir id))
      (define real-bin (build-path install-root "bin"))
      (make-directory* real-bin)
-     (write-string-file (build-path real-bin "racket") "#!/usr/bin/env bash\nexit 0\n")
-     (file-or-directory-permissions (build-path real-bin "racket") #o755)
+     (write-fake-exe! (build-path real-bin "racket") "#!/usr/bin/env bash\nexit 0\n")
      (make-file-or-directory-link real-bin (rackup-toolchain-bin-link id))
      (with-state-lock
        (register-toolchain! id
-                            (hash 'id id 'kind 'release 'requested-spec "9.0"
-                                  'resolved-version "9.0" 'variant 'cs 'distribution 'full
-                                  'arch "x86_64" 'platform "linux"
-                                  'executables '("racket") 'installed-at "2026-01-15T00:00:00Z")))
+                            (test-toolchain-meta id #:spec "9.0" #:version "9.0"
+                                                 'installed-at "2026-01-15T00:00:00Z")))
      ;; Re-run ensure-index! (simulating what happens after self-upgrade)
      (define idx3 (ensure-index!))
      (check-true (toolchain-exists? id idx3))
@@ -1909,31 +1764,28 @@
      (define install-root (rackup-toolchain-install-dir id-90))
      (define real-bin (build-path install-root "bin"))
      (make-directory* real-bin)
-     (write-string-file (build-path real-bin "racket") "#!/usr/bin/env bash\necho 9.0\n")
-     (file-or-directory-permissions (build-path real-bin "racket") #o755)
+     (write-fake-exe! (build-path real-bin "racket") "#!/usr/bin/env bash\necho 9.0\n")
      (make-file-or-directory-link real-bin (rackup-toolchain-bin-link id-90))
      (with-state-lock
        (register-toolchain! id-90
-                            (hash 'id id-90 'kind 'release 'requested-spec "stable"
-                                  'resolved-version "9.0" 'variant 'cs 'distribution 'full
-                                  'arch "x86_64" 'platform "linux"
-                                  'snapshot-site #f 'snapshot-stamp #f
-                                  'installer-url "https://example.invalid/racket-9.0.sh"
-                                  'installer-filename "racket-9.0-x86_64-linux-cs.sh"
-                                  'install-root (path->string install-root)
-                                  'bin-link (path->string (rackup-toolchain-bin-link id-90))
-                                  'real-bin-dir (path->string real-bin)
-                                  'executables '("racket")
-                                  'installed-at "2026-01-15T00:00:00Z")))
+                            (test-toolchain-meta
+                             id-90
+                             #:version "9.0"
+                             'snapshot-site #f 'snapshot-stamp #f
+                             'installer-url "https://example.invalid/racket-9.0.sh"
+                             'installer-filename "racket-9.0-x86_64-linux-cs.sh"
+                             'install-root (path->string install-root)
+                             'bin-link (path->string (rackup-toolchain-bin-link id-90))
+                             'real-bin-dir (path->string real-bin)
+                             'installed-at "2026-01-15T00:00:00Z")))
 
      ;; Fake the self-upgrade: a script that just touches a marker file
      ;; but doesn't modify state (simulating install.sh --prefix preserving state)
      (define fake-installer (build-path tmp "fake-upgrade-install.sh"))
      (define marker-file (build-path tmp "upgrade-ran.marker"))
-     (write-string-file
+     (write-fake-exe!
       fake-installer
       (format "#!/bin/sh\nset -eu\ntouch ~s\n" (path->string marker-file)))
-     (file-or-directory-permissions fake-installer #o755)
 
      (define old-override (getenv "RACKUP_SELF_UPGRADE_INSTALL_SH"))
      (dynamic-wind
@@ -1971,29 +1823,24 @@
        (define real-bin (build-path install-root "bin"))
        (make-directory* real-bin)
        (define racket-exe (build-path real-bin "racket"))
-       (write-string-file racket-exe
-                          (format "#!/usr/bin/env bash\nprintf '~a (~a)'\n" version site))
-       (file-or-directory-permissions racket-exe #o755)
+       (write-fake-exe! racket-exe
+                        (format "#!/usr/bin/env bash\nprintf '~a (~a)'\n" version site))
        (make-file-or-directory-link real-bin (rackup-toolchain-bin-link id))
        (with-state-lock
          (register-toolchain! id
-                              (hash 'id id
-                                    'kind 'snapshot
-                                    'requested-spec (format "snapshot:~a" site)
-                                    'resolved-version version
-                                    'variant 'cs
-                                    'distribution 'full
-                                    'arch "x86_64"
-                                    'platform "linux"
-                                    'snapshot-site site
-                                    'snapshot-stamp stamp
-                                    'installer-url (format "https://~a.example/snapshots/~a/racket.sh" site stamp)
-                                    'installer-filename (format "racket-~a-x86_64-linux-cs.sh" version)
-                                    'install-root (path->string install-root)
-                                    'bin-link (path->string (rackup-toolchain-bin-link id))
-                                    'real-bin-dir (path->string real-bin)
-                                    'executables '("racket")
-                                    'installed-at "2026-03-01T00:00:00Z")))
+                              (test-toolchain-meta
+                               id
+                               #:spec (format "snapshot:~a" site)
+                               #:version version
+                               'kind 'snapshot
+                               'snapshot-site site
+                               'snapshot-stamp stamp
+                               'installer-url (format "https://~a.example/snapshots/~a/racket.sh" site stamp)
+                               'installer-filename (format "racket-~a-x86_64-linux-cs.sh" version)
+                               'install-root (path->string install-root)
+                               'bin-link (path->string (rackup-toolchain-bin-link id))
+                               'real-bin-dir (path->string real-bin)
+                               'installed-at "2026-03-01T00:00:00Z")))
        id)
 
      ;; Register a Utah snapshot
@@ -2067,29 +1914,24 @@
        (define install-root (rackup-toolchain-install-dir id))
        (define real-bin (build-path install-root "bin"))
        (make-directory* real-bin)
-       (write-string-file (build-path real-bin "racket")
-                          (format "#!/usr/bin/env bash\nprintf '~a'\n" version))
-       (file-or-directory-permissions (build-path real-bin "racket") #o755)
+       (write-fake-exe! (build-path real-bin "racket")
+                        (format "#!/usr/bin/env bash\nprintf '~a'\n" version))
        (make-file-or-directory-link real-bin (rackup-toolchain-bin-link id))
        (with-state-lock
          (register-toolchain! id
-                              (hash 'id id
-                                    'kind 'snapshot
-                                    'requested-spec "snapshot:utah"
-                                    'resolved-version version
-                                    'variant 'cs
-                                    'distribution 'full
-                                    'arch "x86_64"
-                                    'platform "linux"
-                                    'snapshot-site 'utah
-                                    'snapshot-stamp stamp
-                                    'installer-url (format "https://utah.example/snapshots/~a/racket.sh" stamp)
-                                    'installer-filename (format "racket-~a-x86_64-linux-cs.sh" version)
-                                    'install-root (path->string install-root)
-                                    'bin-link (path->string (rackup-toolchain-bin-link id))
-                                    'real-bin-dir (path->string real-bin)
-                                    'executables '("racket")
-                                    'installed-at "2026-03-01T00:00:00Z")))
+                              (test-toolchain-meta
+                               id
+                               #:spec "snapshot:utah"
+                               #:version version
+                               'kind 'snapshot
+                               'snapshot-site 'utah
+                               'snapshot-stamp stamp
+                               'installer-url (format "https://utah.example/snapshots/~a/racket.sh" stamp)
+                               'installer-filename (format "racket-~a-x86_64-linux-cs.sh" version)
+                               'install-root (path->string install-root)
+                               'bin-link (path->string (rackup-toolchain-bin-link id))
+                               'real-bin-dir (path->string real-bin)
+                               'installed-at "2026-03-01T00:00:00Z")))
        id)
 
      ;; Install old snapshot
@@ -2127,20 +1969,15 @@
      (define real-bin (build-path install-root "bin"))
      (make-directory* real-bin)
      (define racket-exe (build-path real-bin "racket"))
-     (write-string-file racket-exe "#!/usr/bin/env bash\necho test\n")
-     (file-or-directory-permissions racket-exe #o755)
+     (write-fake-exe! racket-exe "#!/usr/bin/env bash\necho test\n")
      (define print-env (build-path real-bin "print-compiled-roots"))
-     (write-string-file print-env
-                        "#!/usr/bin/env bash\nprintf 'PLTCOMPILEDROOTS=%s\\n' \"${PLTCOMPILEDROOTS:-}\"\n")
-     (file-or-directory-permissions print-env #o755)
+     (write-fake-exe! print-env
+                      "#!/usr/bin/env bash\nprintf 'PLTCOMPILEDROOTS=%s\\n' \"${PLTCOMPILEDROOTS:-}\"\n")
      (make-file-or-directory-link real-bin (rackup-toolchain-bin-link id))
      (with-state-lock
        (register-toolchain! id
-                            (hash 'id id 'kind 'release 'requested-spec "9.0"
-                                  'resolved-version "9.0" 'variant 'cs 'distribution 'full
-                                  'arch "x86_64" 'platform "linux"
-                                  'executables '("racket" "print-compiled-roots")
-                                  'installed-at "2026-02-26T00:00:00Z")))
+                            (test-toolchain-meta id #:spec "9.0" #:version "9.0"
+                                                 'executables '("racket" "print-compiled-roots"))))
 
      (define old-cr (getenv "PLTCOMPILEDROOTS"))
      (dynamic-wind
@@ -2203,13 +2040,11 @@
      (define install-root (rackup-toolchain-install-dir id))
      (define real-bin (build-path install-root "bin"))
      (make-directory* real-bin)
-     (write-string-file (build-path real-bin "racket")
-                        "#!/usr/bin/env bash\necho test\n")
-     (file-or-directory-permissions (build-path real-bin "racket") #o755)
+     (write-fake-exe! (build-path real-bin "racket")
+                      "#!/usr/bin/env bash\necho test\n")
      (define print-cr (build-path real-bin "print-compiled-roots"))
-     (write-string-file print-cr
-                        "#!/usr/bin/env bash\nprintf 'PLTCOMPILEDROOTS=%s\\n' \"${PLTCOMPILEDROOTS:-}\"\n")
-     (file-or-directory-permissions print-cr #o755)
+     (write-fake-exe! print-cr
+                      "#!/usr/bin/env bash\nprintf 'PLTCOMPILEDROOTS=%s\\n' \"${PLTCOMPILEDROOTS:-}\"\n")
      (make-file-or-directory-link real-bin (rackup-toolchain-bin-link id))
 
      ;; Simulate install-time env-var computation
@@ -2223,13 +2058,14 @@
 
      (with-state-lock
        (register-toolchain! id
-                            (hash 'id id 'kind 'release 'requested-spec "9.1"
-                                  'resolved-version "9.1" 'variant 'cs 'distribution 'full
-                                  'arch "x86_64" 'platform "linux"
-                                  'env-vars (for/list ([kv (in-list env-vars)])
-                                              (list (car kv) (cdr kv)))
-                                  'executables '("racket" "print-compiled-roots")
-                                  'installed-at "2026-03-01T00:00:00Z")))
+                            (test-toolchain-meta
+                             id
+                             #:spec "9.1"
+                             #:version "9.1"
+                             'env-vars (for/list ([kv (in-list env-vars)])
+                                         (list (car kv) (cdr kv)))
+                             'executables '("racket" "print-compiled-roots")
+                             'installed-at "2026-03-01T00:00:00Z")))
      ;; Write the env.sh as the install flow would
      (write-toolchain-env-file! id env-vars)
 
@@ -2292,24 +2128,20 @@
      ;; Racket program that uses pkg/lib.  Only -e invocations matter;
      ;; ignore other raco subcommands for this test.
      (define racket-exe (build-path real-bin "racket"))
-     (write-string-file racket-exe
-                        (string-append
-                         "#!/usr/bin/env bash\n"
-                         "if [ \"${1:-}\" = \"-e\" ]; then\n"
-                         "  printf '%s\\n' " (sh-single-quote (path->string pkg-dir)) "\n"
-                         "  exit 0\n"
-                         "fi\n"
-                         "exit 0\n"))
-     (file-or-directory-permissions racket-exe #o755)
+     (write-fake-exe! racket-exe
+                      (string-append
+                       "#!/usr/bin/env bash\n"
+                       "if [ \"${1:-}\" = \"-e\" ]; then\n"
+                       "  printf '%s\\n' " (sh-single-quote (path->string pkg-dir)) "\n"
+                       "  exit 0\n"
+                       "fi\n"
+                       "exit 0\n"))
      (make-file-or-directory-link real-bin (rackup-toolchain-bin-link id))
 
      (with-state-lock
        (register-toolchain! id
-                            (hash 'id id 'kind 'release 'requested-spec "9.1"
-                                  'resolved-version "9.1" 'variant 'cs 'distribution 'full
-                                  'arch "x86_64" 'platform "linux"
-                                  'executables '("racket")
-                                  'installed-at "2026-03-01T00:00:00Z")))
+                            (test-toolchain-meta id #:spec "9.1" #:version "9.1"
+                                                 'installed-at "2026-03-01T00:00:00Z")))
 
      ;; Sanity: all three compiled dirs exist up front
      (check-true (directory-exists? (build-path pkg-dir "compiled" "9.1-cs")))
@@ -2370,14 +2202,14 @@
 
          (with-state-lock
            (register-toolchain! id
-                                (hash 'id id 'kind 'release 'requested-spec "test"
-                                      'resolved-version "test" 'variant 'cs
-                                      'distribution 'full 'arch "x86_64"
-                                      'platform "linux"
-                                      'env-vars (for/list ([kv (in-list env-vars)])
-                                                  (list (car kv) (cdr kv)))
-                                      'executables '("racket" "raco")
-                                      'installed-at "2026-04-01T00:00:00Z"))
+                                (test-toolchain-meta
+                                 id
+                                 #:spec "test"
+                                 #:version "test"
+                                 'env-vars (for/list ([kv (in-list env-vars)])
+                                             (list (car kv) (cdr kv)))
+                                 'executables '("racket" "raco")
+                                 'installed-at "2026-04-01T00:00:00Z"))
            (set-default-toolchain! id)
            (reshim!))
          ;; Write env.sh so the shim dispatcher picks up PLTCOMPILEDROOTS
@@ -2528,22 +2360,17 @@
      (define install-root (rackup-toolchain-install-dir id))
      (define real-bin (build-path install-root "bin"))
      (make-directory* real-bin)
-     (write-string-file (build-path real-bin "racket")
-                        "#!/usr/bin/env bash\nexit 0\n")
-     (file-or-directory-permissions (build-path real-bin "racket") #o755)
+     (write-fake-exe! (build-path real-bin "racket")
+                      "#!/usr/bin/env bash\nexit 0\n")
      (make-file-or-directory-link real-bin (rackup-toolchain-bin-link id))
 
      ;; Register the toolchain as if it had been installed by an older
      ;; rackup: env-vars is empty (no PLTCOMPILEDROOTS).
      (with-state-lock
        (register-toolchain! id
-                            (hash 'id id 'kind 'release 'requested-spec "9.1"
-                                  'resolved-version "9.1" 'variant 'cs
-                                  'distribution 'full 'arch "x86_64"
-                                  'platform "linux"
-                                  'env-vars '()
-                                  'executables '("racket")
-                                  'installed-at "2026-02-01T00:00:00Z")))
+                            (test-toolchain-meta id #:spec "9.1" #:version "9.1"
+                                                 'env-vars '()
+                                                 'installed-at "2026-02-01T00:00:00Z")))
 
      ;; Sanity: nothing has PLTCOMPILEDROOTS yet
      (check-false (assoc "PLTCOMPILEDROOTS" (toolchain-env-vars id))
@@ -2596,11 +2423,10 @@
 
      ;; Fake racket that returns NEW values on probe (different from
      ;; what was stored in meta).
-     (write-string-file (build-path bin-dir "racket")
-                        (fake-racket-script
-                         #:version "9.7.0.5"
-                         #:addon-dir new-addon))
-     (file-or-directory-permissions (build-path bin-dir "racket") #o755)
+     (write-fake-exe! (build-path bin-dir "racket")
+                      (fake-racket-script
+                       #:version "9.7.0.5"
+                       #:addon-dir new-addon))
 
      (define id "local-stale")
      (define real-bin-link (rackup-toolchain-bin-link id))

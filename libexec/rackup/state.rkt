@@ -25,7 +25,10 @@
          read-toolchain-meta
          write-toolchain-meta!
          toolchain-env-vars
+         toolchain-runtime-env
          meta->env-vars
+         env-vars->meta
+         toolchain-env-var-entries
          compiled-roots-value
          read-toolchain-compiled-file-roots
          register-toolchain!
@@ -103,8 +106,7 @@
   (save-index! (hash-set idx 'default-toolchain id)))
 
 (define/state-locked (clear-default-toolchain!)
-  (when (file-exists? (rackup-default-file))
-    (delete-file (rackup-default-file)))
+  (delete-path! (rackup-default-file))
   (when (file-exists? (rackup-index-file))
     (define idx (load-index))
     (save-index! (hash-set idx 'default-toolchain #f))))
@@ -130,6 +132,18 @@
 (define (toolchain-env-vars id)
   (meta->env-vars (read-toolchain-meta id)))
 
+;; The inverse of meta->env-vars: serialize an env-var alist into the
+;; list-of-two-element-lists form stored under 'env-vars in meta.rktd.
+(define (env-vars->meta env-vars)
+  (for/list ([kv (in-list env-vars)])
+    (list (car kv) (cdr kv))))
+
+;; Environment for running a toolchain's own executables (raco/racket):
+;; the toolchain's recorded env vars plus its rackup-managed addon dir.
+(define (toolchain-runtime-env id)
+  (append (toolchain-env-vars id)
+          (list (cons "PLTADDONDIR" (path->string (rackup-addon-dir id))))))
+
 ;; Read the compiled-file-roots from a toolchain's config.rktd.
 ;; Returns a list like (same) or ("/usr/lib/racket/compiled"), or
 ;; (same) as default if the file is missing or has no entry.
@@ -148,7 +162,7 @@
   (define config
     (for/or ([p (in-list candidates)])
       (and (file-exists? p)
-           (with-handlers ([exn:fail? (lambda (_) #f)])
+           (try-or #f
              (call-with-input-file p read)))))
   (cond
     [(and (hash? config) (list? (hash-ref config 'compiled-file-roots #f)))
@@ -209,6 +223,21 @@
      (define fallbacks (map serialize-compiled-root roots-with-same))
      (string-join (cons key fallbacks) ":")]
     [else #f]))
+
+;; Build the env-var alist recorded for a toolchain: PLTADDONDIR (when
+;; a usable addon dir is known) and PLTCOMPILEDROOTS (when the
+;; version+variant yield a stable key).  Entries are omitted when
+;; unavailable.
+(define (toolchain-env-var-entries addon-dir version variant existing-roots local-name)
+  (append
+   (if (and (string? addon-dir) (not (string-blank? addon-dir)))
+       (list (cons "PLTADDONDIR" addon-dir))
+       null)
+   (cond
+     [(compiled-roots-value version variant existing-roots local-name)
+      =>
+      (lambda (v) (list (cons "PLTCOMPILEDROOTS" v)))]
+     [else null])))
 
 (define (meta-summary meta)
   (for/hash ([k '(id kind

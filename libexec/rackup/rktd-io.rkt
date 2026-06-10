@@ -34,34 +34,25 @@
         (call-with-input-file* path read-rktd/port))
       default))
 
-(define (call-with-atomic-output-file path writer)
-  (define dir (or (path-only path) (current-directory)))
+;; Atomic write via racket/file's call-with-atomic-output-file
+;; (temp file + rename), additionally preserving the permission bits of
+;; an existing file at `path` — the stdlib temp file starts with
+;; default permissions.
+(define (write-file-atomically path writer)
   (define perms (and (file-exists? path) (file-or-directory-permissions path 'bits)))
-  (make-directory* dir)
-  (define tmp (make-temporary-file "rackup-write-~a" #f dir))
-  (dynamic-wind
-   void
-   (lambda ()
-     (call-with-output-file* tmp
-       #:exists 'truncate/replace
-       (lambda (out)
-         (writer out)
-         (flush-output out)))
-     (when perms
-       (file-or-directory-permissions tmp perms))
-     (rename-file-or-directory tmp path #t))
-   (lambda ()
-     (when (file-exists? tmp)
-       (delete-file tmp)))))
+  (make-directory* (or (path-only path) (current-directory)))
+  (call-with-atomic-output-file path (lambda (out _tmp) (writer out)))
+  (when perms
+    (file-or-directory-permissions path perms)))
 
 (define (write-string-file path s)
-  (call-with-atomic-output-file path
+  (write-file-atomically path
     (lambda (out)
       (display s out)
       (newline out))))
 
 (define (write-rktd-file path v)
-  (call-with-atomic-output-file path
+  (write-file-atomically path
     (lambda (out)
       (write v out)
       (newline out))))

@@ -1,14 +1,6 @@
 
 # rackup zsh completion
-_rackup_toolchains() {
-  local dir="${RACKUP_HOME:-$HOME/.rackup}/toolchains"
-  if [ -d "$dir" ]; then
-    local f
-    for f in "$dir"/*/; do
-      [ -d "$f" ] && basename "$f"
-    done
-  fi
-}
+@include/text["toolchains-fn.scrbl"]
 
 # Emit toolchain id:description pairs for zsh _describe.
 _rackup_toolchains_described() {

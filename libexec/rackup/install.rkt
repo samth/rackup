@@ -1,4 +1,4 @@
-#lang at-exp racket/base
+#lang racket/base
 
 (require racket/cmdline
          racket/file
@@ -110,29 +110,10 @@
                          (path->string* p)))
          p)))
 
-(define (installer-cache-file installer-url)
-  (build-path (rackup-download-cache-dir)
-              (path-basename-string (string->path (car (reverse (string-split installer-url "/")))))))
-
-(define (ensure-installer-cached! installer-url
-                                  #:no-cache? [no-cache? #f]
-                                  #:sha256 [expected-sha256 #f]
-                                  #:sha1 [expected-sha1 #f])
-  (ensure-rackup-layout!)
-  (require-checksummed-http-installer! installer-url expected-sha256)
-  (define cache-path (installer-cache-file installer-url))
-  (when (and (file-exists? cache-path) (or expected-sha256 expected-sha1))
-    (with-handlers ([exn:fail? (lambda (_)
-                                 (delete-file cache-path))])
-      (verify-installer-checksum! cache-path #:sha256 expected-sha256 #:sha1 expected-sha1)))
-  (when (or no-cache? (not (file-exists? cache-path)))
-    (if (install-verbose?)
-        (install-verbose "Downloading installer: ~a" installer-url)
-        (install-info "Downloading installer..."))
-    (download-url->file installer-url cache-path)
-    (verify-installer-checksum! cache-path #:sha256 expected-sha256 #:sha1 expected-sha1)
-    (file-or-directory-permissions cache-path #o755))
-  cache-path)
+(define (announce-installer-download url)
+  (if (install-verbose?)
+      (install-verbose "Downloading installer: ~a" url)
+      (install-info "Downloading installer...")))
 
 (define (run-linux-installer! installer-file
                               install-root
@@ -143,7 +124,7 @@
   (install-verbose "Installing into ~a" (path->string dest))
   (define log-file (make-temporary-file "rackup-installer-~a.log"))
   (define (delete-log!)
-    (with-handlers ([exn:fail? (lambda (_) (void))])
+    (try-or (void)
       (delete-file log-file)))
   (define detected-shell-mode
     (and (regexp-match? #px"[.]sh$" (string-downcase (path->string* installer)))
@@ -175,7 +156,7 @@
              (run-modern))))))
   (unless ok?
     (define details
-      (with-handlers ([exn:fail? (lambda (_) "")])
+      (try-or ""
         (call-with-input-file* log-file (lambda (in) (string-trim (port->string in))))))
     (install-warn "Installer script failed.")
     (unless (string-blank? details)
@@ -190,7 +171,7 @@
 
 (define (file-executable?/safe p)
   (and (file-exists? p)
-       (with-handlers ([exn:fail? (lambda (_) #f)])
+       (try-or #f
          (member 'execute (file-or-directory-permissions p)))))
 
 (define (enumerate-toolchain-executables real-bin-dir)
@@ -212,10 +193,7 @@
 
 (define (make-bin-overlay! id real-bin-dir extra-exes)
   (define overlay (rackup-toolchain-bin-link id))
-  (cond
-    [(link-exists? overlay) (delete-file overlay)]
-    [(file-exists? overlay) (delete-file overlay)]
-    [(directory-exists? overlay) (delete-directory/files overlay)])
+  (delete-path! overlay)
   (make-directory* overlay)
   (for ([p (in-list (directory-list real-bin-dir #:build? #t))]
         #:when (and (file-exists? p) (file-executable?/safe p)))
@@ -257,10 +235,9 @@
   (define quoted-args (string-join (map sh-single-quote args) " "))
   (define args-suffix (if (equal? quoted-args "") "" (string-append " " quoted-args)))
   (define body
-    @~a{#!/usr/bin/env bash
-        set -euo pipefail
-        exec @|quoted-exe|@|args-suffix| "$@"@""
-        })
+    (string-append "#!/usr/bin/env bash\n"
+                   "set -euo pipefail\n"
+                   "exec " quoted-exe args-suffix " \"$@\"\n"))
   (write-string-file dest body)
   (file-or-directory-permissions dest #o755))
 
@@ -273,26 +250,8 @@
     (define src (assoc name extra-exes))
     (when src
       (define dest (build-path overlay name))
-      (when (or (link-exists? dest) (file-exists? dest))
-        (delete-file dest))
+      (delete-path! dest)
       (write-exec-wrapper! dest (cdr src) boot-args))))
-
-(define (write-toolchain-env-file! id env-vars)
-  (define p (rackup-toolchain-env-file id))
-  (define body
-    (string-append "#!/usr/bin/env bash\n"
-                   "# rackup managed toolchain environment\n"
-                   (apply string-append
-                          (for/list ([kv (in-list env-vars)])
-                            (env-var-export-line (car kv) (cdr kv))))))
-  (write-string-file p body)
-  (file-or-directory-permissions p #o644)
-  p)
-
-(define (delete-toolchain-env-file! id)
-  (define p (rackup-toolchain-env-file id))
-  (when (file-exists? p)
-    (delete-file p)))
 
 (define (path-complete-string p)
   (path->string* (path->complete-path p)))
@@ -362,28 +321,24 @@
               (set! names->paths (make-hash))
               (hash-set! dirs->executables dir names->paths))
             (hash-set! names->paths (path-basename-string p) p)))
-        (let* ([scored (for/list ([dir (in-list (hash-keys dirs->executables))])
-                         (define names->paths (hash-ref dirs->executables dir))
-                         (define both?
-                           (and (hash-has-key? names->paths "scheme")
-                                (hash-has-key? names->paths "petite")))
-                         (define score
-                           (+ (if both? 200 0)
-                              (if (path-contains? dir #rx"/src/build/") 100 0)
-                              (if (path-contains? dir #rx"/ChezScheme/") 40 0)
-                              (if (path-contains? dir #rx"/bin/") 20 0)))
-                         (list dir names->paths score (path->string* dir)))]
-               [best (car (sort scored
-                                (lambda (a b)
-                                  (define sa (list-ref a 2))
-                                  (define sb (list-ref b 2))
-                                  (define pa (list-ref a 3))
-                                  (define pb (list-ref b 3))
-                                  (or (> sa sb) (and (= sa sb) (string<? pa pb))))))]
-               [names->paths (list-ref best 1)])
-          (for/list ([name (in-list chez-extra-names)]
-                     #:when (hash-has-key? names->paths name))
-            (cons name (hash-ref names->paths name)))))))
+        (define (dir-score dir)
+          (define names->paths (hash-ref dirs->executables dir))
+          (define both?
+            (and (hash-has-key? names->paths "scheme")
+                 (hash-has-key? names->paths "petite")))
+          (+ (if both? 200 0)
+             (if (path-contains? dir #rx"/src/build/") 100 0)
+             (if (path-contains? dir #rx"/ChezScheme/") 40 0)
+             (if (path-contains? dir #rx"/bin/") 20 0)))
+        ;; Sort by path first so argmax (which keeps the first maximum)
+        ;; breaks score ties deterministically.
+        (define best
+          (argmax dir-score
+                  (sort (hash-keys dirs->executables) string<? #:key path->string*)))
+        (define names->paths (hash-ref dirs->executables best))
+        (for/list ([name (in-list chez-extra-names)]
+                   #:when (hash-has-key? names->paths name))
+          (cons name (hash-ref names->paths name))))))
 
 (define (detect-local-source-layout path-input)
   (define input-path
@@ -488,22 +443,12 @@
   ;; tends to be wrong for users whose packages live in their native
   ;; addon-dir (e.g., ~/.local/share/racket/<install-name>/), and the
   ;; old behavior caused silent breakage of `raco pkg` operations.
-  (define addon-entry
-    (if (and (string? addon-dir) (not (string-blank? addon-dir)))
-        (list (cons "PLTADDONDIR" addon-dir))
-        null))
   (define bin-dir-str (hash-ref layout 'bin-dir #f))
   (define existing-roots
     (if bin-dir-str
         (read-toolchain-compiled-file-roots (string->path bin-dir-str))
         '(same)))
-  (define compiled-roots-entry
-    (cond
-      [(compiled-roots-value version variant existing-roots local-name)
-       =>
-       (lambda (v) (list (cons "PLTCOMPILEDROOTS" v)))]
-      [else null]))
-  (append addon-entry compiled-roots-entry))
+  (toolchain-env-var-entries addon-dir version variant existing-roots local-name))
 
 ;; Old PLT Scheme installations (version <= 4.x) have a shell wrapper at
 ;; plt/bin/mzscheme that uses $PLTHOME to locate the real binary under
@@ -524,14 +469,13 @@
        (list (cons "PLTHOME" (path->string* plthome-normalized)))]
       [else null]))
   (define compiled-roots-entry
-    (cond
-      [(and (hash? request)
-            (compiled-roots-value (hash-ref request 'resolved-version #f)
-                                  (hash-ref request 'variant #f)
-                                  (read-toolchain-compiled-file-roots real-bin-dir)))
-       =>
-       (lambda (v) (list (cons "PLTCOMPILEDROOTS" v)))]
-      [else null]))
+    (if (hash? request)
+        (toolchain-env-var-entries #f
+                                   (hash-ref request 'resolved-version #f)
+                                   (hash-ref request 'variant #f)
+                                   (read-toolchain-compiled-file-roots real-bin-dir)
+                                   #f)
+        null))
   (append plthome-entry compiled-roots-entry))
 
 (define (toolchain-meta request id real-bin-dir executables [env-vars null] [prefix #f])
@@ -570,8 +514,7 @@
         'toolchain-prefix
         (and prefix (path->string* prefix))
         'env-vars
-        (for/list ([kv (in-list env-vars)])
-          (list (car kv) (cdr kv)))
+        (env-vars->meta env-vars)
         'executables
         executables
         'installed-at
@@ -703,8 +646,7 @@
         'real-bin-dir
         (path->string* real-bin-dir)
         'env-vars
-        (for/list ([kv (in-list env-vars)])
-          (list (car kv) (cdr kv)))
+        (env-vars->meta env-vars)
         'executables
         executables
         'installed-at
@@ -720,7 +662,7 @@
   (define tc-dir (rackup-toolchain-dir id))
   (when (hash-ref parsed-opts 'force? #f)
     (delete-toolchain-dir! tc-dir)
-    (when (or (link-exists? tc-dir) (directory-exists? tc-dir))
+    (when (dir-or-link-exists? tc-dir)
       (rackup-error "failed to remove existing toolchain before relink: ~a" id)))
   (define layout (detect-local-source-layout local-path))
   (define real-bin-dir (string->path (hash-ref layout 'bin-dir)))
@@ -729,7 +671,7 @@
     (rackup-error "linked toolchain does not contain an executable racket binary at ~a"
                   (path->string* racket-exe)))
   (cond
-    [(or (link-exists? tc-dir) (directory-exists? tc-dir))
+    [(dir-or-link-exists? tc-dir)
      (rackup-error "toolchain already exists: ~a (use --force to relink)" id)]
     [else
      (with-handlers ([exn:fail? (lambda (e)
@@ -769,9 +711,7 @@
   (define env-vars (local-layout-env-vars layout addon-dir* version* variant* name))
   (make-bin-overlay! id real-bin-dir extra-exes)
   (maybe-wrap-local-chez-extra-executables! id extra-exes layout)
-  (if (pair? env-vars)
-      (write-toolchain-env-file! id env-vars)
-      (delete-toolchain-env-file! id))
+  (sync-toolchain-env-file! id env-vars)
   (ensure-toolchain-addon-dir! id)
   (define executables (enumerate-toolchain-executables (rackup-toolchain-bin-link id)))
   (define base-meta
@@ -844,9 +784,7 @@
                (hash-ref request 'arch)
                (hash-ref request 'platform))
        (flush-output)
-       (define answer (read-line))
-       (unless (and (string? answer)
-                    (member (string-downcase (string-trim answer)) '("y" "yes")))
+       (unless (yes-answer? (read-line))
          (rackup-error "install aborted"))]
       [else
        ;; Default full was unavailable; proceed with warning
@@ -862,7 +800,7 @@
     (define explicit-default? (hash-ref parsed-opts 'set-default? #f))
     (when (hash-ref parsed-opts 'force? #f)
       (delete-toolchain-dir! tc-dir)
-      (when (or (link-exists? tc-dir) (directory-exists? tc-dir))
+      (when (dir-or-link-exists? tc-dir)
         (rackup-error "failed to remove existing toolchain before reinstall: ~a" id)))
     ;; A dangling --prefix symlink (target wiped, e.g., /tmp cleared) or a
     ;; ghost dir from an interrupted install would block the reinstall;
@@ -885,7 +823,8 @@
          (ensure-installer-cached! (hash-ref request 'installer-url)
                                    #:no-cache? (hash-ref parsed-opts 'no-cache? #f)
                                    #:sha256 (hash-ref request 'installer-sha256 #f)
-                                   #:sha1 (hash-ref request 'installer-sha1 #f)))
+                                   #:sha1 (hash-ref request 'installer-sha1 #f)
+                                   #:announce announce-installer-download))
        (define installer-ext
          (detect-installer-type
           (hash-ref request
@@ -899,7 +838,7 @@
          (cond
            [prefix
             (define real (build-path prefix id))
-            (when (or (link-exists? real) (directory-exists? real))
+            (when (dir-or-link-exists? real)
               (rackup-error
                (string-append
                 "refusing to install ~a into existing prefix path: ~a\n"
@@ -932,9 +871,7 @@
          (maybe-modernize-legacy-archsys! real-bin-dir)
          (make-bin-link! id real-bin-dir)
          (define env-vars (installed-toolchain-env-vars real-bin-dir request))
-         (if (pair? env-vars)
-             (write-toolchain-env-file! id env-vars)
-             (delete-toolchain-env-file! id))
+         (sync-toolchain-env-file! id env-vars)
          (ensure-toolchain-addon-dir! id)
          (define executables (enumerate-toolchain-executables real-bin-dir))
          (define meta (toolchain-meta request id real-bin-dir executables env-vars prefix))
@@ -964,12 +901,6 @@
 
 ;; ---------------------------------------------------------------------------
 ;; Upgrade
-
-;; Build the environment variable alist for running a toolchain's raco.
-(define (toolchain-runtime-env id)
-  (append (toolchain-env-vars id)
-          (list (cons "PLTADDONDIR"
-                      (path->string (rackup-addon-dir id))))))
 
 ;; Run raco with the correct env for a toolchain.  Returns stdout as a
 ;; string on success, #f on failure.
@@ -1015,7 +946,7 @@
 ;; or #f if the toolchain's racket cannot be invoked.
 (define (toolchain-user-package-dirs id)
   (define out
-    (with-handlers ([exn:fail? (lambda (_) #f)])
+    (try-or #f
       (capture-racket-eval-output id list-pkg-dirs-program)))
   (cond
     [(or (not out) (string-blank? out)) null]
@@ -1030,7 +961,7 @@
 (define (for-each-named-subdir root target proc)
   (define (walk dir)
     (when (and (directory-exists? dir) (not (link-exists? dir)))
-      (for ([entry (in-list (with-handlers ([exn:fail? (lambda (_) null)])
+      (for ([entry (in-list (try-or null
                               (directory-list dir #:build? #t)))])
         (cond
           [(link-exists? entry) (void)]
@@ -1132,14 +1063,11 @@
                    (string-join pkgs " "))
      (define bin (rackup-toolchain-bin-link new-id))
      (define raco-exe (build-path bin "raco"))
-     (define env (environment-variables-copy (current-environment-variables)))
-     (for ([kv (in-list (toolchain-runtime-env new-id))])
-       (environment-variables-set! env
-                                   (string->bytes/utf-8 (car kv))
-                                   (string->bytes/utf-8 (cdr kv))))
      (define ok?
-       (parameterize ([current-environment-variables env])
-         (apply system* raco-exe "pkg" "install" "--auto" "--skip-installed" pkgs)))
+       (call-with-env-overlay
+        (toolchain-runtime-env new-id)
+        (lambda ()
+          (apply system* raco-exe "pkg" "install" "--auto" "--skip-installed" pkgs))))
      (cond
        [ok?
         (install-ok "Migrated ~a package~a."
@@ -1333,8 +1261,6 @@
 (module+ for-testing
   (provide discover-bin-dir
            installed-toolchain-env-vars
-           ensure-installer-cached!
            parse-pkg-show-output
            meta->upgrade-spec
-           write-toolchain-env-file!
            clean-toolchain-compiled-dirs!))

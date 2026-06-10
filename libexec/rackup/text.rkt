@@ -10,6 +10,7 @@
          path-basename-string
          sh-single-quote
          env-var-export-line
+         yes-answer?
          color-enabled?
          ansi)
 
@@ -35,6 +36,16 @@
 
 (define (env-var-export-line key value)
   (format "export ~a=~a\n" key (sh-single-quote value)))
+
+;; Interpret an interactive yes/no answer.  Non-strings (#f, eof) count
+;; as no answer.  `#:empty-means-yes?` selects the default for a bare
+;; enter: #t for a "[Y/n]" prompt, #f for a "[y/N]" prompt.
+(define (yes-answer? s #:empty-means-yes? [empty-yes? #f])
+  (define a (and (string? s) (string-downcase (string-trim s))))
+  (cond
+    [(not a) #f]
+    [(string=? a "") empty-yes?]
+    [else (and (member a '("y" "yes")) #t)]))
 
 (define (color-enabled?)
   (and (terminal-port? (current-output-port)) (not (getenv "NO_COLOR"))))

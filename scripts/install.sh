@@ -280,6 +280,17 @@ download_file() {
   fi
 }
 
+# Download a URL and print its contents to stdout.
+download_stdout() {
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL "$1" 2>/dev/null
+  elif command -v wget >/dev/null 2>&1; then
+    wget -qO- "$1" 2>/dev/null
+  else
+    return 1
+  fi
+}
+
 # Like download_file, but show a progress bar on stderr when stderr is a
 # terminal.  Use for large downloads (binary tarballs) where the user
 # benefits from seeing progress.
@@ -375,6 +386,60 @@ has_prebuilt_binary() {
   esac
 }
 
+# Extract a .tar.gz into DEST_DIR and print the single top-level
+# directory it contains (empty output if there is none).
+# Use -m so future mtimes in the archive do not produce noisy warnings
+# on skewed clocks.
+extract_tarball_dir() {
+  tarball="$1"
+  dest_dir="$2"
+  mkdir -p "$dest_dir"
+  tar -xzmf "$tarball" -C "$dest_dir"
+  find "$dest_dir" -mindepth 1 -maxdepth 1 -type d | head -n 1
+}
+
+# Install an unpacked prebuilt binary distribution (bin/, lib/, libexec/)
+# from $1 into $PREFIX, handling macOS quarantine and code signing.
+# The caller must have verified that $1/bin/rackup-core is executable.
+install_binary_distribution() {
+  binary_dir="$1"
+  mkdir -p "$PREFIX/bin" "$PREFIX/libexec"
+  cp "$binary_dir/bin/rackup" "$PREFIX/bin/rackup"
+  cp "$binary_dir/bin/rackup-core" "$PREFIX/bin/rackup-core"
+  chmod +x "$PREFIX/bin/rackup" "$PREFIX/bin/rackup-core"
+  # Remove macOS quarantine flag so Gatekeeper does not kill the binary.
+  if command -v xattr >/dev/null 2>&1; then
+    xattr -dr com.apple.quarantine "$PREFIX/bin" 2>/dev/null || true
+  fi
+  # Ad-hoc sign on macOS so the binary passes code signature
+  # validation.  macOS 26 (Tahoe) can reject signatures produced
+  # by older macOS versions' codesign tool (see
+  # https://github.com/astral-sh/uv/pull/17123).  Re-signing with
+  # the user's local codesign ensures the signature is accepted.
+  if [ "$(uname -s)" = "Darwin" ]; then
+    if command -v codesign >/dev/null 2>&1; then
+      codesign --sign - --force "$PREFIX/bin/rackup-core" || {
+        warn "Error: codesign failed on $PREFIX/bin/rackup-core"
+        warn "The binary may be killed by the kernel on macOS 26+."
+      }
+    else
+      warn "Warning: codesign not found; cannot re-sign binary."
+      warn "Install Xcode Command Line Tools: xcode-select --install"
+      warn "Otherwise the binary may be killed on macOS 26+."
+    fi
+  fi
+  if [ -d "$binary_dir/lib" ]; then
+    rm -rf "${PREFIX:?}/lib"
+    cp -R "$binary_dir/lib" "$PREFIX/lib"
+    if command -v xattr >/dev/null 2>&1; then
+      xattr -dr com.apple.quarantine "$PREFIX/lib" 2>/dev/null || true
+    fi
+  fi
+  cp "$binary_dir/libexec/rackup-bootstrap.sh" "$PREFIX/libexec/rackup-bootstrap.sh"
+  chmod +x "$PREFIX/libexec/rackup-bootstrap.sh"
+  INSTALLED_PREBUILT=1
+}
+
 # --- Early up-to-date check for self-upgrade ---
 # On self-upgrade from the default repo, download just the tiny checksum
 # file and compare to the stored hash.  Skip the full install if they match.
@@ -383,34 +448,20 @@ if [ "$BOOTSTRAP_MODE" = "self-upgrade" ] && [ -z "$FROM_LOCAL" ] &&
   [ "$REF" = "main" ]; then
   _upgrade_base_url="${PAGES_BASE_URL:-https://samth.github.io/rackup}"
   _installed_sha_file="$PREFIX/.installed-sha256"
-  if [ "$FORCE_SOURCE" -eq 1 ]; then
-    _remote_sha_url="$_upgrade_base_url/rackup-src.tar.gz.sha256"
-  elif [ "$FORCE_EXE" -eq 1 ]; then
-    _host_arch="$(detect_arch)"
-    _host_platform="$(detect_platform)"
-    _host_binary_target="$(binary_target "$_host_arch" "$_host_platform")"
+  _host_arch="$(detect_arch)"
+  _host_platform="$(detect_platform)"
+  _host_binary_target="$(binary_target "$_host_arch" "$_host_platform")"
+  # In auto mode, check the exe checksum if a prebuilt is available, source otherwise.
+  if [ "$FORCE_SOURCE" -eq 0 ] &&
+    { [ "$FORCE_EXE" -eq 1 ] || has_prebuilt_binary "${_host_arch}-${_host_platform}"; }; then
     _remote_sha_url="$_upgrade_base_url/rackup-${_host_binary_target}.tar.gz.sha256"
   else
-    # Auto mode: check the exe checksum if a prebuilt is available, source otherwise.
-    _host_arch="$(detect_arch)"
-    _host_platform="$(detect_platform)"
-    _host_binary_target="$(binary_target "$_host_arch" "$_host_platform")"
-    if has_prebuilt_binary "${_host_arch}-${_host_platform}"; then
-      _remote_sha_url="$_upgrade_base_url/rackup-${_host_binary_target}.tar.gz.sha256"
-    else
-      _remote_sha_url="$_upgrade_base_url/rackup-src.tar.gz.sha256"
-    fi
+    _remote_sha_url="$_upgrade_base_url/rackup-src.tar.gz.sha256"
   fi
   if [ -f "$_installed_sha_file" ]; then
     _installed_sha="$(cat "$_installed_sha_file")"
     _remote_sha=""
-    if command -v curl >/dev/null 2>&1; then
-      _remote_sha_content="$(curl -fsSL "$_remote_sha_url" 2>/dev/null)" || true
-    elif command -v wget >/dev/null 2>&1; then
-      _remote_sha_content="$(wget -qO- "$_remote_sha_url" 2>/dev/null)" || true
-    else
-      _remote_sha_content=""
-    fi
+    _remote_sha_content="$(download_stdout "$_remote_sha_url")" || _remote_sha_content=""
     if [ -n "$_remote_sha_content" ]; then
       _remote_sha="$(echo "$_remote_sha_content" | cut -d ' ' -f 1)"
     fi
@@ -420,6 +471,16 @@ if [ "$BOOTSTRAP_MODE" = "self-upgrade" ] && [ -z "$FROM_LOCAL" ] &&
     fi
   fi
 fi
+
+# Rebuild shims, then record the installed checksum ($1, may be empty)
+# only after reshim succeeds, so a failed upgrade can be retried (the
+# self-upgrade up-to-date check compares this hash).
+reshim_and_store_checksum() {
+  "$PREFIX/bin/rackup" reshim >/dev/null
+  if [ -n "$1" ]; then
+    printf '%s\n' "$1" >"$PREFIX/.installed-sha256"
+  fi
+}
 
 # --- Try prebuilt binary before falling back to source ---
 INSTALLED_PREBUILT=0
@@ -469,29 +530,10 @@ if [ -z "$FROM_LOCAL" ] && [ "$FORCE_SOURCE" -eq 0 ]; then
         GH_TARBALL="$GH_TMPDIR/$BINARY_NAME"
         if [ -f "$GH_TARBALL" ]; then
           info "Downloaded CI binary artifact for $BINARY_TARGET."
-          mkdir -p "$TMPDIR_INSTALL/binary"
-          tar -xzmf "$GH_TARBALL" -C "$TMPDIR_INSTALL/binary"
-          BINARY_DIR="$(find "$TMPDIR_INSTALL/binary" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
+          BINARY_DIR="$(extract_tarball_dir "$GH_TARBALL" "$TMPDIR_INSTALL/binary")"
           if [ -n "$BINARY_DIR" ] && [ -x "$BINARY_DIR/bin/rackup-core" ]; then
-            mkdir -p "$PREFIX"
-            mkdir -p "$PREFIX/bin" "$PREFIX/libexec"
-            cp "$BINARY_DIR/bin/rackup" "$PREFIX/bin/rackup"
-            cp "$BINARY_DIR/bin/rackup-core" "$PREFIX/bin/rackup-core"
-            chmod +x "$PREFIX/bin/rackup" "$PREFIX/bin/rackup-core"
-            if command -v xattr >/dev/null 2>&1; then
-              xattr -dr com.apple.quarantine "$PREFIX/bin" 2>/dev/null || true
-            fi
-            if [ -d "$BINARY_DIR/lib" ]; then
-              rm -rf "${PREFIX:?}/lib"
-              cp -R "$BINARY_DIR/lib" "$PREFIX/lib"
-              if command -v xattr >/dev/null 2>&1; then
-                xattr -dr com.apple.quarantine "$PREFIX/lib" 2>/dev/null || true
-              fi
-            fi
-            cp "$BINARY_DIR/libexec/rackup-bootstrap.sh" "$PREFIX/libexec/rackup-bootstrap.sh"
-            chmod +x "$PREFIX/libexec/rackup-bootstrap.sh"
+            install_binary_distribution "$BINARY_DIR"
             ok "Installed prebuilt binary from CI (run $GH_RUN_ID): $PREFIX/bin/rackup"
-            INSTALLED_PREBUILT=1
             GH_BINARY_DOWNLOADED=1
           else
             warn "CI binary artifact was invalid; will try other methods."
@@ -541,48 +583,10 @@ if [ -z "$FROM_LOCAL" ] && [ "$FORCE_SOURCE" -eq 0 ]; then
         rm -f "$TMPDIR_INSTALL/rackup-binary.tar.gz"
       fi
       if [ -f "$TMPDIR_INSTALL/rackup-binary.tar.gz" ]; then
-        mkdir -p "$TMPDIR_INSTALL/binary"
-        tar -xzmf "$TMPDIR_INSTALL/rackup-binary.tar.gz" -C "$TMPDIR_INSTALL/binary"
-        BINARY_DIR="$(find "$TMPDIR_INSTALL/binary" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
+        BINARY_DIR="$(extract_tarball_dir "$TMPDIR_INSTALL/rackup-binary.tar.gz" "$TMPDIR_INSTALL/binary")"
         if [ -n "$BINARY_DIR" ] && [ -x "$BINARY_DIR/bin/rackup-core" ]; then
-          mkdir -p "$PREFIX"
-          mkdir -p "$PREFIX/bin" "$PREFIX/libexec"
-          # Install the prebuilt binary distribution
-          cp "$BINARY_DIR/bin/rackup" "$PREFIX/bin/rackup"
-          cp "$BINARY_DIR/bin/rackup-core" "$PREFIX/bin/rackup-core"
-          chmod +x "$PREFIX/bin/rackup" "$PREFIX/bin/rackup-core"
-          # Remove macOS quarantine flag so Gatekeeper does not kill the binary.
-          if command -v xattr >/dev/null 2>&1; then
-            xattr -dr com.apple.quarantine "$PREFIX/bin" 2>/dev/null || true
-          fi
-          # Ad-hoc sign on macOS so the binary passes code signature
-          # validation.  macOS 26 (Tahoe) can reject signatures produced
-          # by older macOS versions' codesign tool (see
-          # https://github.com/astral-sh/uv/pull/17123).  Re-signing with
-          # the user's local codesign ensures the signature is accepted.
-          if [ "$(uname -s)" = "Darwin" ]; then
-            if command -v codesign >/dev/null 2>&1; then
-              codesign --sign - --force "$PREFIX/bin/rackup-core" || {
-                warn "Error: codesign failed on $PREFIX/bin/rackup-core"
-                warn "The binary may be killed by the kernel on macOS 26+."
-              }
-            else
-              warn "Warning: codesign not found; cannot re-sign binary."
-              warn "Install Xcode Command Line Tools: xcode-select --install"
-              warn "Otherwise the binary may be killed on macOS 26+."
-            fi
-          fi
-          if [ -d "$BINARY_DIR/lib" ]; then
-            rm -rf "${PREFIX:?}/lib"
-            cp -R "$BINARY_DIR/lib" "$PREFIX/lib"
-            if command -v xattr >/dev/null 2>&1; then
-              xattr -dr com.apple.quarantine "$PREFIX/lib" 2>/dev/null || true
-            fi
-          fi
-          cp "$BINARY_DIR/libexec/rackup-bootstrap.sh" "$PREFIX/libexec/rackup-bootstrap.sh"
-          chmod +x "$PREFIX/libexec/rackup-bootstrap.sh"
+          install_binary_distribution "$BINARY_DIR"
           ok "Installed prebuilt binary: $PREFIX/bin/rackup"
-          INSTALLED_PREBUILT=1
           INSTALLED_PREBUILT_SHA256="${expected_bin_sha256:-}"
         else
           if [ "$FORCE_EXE" -eq 1 ]; then
@@ -636,10 +640,7 @@ if [ "$INSTALLED_PREBUILT" -eq 0 ]; then
       warn "This is expected when running the repo copy directly. Use --from-local or --archive-url instead."
       exit 1
     fi
-    mkdir -p "$TMPDIR_INSTALL/src"
-    # Use -m so future mtimes in the archive do not produce noisy warnings on skewed clocks.
-    tar -xzmf "$TMPDIR_INSTALL/rackup.tar.gz" -C "$TMPDIR_INSTALL/src"
-    SRC_DIR="$(find "$TMPDIR_INSTALL/src" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
+    SRC_DIR="$(extract_tarball_dir "$TMPDIR_INSTALL/rackup.tar.gz" "$TMPDIR_INSTALL/src")"
   fi
 
   if [ -z "$SRC_DIR" ] || [ ! -d "$SRC_DIR" ]; then
@@ -651,21 +652,14 @@ if [ "$INSTALLED_PREBUILT" -eq 0 ]; then
   mkdir -p "$PREFIX/bin" "$PREFIX/libexec"
 
   info "Installing rackup into $PREFIX"
-  copy_filtered_tree() {
-    src_dir="$1"
-    dest_dir="$2"
-    shift 2
-    mkdir -p "$dest_dir"
-    (
-      cd "$src_dir"
-      find "$@" \
-        \( -type d \( -name .git -o -name compiled \) -prune \) -o \
-        \( -type f \( -name '*.zo' -o -name '*.dep' \) -prune \) -o \
-        \( -type f -o -type l \) -print0
-    ) | tar -C "$src_dir" --null -T - -cf - | tar -C "$dest_dir" -xf -
-  }
-
-  copy_filtered_tree "$SRC_DIR" "$PREFIX" bin libexec
+  # The source tarball bundles scripts/copy-filtered-tree.sh for exactly
+  # this step (see pages/build-pages-site.rkt); repo checkouts and
+  # GitHub ref archives contain it too.
+  if [ ! -r "$SRC_DIR/scripts/copy-filtered-tree.sh" ]; then
+    warn "Error: source tree is missing scripts/copy-filtered-tree.sh."
+    exit 1
+  fi
+  sh "$SRC_DIR/scripts/copy-filtered-tree.sh" "$SRC_DIR" "$PREFIX" bin libexec
   chmod +x "$PREFIX/bin/rackup"
   chmod +x "$PREFIX/libexec/rackup-bootstrap.sh" 2>/dev/null || true
 
@@ -702,12 +696,7 @@ if [ "$INSTALLED_PREBUILT" -eq 0 ]; then
 
   info "Registering/validating hidden runtime..."
   "$PREFIX/bin/rackup" runtime install >/dev/null
-  "$PREFIX/bin/rackup" reshim >/dev/null
-  # Store the checksum only after reshim succeeds, so a failed upgrade
-  # can be retried (the up-to-date check compares this hash).
-  if [ -n "${_INSTALLED_SRC_SHA256:-}" ]; then
-    printf '%s\n' "$_INSTALLED_SRC_SHA256" >"$PREFIX/.installed-sha256"
-  fi
+  reshim_and_store_checksum "${_INSTALLED_SRC_SHA256:-}"
 
 fi
 # --- End source/prebuilt branch ---
@@ -725,11 +714,7 @@ if [ "$INSTALLED_PREBUILT" -eq 1 ]; then
   if [ -f "$PREFIX/libexec/rackup-core.rkt" ]; then
     rm -rf "$PREFIX/libexec/rackup" "$PREFIX/libexec/rackup-core.rkt"
   fi
-  "$PREFIX/bin/rackup" reshim >/dev/null
-  # Store the checksum only after reshim succeeds.
-  if [ -n "${INSTALLED_PREBUILT_SHA256:-}" ]; then
-    printf '%s\n' "$INSTALLED_PREBUILT_SHA256" >"$PREFIX/.installed-sha256"
-  fi
+  reshim_and_store_checksum "${INSTALLED_PREBUILT_SHA256:-}"
 fi
 
 default_shell="$(basename "${SHELL:-bash}")"

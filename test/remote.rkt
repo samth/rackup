@@ -8,14 +8,11 @@
          racket/runtime-path
          racket/string
          "../libexec/rackup/install.rkt"
+         "../libexec/rackup/installer-backend.rkt"
          "../libexec/rackup/legacy-plt-catalog.rkt"
          "../libexec/rackup/remote.rkt"
          "../libexec/rackup/runtime.rkt"
-         (submod "../libexec/rackup/remote.rkt" for-testing)
-         (rename-in (submod "../libexec/rackup/install.rkt" for-testing)
-                    [ensure-installer-cached! install-ensure-installer-cached!])
-         (rename-in (submod "../libexec/rackup/runtime.rkt" for-testing)
-                    [ensure-installer-cached! runtime-ensure-installer-cached!]))
+         (submod "../libexec/rackup/remote.rkt" for-testing))
 
 (module+ test
   (define-runtime-path repo-root "..")
@@ -339,14 +336,7 @@
      (check-exn
       #px"refusing to download installer over HTTP without a hardcoded SHA-256 checksum"
       (lambda ()
-        (install-ensure-installer-cached! "http://download.plt-scheme.org/example.sh")))))
-
-  (with-temp-rackup-home
-   (lambda (_tmp-home)
-     (check-exn
-      #px"refusing to download installer over HTTP without a hardcoded SHA-256 checksum"
-      (lambda ()
-        (runtime-ensure-installer-cached! "http://download.plt-scheme.org/example.sh")))))
+        (ensure-installer-cached! "http://download.plt-scheme.org/example.sh")))))
 
   (check-exn exn:fail?
              (lambda () (resolve-install-request "053" #:arch "i386" #:platform "linux")))

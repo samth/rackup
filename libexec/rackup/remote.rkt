@@ -847,7 +847,7 @@
      ;; pre-release.racket-lang.org may not publish installers/version.rktd.
      ;; Derive a usable version from table.rktd when that metadata is absent.
      (define maybe-version-rktd
-       (with-handlers ([exn:fail? (lambda (_) #f)])
+       (try-or #f
          (fetch-version-rktd pre-release-installers-base)))
      (define resolved-version
        (let ([from-rktd (and maybe-version-rktd

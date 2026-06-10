@@ -5,11 +5,16 @@
          racket/path
          racket/string
          racket/system
+         "checksum.rkt"
          "error.rkt"
+         "paths.rkt"
          "process.rkt"
+         "remote.rkt"
+         "security.rkt"
          "text.rkt")
 
 (provide detect-installer-type
+         ensure-installer-cached!
          extract-tgz-installer!
          install-from-dmg!
          discover-bin-dir)
@@ -39,6 +44,34 @@
     [else #f]))
 
 (define (tar-exe) (find-executable-path/default "tar" "/bin/tar"))
+
+(define (installer-cache-path installer-url)
+  (build-path (rackup-download-cache-dir)
+              (path-basename-string (string->path (last (string-split installer-url "/"))))))
+
+;; Download an installer into the shared download cache, verifying its
+;; checksum, and return the cached path.  A cached file whose checksum
+;; no longer matches is deleted and redownloaded; `#:no-cache?` forces a
+;; redownload.  `#:announce` is called with the URL before downloading.
+(define (ensure-installer-cached! installer-url
+                                  #:no-cache? [no-cache? #f]
+                                  #:sha256 [expected-sha256 #f]
+                                  #:sha1 [expected-sha1 #f]
+                                  #:announce [announce
+                                              (lambda (url)
+                                                (displayln (format "Downloading installer: ~a" url)))])
+  (ensure-rackup-layout!)
+  (require-checksummed-http-installer! installer-url expected-sha256)
+  (define cache-path (installer-cache-path installer-url))
+  (when (and (file-exists? cache-path) (or expected-sha256 expected-sha1))
+    (with-handlers ([exn:fail? (lambda (_) (delete-file cache-path))])
+      (verify-installer-checksum! cache-path #:sha256 expected-sha256 #:sha1 expected-sha1)))
+  (when (or no-cache? (not (file-exists? cache-path)))
+    (announce installer-url)
+    (download-url->file installer-url cache-path)
+    (verify-installer-checksum! cache-path #:sha256 expected-sha256 #:sha1 expected-sha1)
+    (file-or-directory-permissions cache-path #o755))
+  cache-path)
 
 ;; Extract a .tgz installer archive into install-root.
 ;; `#:check-label` sets the error-context label; `#:archive-noun` and
