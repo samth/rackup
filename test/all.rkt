@@ -13,6 +13,7 @@
          "security.rkt"
          "shell-completion.rkt"
          "state-shims.rkt"
+         "switch-install.rkt"
          "text.rkt"
          "uninstall.rkt"
          "upgrade.rkt"

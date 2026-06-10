@@ -184,14 +184,21 @@
         "__no__"))
   (or (string=? a "") (member a '("y" "yes"))))
 
+;; Open the controlling terminal for interactive prompts.  A parameter
+;; so tests can substitute string ports.
+(define current-open-user-tty
+  (make-parameter
+   (lambda ()
+     (values (open-input-file "/dev/tty")
+             (open-output-file "/dev/tty" #:exists 'append)))))
+
 (define (call-with-user-tty proc)
   (with-handlers ([exn:fail?
                    (lambda (_)
                      (and (terminal-port? (current-input-port))
                           (terminal-port? (current-error-port))
                           (proc (current-input-port) (current-error-port))))])
-    (define tty-in (open-input-file "/dev/tty"))
-    (define tty-out (open-output-file "/dev/tty" #:exists 'append))
+    (define-values (tty-in tty-out) ((current-open-user-tty)))
     (dynamic-wind void
                   (lambda () (proc tty-in tty-out))
                   (lambda ()
@@ -395,7 +402,11 @@
   (cond
     [deactivate? (display (emit-shell-deactivation))]
     [(= (length args) 1)
-     (define id (resolve-toolchain-or-die (first args)))
+     ;; As with `rackup switch`, stdout is eval'd by the shell function
+     ;; and must carry only shell code.
+     (define id
+       (parameterize ([current-output-port (current-error-port)])
+         (resolve-toolchain-or-die (first args))))
      (display (emit-shell-activation id))]
     [else (rackup-error "usage: rackup shell <toolchain> | rackup shell --deactivate")]))
 
@@ -413,7 +424,17 @@
   (cond
     [unset? (display (emit-shell-deactivation))]
     [(= (length args) 1)
-     (define id (resolve-toolchain-or-offer-install (first args)))
+     ;; The shell-integration function evals the stdout of `rackup
+     ;; switch`, so stdout must carry only the activation shell code.
+     ;; Route everything else -- notably install progress when the user
+     ;; accepts the offer to install -- to stderr.
+     ;; The shell-integration function evals the stdout of `rackup
+     ;; switch`, so stdout must carry only the activation shell code.
+     ;; Route everything else -- notably install progress when the user
+     ;; accepts the offer to install -- to stderr.
+     (define id
+       (parameterize ([current-output-port (current-error-port)])
+         (resolve-toolchain-or-offer-install (first args))))
      (display (emit-shell-activation id))]
     [else (rackup-error "usage: rackup switch <toolchain> | rackup switch --unset")]))
 
@@ -1138,5 +1159,6 @@
            validate-uninstall-home-path!
            delete-rackup-home!/external
            installed-toolchain-metas/safe
+           current-open-user-tty
            current-remove-shell-init-blocks-proc
            current-uninstall-system*-proc))
