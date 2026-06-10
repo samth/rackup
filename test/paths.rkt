@@ -28,8 +28,6 @@
                    (build-path tmp "runtime" "current" "bin"))
      (check-equal? (rackup-runtime-current-racket)
                    (build-path tmp "runtime" "current" "bin" "racket"))
-     (check-equal? (rackup-legacy-config-file) (build-path tmp "state" "config.rktd"))
-     (check-equal? (rackup-legacy-shim-aliases-file) (build-path tmp "state" "shim-aliases"))
      (check-equal? (rackup-shim-path "racket") (build-path tmp "shims" "racket"))
      (check-equal? (rackup-toolchain-exe-path "stable" "racket")
                    (build-path tmp "toolchains" "stable" "bin" "racket")))))

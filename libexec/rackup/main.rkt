@@ -151,21 +151,18 @@
   (define idx (load-index))
   (define registered (installed-toolchain-ids idx))
   (define orphan-ids (filter (lambda (id) (not (member id registered))) (toolchain-dir-ids/safe)))
-  (define (unique xs)
-    (and (= (length xs) 1) (car xs)))
-  (define (ambiguous xs)
-    (and (> (length xs) 1)
-         (rackup-error "multiple orphan/partial toolchain directories match '~a': ~a"
-                       spec
-                       (string-join xs ", "))))
+  (define (unique-or-ambiguous xs)
+    (cond
+      [(null? xs) #f]
+      [(null? (cdr xs)) (car xs)]
+      [else
+       (rackup-error "multiple orphan/partial toolchain directories match '~a': ~a"
+                     spec
+                     (string-join xs ", "))]))
+  (define rx (pregexp (format "(^|-)~a([.-]|-|$)" (regexp-quote spec))))
   (or (and (member spec orphan-ids) spec)
-      (let ([xs (filter (lambda (id) (string-prefix? id spec)) orphan-ids)])
-        (or (unique xs) (ambiguous xs)))
-      (let* ([quoted (regexp-quote spec)]
-             [rx (pregexp (format "(^|-)~a([.-]|-|$)" quoted))]
-             [xs (filter (lambda (id) (regexp-match? rx id)) orphan-ids)])
-        (or (unique xs) (ambiguous xs)))
-      #f))
+      (unique-or-ambiguous (filter (lambda (id) (string-prefix? id spec)) orphan-ids))
+      (unique-or-ambiguous (filter (lambda (id) (regexp-match? rx id)) orphan-ids))))
 
 (define (remove-orphan-toolchain! id)
   (define tc-dir (rackup-toolchain-dir id))
@@ -368,8 +365,7 @@
                    (set! toolchain (resolve-toolchain-or-die id))]
                   #:args (exe)
                   exe))
-  (define tc toolchain)
-  (define p (resolve-executable-path exe tc))
+  (define p (resolve-executable-path exe toolchain))
   (if p
       (displayln (path->string p))
       (begin
@@ -829,7 +825,7 @@
   (remove-duplicates
    (filter values
            (for/list ([m (in-list (installed-toolchain-metas/safe))])
-             (and (hash? m) (equal? (hash-ref m 'kind #f) 'local) (hash-ref m 'source-path #f))))
+             (and (equal? (hash-ref m 'kind #f) 'local) (hash-ref m 'source-path #f))))
    string=?))
 
 (define (warn-uninstall-summary home-path)

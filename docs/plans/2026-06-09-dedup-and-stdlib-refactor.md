@@ -76,6 +76,44 @@ New reusable abstractions:
   `runtime.rkt`).
 - `text.rkt`: `yes-answer?` for interactive `[y/N]`/`[Y/n]` prompts.
 
+## Phase 3: needless defensiveness and dead feature code (2026-06-10)
+
+A follow-up pass hunting redundant error handling and unnecessary code:
+
+- **Removed the index `aliases` map entirely.** No command ever wrote an
+  alias — the map was always empty — yet `resolve-name-with-meta`,
+  `find-local-toolchain`, and `toolchain-short-names` all carried alias
+  plumbing. An old index containing the key still loads (normalize-index
+  drops unknown keys).
+- **Removed the legacy `config.rktd`/`shim-aliases` migrations** in
+  `ensure-index!` and their path accessors. Those formats existed only
+  between 2026-02-26 and 2026-03-17; any install touched since then has
+  already migrated.
+- **Removed the hash form of `meta->env-vars`.** env-vars was written as
+  a list-of-lists from the first commit that introduced it; the hash
+  branch never had a writer.
+- **Removed the unreachable "failed to remove existing toolchain"
+  checks** after `delete-toolchain-dir!` in install/link: deletion
+  failures raise on their own.
+- **remote.rkt restructure:** the request hash construction
+  (`install-request-hash`), download-page checksum attachment
+  (`attach-page-checksum`), and full→minimal retry
+  (`try-with-minimal-fallback`) were each written out two to four times
+  across the release/pre-release/snapshot resolvers; each is now one
+  helper.
+- **Shared `installer-platform-fields`** (versioning.rkt): the
+  platform-token decomposition duplicated between
+  `parse-installer-filename` (remote.rkt) and
+  `parse-legacy-installer-filename` (legacy.rkt).
+- **versioning.rkt:** `version-token->number`'s four-way match collapsed
+  via zero-padding; `arch-token->normalized`'s identity branches dropped
+  (only arm64 and the ppc family actually map to something else).
+- Smaller: `upgradeable-toolchains` read each meta.rktd twice; dropped
+  the `version-maybe-plt-scheme?` alias, the `ansi-color` and
+  `install-verbosity` pass-through wrappers, a `(hash? m)` guard after
+  `(filter hash? ...)`, and `find-orphan-toolchain-id`'s split
+  unique/ambiguous helpers.
+
 ## Test-suite coverage fix
 
 `test/all.rkt` required each test file's *main* module, but every test

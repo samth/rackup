@@ -49,31 +49,25 @@
 
 (define current-install-verbosity (make-parameter 'normal))
 
-(define (install-verbosity)
-  (current-install-verbosity))
-
 (define (install-quiet?)
-  (eq? (install-verbosity) 'quiet))
+  (eq? (current-install-verbosity) 'quiet))
 
 (define (install-verbose?)
-  (eq? (install-verbosity) 'verbose))
-
-(define (ansi-color code s)
-  (ansi code s))
+  (eq? (current-install-verbosity) 'verbose))
 
 (define (install-info fmt . args)
   (unless (install-quiet?)
-    (displayln (ansi-color "34" (apply format fmt args)))))
+    (displayln (ansi "34" (apply format fmt args)))))
 
 (define (install-ok fmt . args)
-  (displayln (ansi-color "32" (apply format fmt args))))
+  (displayln (ansi "32" (apply format fmt args))))
 
 (define (install-warn fmt . args)
-  (eprintf "~a\n" (ansi-color "33" (apply format fmt args))))
+  (eprintf "~a\n" (ansi "33" (apply format fmt args))))
 
 (define (install-verbose fmt . args)
   (when (install-verbose?)
-    (displayln (ansi-color "34" (apply format fmt args)))))
+    (displayln (ansi "34" (apply format fmt args)))))
 
 (define (truncate-lines s [max-lines 80])
   (define lines (string-split s "\n"))
@@ -661,9 +655,7 @@
   (define id (local-toolchain-id name))
   (define tc-dir (rackup-toolchain-dir id))
   (when (hash-ref parsed-opts 'force? #f)
-    (delete-toolchain-dir! tc-dir)
-    (when (dir-or-link-exists? tc-dir)
-      (rackup-error "failed to remove existing toolchain before relink: ~a" id)))
+    (delete-toolchain-dir! tc-dir))
   (define layout (detect-local-source-layout local-path))
   (define real-bin-dir (string->path (hash-ref layout 'bin-dir)))
   (define racket-exe (build-path real-bin-dir "racket"))
@@ -799,9 +791,7 @@
     (define default-before (get-default-toolchain))
     (define explicit-default? (hash-ref parsed-opts 'set-default? #f))
     (when (hash-ref parsed-opts 'force? #f)
-      (delete-toolchain-dir! tc-dir)
-      (when (dir-or-link-exists? tc-dir)
-        (rackup-error "failed to remove existing toolchain before reinstall: ~a" id)))
+      (delete-toolchain-dir! tc-dir))
     ;; A dangling --prefix symlink (target wiped, e.g., /tmp cleared) or a
     ;; ghost dir from an interrupted install would block the reinstall;
     ;; clean either up here.

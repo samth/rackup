@@ -74,17 +74,18 @@ All rackup state lives under `RACKUP_HOME` (default `~/.rackup`). The layout is 
 
 ### Index
 
-`~/.rackup/state/index.rktd` is the toolchain registry. It is a Racket hash with three keys:
+`~/.rackup/state/index.rktd` is the toolchain registry. It is a Racket hash with two keys:
 
 - `installed-toolchains`: hash from toolchain ID to a metadata summary.
-- `aliases`: hash from short names to toolchain IDs.
 - `default-toolchain`: the default toolchain ID or `#f`.
+
+Unknown keys in an existing index file are dropped on the next save; missing keys are filled with defaults, so the format can evolve in either direction.
 
 The default toolchain is also stored separately in `~/.rackup/state/default-toolchain` as a plain text file. The separate file exists so that shell code can read the default without parsing `.rktd` format. The Racket code reads both and prefers the file.
 
 ### Config file
 
-`~/.rackup/state/config` is a plain-text file with one flag name per line. It stores boolean configuration flags such as `short-aliases`. The `config-flag-set?`, `set-config-flag!`, and `clear-config-flag!` functions in `state.rkt` manage it. This replaced the earlier approach of separate marker files (e.g., `state/shim-aliases`) and a `config.rktd` hash; the plain-text format is simpler to inspect and edit.
+`~/.rackup/state/config` is a plain-text file with one flag name per line. It stores boolean configuration flags such as `short-aliases`. The `config-flag-set?`, `set-config-flag!`, and `clear-config-flag!` functions in `state.rkt` manage it.
 
 ### Per-toolchain metadata
 
