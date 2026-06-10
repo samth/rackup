@@ -17,6 +17,7 @@
          normalized-host-arch
          host-platform-token
          arch-token->normalized
+         installer-platform-fields
          variant->string
          distribution->string)
 
@@ -31,25 +32,11 @@
      (match (regexp-match #px"^([0-9]+(?:\\.[0-9]+){0,3})(?:p([0-9]+))?$" v)
        [(list _ base patch-s)
         (define patch (if patch-s (string->number patch-s) 0))
-        (match (string-split base ".")
-          [(list a b c d)
-           (+ (* (string->number a) (expt 10 10))
-              (* (string->number b) (expt 10 7))
-              (* (string->number c) (expt 10 4))
-              (* (string->number d) 10)
-              patch)]
-          [(list a b c)
-           (+ (* (string->number a) (expt 10 10))
-              (* (string->number b) (expt 10 7))
-              (* (string->number c) (expt 10 4))
-              patch)]
-          [(list a b)
-           (+ (* (string->number a) (expt 10 10))
-              (* (string->number b) (expt 10 7))
-              patch)]
-          [(list a)
-           (+ (* (string->number a) (expt 10 10)) patch)]
-          [_ 0])]
+        ;; Pad to a.b.c.d; absent components count as 0.
+        (define parts (map string->number (string-split base ".")))
+        (match-define (list a b c d)
+          (append parts (make-list (- 4 (length parts)) 0)))
+        (+ (* a (expt 10 10)) (* b (expt 10 7)) (* c (expt 10 4)) (* d 10) patch)]
        [_ 0])]))
 
 (define (cmp-versions a b)
@@ -152,19 +139,23 @@
     [(unix)   "linux"]
     [else (rackup-error "unsupported platform: ~a" (system-type 'os))]))
 
+;; Decompose an installer filename's platform token (e.g.
+;; "x86_64-linux-ubuntu") into the arch/platform fields shared by the
+;; modern (remote.rkt) and legacy (legacy.rkt) filename parsers.
+(define (installer-platform-fields platform-token)
+  (define parts (string-split platform-token "-"))
+  (define arch-token (if (pair? parts) (car parts) platform-token))
+  (define platform-parts (if (pair? parts) (cdr parts) null))
+  (define platform (string-join platform-parts "-"))
+  (hash 'platform-token platform-token
+        'arch-token arch-token
+        'arch (arch-token->normalized arch-token)
+        'platform platform
+        'platform-family (if (pair? platform-parts) (car platform-parts) platform)
+        'platform-parts platform-parts))
+
 (define (arch-token->normalized token)
-  (cond
-    [(equal? token "x86_64") "x86_64"]
-    [(equal? token "aarch64") "aarch64"]
-    [(equal? token "arm64") "aarch64"]
-    [(equal? token "i386") "i386"]
-    [(equal? token "arm") "arm"]
-    [(equal? token "riscv64") "riscv64"]
-    [(or (equal? token "ppc")
-         (equal? token "powerpc")
-         (equal? token "ppc64")
-         (equal? token "ppc64le")
-         (equal? token "powerpc64")
-         (equal? token "powerpc64le"))
-     "ppc"]
+  (case token
+    [("arm64") "aarch64"]
+    [("powerpc" "ppc64" "ppc64le" "powerpc64" "powerpc64le") "ppc"]
     [else token]))

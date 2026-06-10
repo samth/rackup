@@ -32,8 +32,6 @@
          rackup-runtime-bin-link
          rackup-index-file
          rackup-config-file
-         rackup-legacy-config-file
-         rackup-legacy-shim-aliases-file
          rackup-default-file
          rackup-shim-dispatcher
          rackup-shim-path
@@ -122,8 +120,6 @@
 (define-paths-under (rackup-state-dir)
   [rackup-index-file                "index.rktd"]
   [rackup-config-file               "config"]
-  [rackup-legacy-config-file        "config.rktd"]
-  [rackup-legacy-shim-aliases-file  "shim-aliases"]
   [rackup-default-file              "default-toolchain"])
 
 (define-paths-under (rackup-libexec-dir) [rackup-shim-dispatcher "rackup-shim"])

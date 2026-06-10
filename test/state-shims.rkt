@@ -1722,13 +1722,15 @@
   (with-temp-rackup-home
    (lambda (tmp)
      (ensure-rackup-layout!)
-     ;; Write a minimal old-format index that lacks the 'aliases key
+     ;; Write an old-format index with an extra key (the retired
+     ;; 'aliases map); load-index should normalize it without error
      (write-rktd-file (rackup-index-file)
-                      (hash 'installed-toolchains (hash) 'default-toolchain #f))
-     ;; load-index should normalize it without error
+                      (hash 'installed-toolchains (hash)
+                            'aliases (hash)
+                            'default-toolchain #f))
      (define idx (load-index))
      (check-true (hash? idx))
-     (check-equal? (hash-ref idx 'aliases) (hash))
+     (check-false (hash-has-key? idx 'aliases))
      (check-equal? (installed-toolchain-ids idx) null)
 
      ;; Write an even more minimal index (just a hash with installed-toolchains)
@@ -1736,7 +1738,6 @@
                       (hash 'installed-toolchains (hash)))
      (define idx2 (load-index))
      (check-true (hash? idx2))
-     (check-equal? (hash-ref idx2 'aliases) (hash))
      (check-equal? (hash-ref idx2 'default-toolchain) #f)
 
      ;; ensure-index! on top of existing state should preserve it

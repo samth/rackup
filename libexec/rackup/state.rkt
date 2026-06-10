@@ -42,7 +42,7 @@
          clear-config-flag!)
 
 (define (empty-index)
-  (hash 'installed-toolchains (hash) 'aliases (hash) 'default-toolchain #f))
+  (hash 'installed-toolchains (hash) 'default-toolchain #f))
 
 (define (normalize-index idx)
   (cond
@@ -50,10 +50,6 @@
      (hash 'installed-toolchains
            (if (hash? (hash-ref idx 'installed-toolchains #f))
                (hash-ref idx 'installed-toolchains)
-               (hash))
-           'aliases
-           (if (hash? (hash-ref idx 'aliases #f))
-               (hash-ref idx 'aliases)
                (hash))
            'default-toolchain
            (hash-ref idx 'default-toolchain #f))]
@@ -69,16 +65,6 @@
   (ensure-rackup-layout!)
   (unless (file-exists? (rackup-index-file))
     (save-index! (empty-index)))
-  ;; Migrate old config.rktd to plain text config if needed
-  (define old-config (rackup-legacy-config-file))
-  (when (and (file-exists? old-config) (not (file-exists? (rackup-config-file))))
-    (write-string-file (rackup-config-file) "")
-    (delete-file old-config))
-  ;; Migrate old shim-aliases marker to config flag
-  (define old-aliases (rackup-legacy-shim-aliases-file))
-  (when (file-exists? old-aliases)
-    (set-config-flag! "short-aliases")
-    (delete-file old-aliases))
   (unless (file-exists? (rackup-config-file))
     (write-string-file (rackup-config-file) ""))
   (load-index))
@@ -119,15 +105,11 @@
 
 (define (meta->env-vars m)
   (define raw (and (hash? m) (hash-ref m 'env-vars #f)))
-  (cond
-    [(hash? raw)
-     (for/list ([k (in-list (sort (hash-keys raw) string<?))])
-       (cons k (hash-ref raw k)))]
-    [(list? raw)
-     (for/list ([entry (in-list raw)]
-                #:when (and (list? entry) (= (length entry) 2)))
-       (cons (format "~a" (car entry)) (format "~a" (cadr entry))))]
-    [else null]))
+  (if (list? raw)
+      (for/list ([entry (in-list raw)]
+                 #:when (and (list? entry) (= (length entry) 2)))
+        (cons (format "~a" (car entry)) (format "~a" (cadr entry))))
+      null))
 
 (define (toolchain-env-vars id)
   (meta->env-vars (read-toolchain-meta id)))
@@ -332,7 +314,7 @@
 ;; Returns the matching toolchain ID or #f.
 ;; When #:error-on-ambiguous? is #t, raises an error listing the
 ;; matches instead of returning #f for ambiguous names.
-(define (resolve-name-with-meta name ids aliases all-meta
+(define (resolve-name-with-meta name ids all-meta
                                 #:error-on-ambiguous? [error-on-ambiguous? #f])
   (define (unique xs) (and (= (length xs) 1) (car xs)))
   ;; When multiple toolchains match, prefer "full" distribution over others.
@@ -352,7 +334,6 @@
                     name
                     (string-join xs "\n  ")))))))
   (cond
-    [(hash-has-key? aliases name) (hash-ref aliases name)]
     [(member name ids) name]
     [else
      (or (unique (filter (lambda (id) (string-prefix? id name)) ids))
@@ -369,12 +350,11 @@
     [(or (not name) (string-blank? name)) (get-default-toolchain idx)]
     [else
      (define ids (installed-toolchain-ids idx))
-     (define aliases (hash-ref idx 'aliases (hash)))
      (define all-meta
        (for/list ([id ids])
          (cons id (read-toolchain-meta id))))
-     (resolve-name-with-meta name ids aliases all-meta
-                              #:error-on-ambiguous? #t)]))
+     (resolve-name-with-meta name ids all-meta
+                             #:error-on-ambiguous? #t)]))
 
 ;; Return the short names that uniquely resolve to this toolchain.
 ;; Accepts optional #:all-meta to avoid redundant file reads when
@@ -387,13 +367,8 @@
           (cons tid (read-toolchain-meta tid)))))
   (define m (cdr (assoc id all-meta)))
   (define candidates (toolchain-meta-names m))
-  (define aliases (hash-ref idx 'aliases (hash)))
-  (define alias-names
-    (for/list ([(k v) (in-hash aliases)]
-               #:when (equal? v id))
-      k))
-  (filter (lambda (name) (equal? id (resolve-name-with-meta name ids aliases all-meta)))
-          (remove-duplicates (append alias-names candidates))))
+  (filter (lambda (name) (equal? id (resolve-name-with-meta name ids all-meta)))
+          (remove-duplicates candidates)))
 
 ;; Determine whether a toolchain's metadata indicates it is
 ;; channel-based (upgradeable).  The kind field is 'release for both
@@ -424,19 +399,19 @@
            ["snapshot" "snapshot"]
            [(regexp #px"^snapshot:") "snapshot"]
            [_ "unknown"])))
-  (for/list ([id (in-list ids)]
-             #:when (let ([m (read-toolchain-meta id)])
-                      (and (upgradeable-meta? m)
-                           (or (not filter-channel)
-                               (let ([spec (hash-ref m 'requested-spec #f)])
-                                 (cond
-                                   [(equal? filter-channel "snapshot")
-                                    (and (string? spec)
-                                         (or (equal? spec "snapshot")
-                                             (string-prefix? spec "snapshot:")))]
-                                   [else
-                                    (equal? spec filter-channel)]))))))
-    (cons id (read-toolchain-meta id))))
+  (for*/list ([id (in-list ids)]
+              [m (in-value (read-toolchain-meta id))]
+              #:when (and (upgradeable-meta? m)
+                          (or (not filter-channel)
+                              (let ([spec (hash-ref m 'requested-spec #f)])
+                                (cond
+                                  [(equal? filter-channel "snapshot")
+                                   (and (string? spec)
+                                        (or (equal? spec "snapshot")
+                                            (string-prefix? spec "snapshot:")))]
+                                  [else
+                                   (equal? spec filter-channel)])))))
+    (cons id m)))
 
 (define (ensure-toolchain-addon-dir! id)
   (ensure-directory* (rackup-addon-dir id)))

@@ -175,20 +175,18 @@
 ;; (full block) for whole cells, this gives sub-cell granularity.
 (define eighth-blocks
   (vector "" "▏" "▎" "▍" "▌" "▋" "▊" "▉"))
-(define full-block "█")
-(define empty-block "░")
+(define full-block #\█)
+(define empty-block #\░)
 
 (define (progress-bar fraction)
   (define f (max 0.0 (min 1.0 fraction)))
   (define total-eighths (inexact->exact (floor (* f progress-bar-width 8))))
   (define-values (full extra) (quotient/remainder total-eighths 8))
   (define filled
-    (string-append (apply string-append (for/list ([_ (in-range full)]) full-block))
+    (string-append (make-string full full-block)
                    (vector-ref eighth-blocks extra)))
   (define filled-cells (+ full (if (positive? extra) 1 0)))
-  (define empty
-    (apply string-append
-           (for/list ([_ (in-range (- progress-bar-width filled-cells))]) empty-block)))
+  (define empty (make-string (- progress-bar-width filled-cells) empty-block))
   (string-append "[" filled empty "]"))
 
 (define (progress-enabled?)
@@ -359,50 +357,12 @@
 (define (parse-installer-filename s)
   (match (regexp-match installer-rx s)
     [(list _ prefix version-token platform-token variant-s ext)
-     (define variant
-       (if variant-s
-           (string->symbol variant-s)
-           'bc))
-     (define distribution (if (equal? prefix "racket-minimal") 'minimal 'full))
-     (define parts (string-split platform-token "-"))
-     (define arch-token
-       (if (pair? parts)
-           (car parts)
-           platform-token))
-     (define platform-parts
-       (if (>= (length parts) 2)
-           (cdr parts)
-           null))
-     (define platform
-       (if (pair? platform-parts)
-           (string-join platform-parts "-")
-           ""))
-     (define platform-family
-       (if (pair? platform-parts)
-           (car platform-parts)
-           platform))
-     (hash 'filename
-           s
-           'distribution
-           distribution
-           'version-token
-           version-token
-           'platform-token
-           platform-token
-           'arch-token
-           arch-token
-           'arch
-           (arch-token->normalized arch-token)
-           'platform
-           platform
-           'platform-family
-           platform-family
-           'platform-parts
-           platform-parts
-           'variant
-           variant
-           'ext
-           (string-downcase ext))]
+     (hash-set* (installer-platform-fields platform-token)
+                'filename s
+                'distribution (if (equal? prefix "racket-minimal") 'minimal 'full)
+                'version-token version-token
+                'variant (if variant-s (string->symbol variant-s) 'bc)
+                'ext (string-downcase ext))]
     [_ #f]))
 
 (define (table-filenames table)
@@ -457,40 +417,62 @@
                                             #:platform platform
                                             #:ext "sh")))
 
-(define (release-request-hash requested-spec
-                              resolved-version
-                              variant
-                              distribution*
-                              arch
-                              platform
-                              base
-                              filename)
+(define (install-request-hash #:kind kind
+                              #:requested-spec requested-spec
+                              #:resolved-version resolved-version
+                              #:version-token [version-token resolved-version]
+                              #:variant variant
+                              #:distribution distribution
+                              #:arch arch
+                              #:platform platform
+                              #:base base
+                              #:filename filename
+                              #:snapshot-site [snapshot-site #f]
+                              #:snapshot-stamp [snapshot-stamp #f])
   (hash 'kind
-        'release
+        kind
         'requested-spec
         requested-spec
         'resolved-version
         resolved-version
         'version-token
-        resolved-version
+        version-token
         'variant
         variant
         'distribution
-        distribution*
+        distribution
         'arch
         arch
         'platform
         platform
         'snapshot-site
-        #f
+        snapshot-site
         'snapshot-stamp
-        #f
+        snapshot-stamp
         'installers-base
         base
         'installer-filename
         filename
         'installer-url
         (string-append base filename)))
+
+;; Fetch the corresponding download page's checksums and attach the one
+;; for `filename` (SHA-256, or SHA-1 for old releases) to the request.
+(define (attach-page-checksum req base filename)
+  (define checksums (fetch-page-checksums (download-page-url-for-base base)))
+  (match (hash-ref checksums filename #f)
+    [(cons 'sha256 hex) (hash-set req 'installer-sha256 hex)]
+    [(cons 'sha1 hex) (hash-set req 'installer-sha1 hex)]
+    [#f req]))
+
+;; Call (proc distribution); when a 'full request fails, retry with
+;; 'minimal.  Returns (values result actual-distribution).
+(define (try-with-minimal-fallback distribution* proc)
+  (with-handlers ([exn:fail? (lambda (e)
+                               (if (eq? distribution* 'full)
+                                   (values (proc 'minimal) 'minimal)
+                                   (raise e)))])
+    (values (proc distribution*) distribution*)))
 
 (define (exn-message-looks-like-404? e)
   (regexp-match? #px"\\b404\\b" (exn-message e)))
@@ -502,8 +484,20 @@
                                           arch
                                           platform
                                           preferred-exts)
+  (define (release-request resolved-distribution base filename)
+    (attach-page-checksum
+     (install-request-hash #:kind 'release
+                           #:requested-spec requested-spec
+                           #:resolved-version resolved-version
+                           #:variant variant
+                           #:distribution resolved-distribution
+                           #:arch arch
+                           #:platform platform
+                           #:base base
+                           #:filename filename)
+     base filename))
   (cond
-    [(version-maybe-plt-scheme? resolved-version)
+    [(legacy-plt-version? resolved-version)
      (define plt-request
        (legacy-plt-request-info resolved-version
                                 #:distribution distribution*
@@ -513,14 +507,15 @@
      (define url* (hash-ref plt-request 'url))
      (define base* (substring url* 0 (- (string-length url*) (string-length filename*))))
      (hash-set*
-      (release-request-hash requested-spec
-                            resolved-version
-                            variant
-                            distribution*
-                            arch
-                            platform
-                            base*
-                            filename*)
+      (install-request-hash #:kind 'release
+                            #:requested-spec requested-spec
+                            #:resolved-version resolved-version
+                            #:variant variant
+                            #:distribution distribution*
+                            #:arch arch
+                            #:platform platform
+                            #:base base*
+                            #:filename filename*)
       'installer-sha256
       (hash-ref plt-request 'sha256)
       'legacy-install-kind
@@ -535,82 +530,32 @@
          (fetch-table-rktd base)))
      (cond
        [table
-     (define-values (filename actual-distribution)
-       (with-handlers ([exn:fail?
-                        (lambda (e)
-                          (if (eq? distribution* 'full)
-                              (values (select-installer-filename/by-ext table
-                                        #:version-token resolved-version
-                                        #:variant variant
-                                        #:distribution 'minimal
-                                        #:arch arch
-                                        #:platform platform
-                                        #:exts preferred-exts
-                                        #:allow-version-prefix? #t)
-                                      'minimal)
-                              (raise e)))])
-         (values (select-installer-filename/by-ext table
-                                         #:version-token resolved-version
-                                         #:variant variant
-                                         #:distribution distribution*
-                                         #:arch arch
-                                         #:platform platform
-                                         #:exts preferred-exts
-                                         #:allow-version-prefix? #t)
-                 distribution*)))
-     (define page-url (download-page-url-for-base base))
-     (define checksums (fetch-page-checksums page-url))
-     (define cksum (hash-ref checksums filename #f))
-     (define req (release-request-hash requested-spec
-                                       resolved-version
-                                       variant
-                                       actual-distribution
-                                       arch
-                                       platform
-                                       base
-                                       filename))
-     (cond
-       [(and cksum (eq? (car cksum) 'sha256))
-        (hash-set req 'installer-sha256 (cdr cksum))]
-       [(and cksum (eq? (car cksum) 'sha1))
-        (hash-set req 'installer-sha1 (cdr cksum))]
-       [else req])]
+        (define-values (filename actual-distribution)
+          (try-with-minimal-fallback
+           distribution*
+           (lambda (dist)
+             (select-installer-filename/by-ext table
+                                               #:version-token resolved-version
+                                               #:variant variant
+                                               #:distribution dist
+                                               #:arch arch
+                                               #:platform platform
+                                               #:exts preferred-exts
+                                               #:allow-version-prefix? #t))))
+        (release-request actual-distribution base filename)]
        [else
         ;; Older Racket releases may use Apache index listings (e.g. 5.2).
-        (define-values (base* filename* actual-distribution)
-          (with-handlers ([exn:fail?
-                           (lambda (e)
-                             (if (eq? distribution* 'full)
-                                 (let-values ([(b f)
-                                               (fetch-legacy-installer-filename resolved-version
-                                                                                #:distribution 'minimal
-                                                                                #:arch arch
-                                                                                #:platform platform)])
-                                   (values b f 'minimal))
-                                 (raise e)))])
-            (let-values ([(b f)
-                          (fetch-legacy-installer-filename resolved-version
-                                                           #:distribution distribution*
-                                                           #:arch arch
-                                                           #:platform platform)])
-              (values b f distribution*))))
-        (define page-url* (download-page-url-for-base base*))
-        (define checksums* (fetch-page-checksums page-url*))
-        (define cksum* (hash-ref checksums* filename* #f))
-        (define req* (release-request-hash requested-spec
-                                           resolved-version
-                                           variant
-                                           actual-distribution
-                                           arch
-                                           platform
-                                           base*
-                                           filename*))
-        (cond
-          [(and cksum* (eq? (car cksum*) 'sha256))
-           (hash-set req* 'installer-sha256 (cdr cksum*))]
-          [(and cksum* (eq? (car cksum*) 'sha1))
-           (hash-set req* 'installer-sha1 (cdr cksum*))]
-          [else req*])])]))
+        (define-values (base+filename actual-distribution)
+          (try-with-minimal-fallback
+           distribution*
+           (lambda (dist)
+             (let-values ([(b f)
+                           (fetch-legacy-installer-filename resolved-version
+                                                            #:distribution dist
+                                                            #:arch arch
+                                                            #:platform platform)])
+               (cons b f)))))
+        (release-request actual-distribution (car base+filename) (cdr base+filename))])]))
 
 (define (distribution-fallback? actual-distribution requested-distribution)
   (and (eq? actual-distribution 'minimal)
@@ -809,7 +754,7 @@
           ["linux"   '("sh" "tgz")]
           [_ (rackup-error "no installer extension preferences for platform: ~a" platform)])))
   (define (variant-for version)
-    (define legacy-plt? (version-maybe-plt-scheme? version))
+    (define legacy-plt? (legacy-plt-version? version))
     (define v
       (if variant-override
           (parse-variant variant-override)
@@ -888,42 +833,18 @@
                                                distribution*)]
                                       [else (raise e)]))])
          (values (select-pre-release "current") distribution*)))
-     (define pre-page-url (download-page-url-for-base pre-release-installers-base))
-     (define pre-checksums (fetch-page-checksums pre-page-url))
-     (define pre-cksum (hash-ref pre-checksums filename #f))
-     (define pre-req
-       (hash 'kind
-             'pre-release
-             'requested-spec
-             requested-spec
-             'resolved-version
-             resolved-version
-             'version-token
-             "current"
-             'variant
-             variant
-             'distribution
-             actual-distribution
-             'arch
-             arch
-             'platform
-             platform
-             'snapshot-site
-             #f
-             'snapshot-stamp
-             #f
-             'installers-base
-             pre-release-installers-base
-             'installer-filename
-             filename
-             'installer-url
-             (string-append pre-release-installers-base filename)))
-     (cond
-       [(and pre-cksum (eq? (car pre-cksum) 'sha256))
-        (hash-set pre-req 'installer-sha256 (cdr pre-cksum))]
-       [(and pre-cksum (eq? (car pre-cksum) 'sha1))
-        (hash-set pre-req 'installer-sha1 (cdr pre-cksum))]
-       [else pre-req])]
+     (attach-page-checksum
+      (install-request-hash #:kind 'pre-release
+                            #:requested-spec requested-spec
+                            #:resolved-version resolved-version
+                            #:version-token "current"
+                            #:variant variant
+                            #:distribution actual-distribution
+                            #:arch arch
+                            #:platform platform
+                            #:base pre-release-installers-base
+                            #:filename filename)
+      pre-release-installers-base filename)]
     ['snapshot
      (define requested-site
        (normalize-site-option (hash-ref spec* 'snapshot-site #f) snapshot-site-opt))
@@ -937,20 +858,13 @@
            (parse-variant variant-override)
            'cs))
      (define-values (picked actual-distribution)
-       (with-handlers ([exn:fail?
-                        (lambda (e)
-                          (if (eq? distribution* 'full)
-                              (values (try-resolve-snapshot-site sites-to-try
-                                                                 #:distribution 'minimal
-                                                                 #:arch arch
-                                                                 #:variant variant)
-                                      'minimal)
-                              (raise e)))])
-         (values (try-resolve-snapshot-site sites-to-try
-                                            #:distribution distribution*
-                                            #:arch arch
-                                            #:variant variant)
-                 distribution*)))
+       (try-with-minimal-fallback
+        distribution*
+        (lambda (dist)
+          (try-resolve-snapshot-site sites-to-try
+                                     #:distribution dist
+                                     #:arch arch
+                                     #:variant variant))))
      (define site (hash-ref picked 'site))
      (define base (snapshot-installers-base site))
      (define table (hash-ref picked 'table))
@@ -967,42 +881,20 @@
                                            #:arch arch
                                            #:platform platform
                                            #:exts preferred-exts))
-     (define snap-page-url (download-page-url-for-base base))
-     (define snap-checksums (fetch-page-checksums snap-page-url))
-     (define snap-cksum (hash-ref snap-checksums filename #f))
-     (define snap-req
-       (hash 'kind
-             'snapshot
-             'requested-spec
-             requested-spec
-             'resolved-version
-             resolved-version
-             'version-token
-             "current"
-             'variant
-             variant
-             'distribution
-             actual-distribution
-             'arch
-             arch
-             'platform
-             platform
-             'snapshot-site
-             site
-             'snapshot-stamp
-             stamp
-             'installers-base
-             base
-             'installer-filename
-             filename
-             'installer-url
-             (string-append base filename)))
-     (cond
-       [(and snap-cksum (eq? (car snap-cksum) 'sha256))
-        (hash-set snap-req 'installer-sha256 (cdr snap-cksum))]
-       [(and snap-cksum (eq? (car snap-cksum) 'sha1))
-        (hash-set snap-req 'installer-sha1 (cdr snap-cksum))]
-       [else snap-req])]
+     (attach-page-checksum
+      (install-request-hash #:kind 'snapshot
+                            #:requested-spec requested-spec
+                            #:resolved-version resolved-version
+                            #:version-token "current"
+                            #:variant variant
+                            #:distribution actual-distribution
+                            #:arch arch
+                            #:platform platform
+                            #:base base
+                            #:filename filename
+                            #:snapshot-site site
+                            #:snapshot-stamp stamp)
+      base filename)]
     [_ (rackup-error "unsupported install kind: ~a" kind)]))
 
 (module+ for-testing
