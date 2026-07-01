@@ -67,6 +67,14 @@ jobs:
           fi
           echo "install.sh self-upgrade smoke OK (exit=$rc)"
 
+      - name: Atomic-swap helper tests
+        shell: bash
+        run: |
+          # Exercise the shared atomic filesystem helpers (used by the
+          # hidden-runtime install and the prebuilt-exe self-upgrade swap):
+          # normal replace, fresh destination, rollback, tolerant cleanup.
+          bash test/atomic-swap-test.sh
+
       - name: Check workflow action pinning
         shell: bash
         run: |

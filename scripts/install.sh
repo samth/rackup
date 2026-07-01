@@ -231,8 +231,15 @@ if ! validate_safe_prefix "$PREFIX"; then
 fi
 
 TMPDIR_INSTALL="$(mktemp -d "${TMPDIR:-/tmp}/rackup-install.XXXXXX")"
+# Staging dir for the prebuilt-exe payload swap (set by
+# install_binary_distribution); cleaned up here so an aborted swap does not
+# leave a partial copy under $PREFIX.
+UPGRADE_STAGE=""
 cleanup() {
   rm -rf "$TMPDIR_INSTALL"
+  if [ -n "${UPGRADE_STAGE:-}" ]; then
+    rm -rf "$UPGRADE_STAGE" 2>/dev/null || true
+  fi
 }
 trap cleanup EXIT
 
@@ -403,23 +410,39 @@ extract_tarball_dir() {
 # The caller must have verified that $1/bin/rackup-core is executable.
 install_binary_distribution() {
   binary_dir="$1"
+  # Reuse the atomic-swap helpers (rackup_atomic_replace_dir/_file) from the
+  # payload's bootstrap when it provides them, so a self-upgrade to a version
+  # that ships them is atomic and NFS-safe.  Payloads whose bootstrap predates
+  # the helpers fall back to a plain in-place swap in the commit step below.
+  # shellcheck disable=SC1091
+  . "$binary_dir/libexec/rackup-bootstrap.sh"
   mkdir -p "$PREFIX/bin" "$PREFIX/libexec"
-  cp "$binary_dir/bin/rackup" "$PREFIX/bin/rackup"
-  cp "$binary_dir/bin/rackup-core" "$PREFIX/bin/rackup-core"
-  chmod +x "$PREFIX/bin/rackup" "$PREFIX/bin/rackup-core"
+
+  # Stage the whole payload on the same filesystem as $PREFIX first, so a
+  # failure here aborts before any live file is touched (the EXIT trap removes
+  # the staging dir).  Use inline rm here, not a helper: an older payload's
+  # bootstrap may not define them.
+  UPGRADE_STAGE="$PREFIX/.rackup-upgrade.$$"
+  rm -rf "$UPGRADE_STAGE" 2>/dev/null || true
+  mkdir -p "$UPGRADE_STAGE"
+  cp "$binary_dir/bin/rackup" "$UPGRADE_STAGE/rackup"
+  cp "$binary_dir/bin/rackup-core" "$UPGRADE_STAGE/rackup-core"
+  cp "$binary_dir/libexec/rackup-bootstrap.sh" "$UPGRADE_STAGE/rackup-bootstrap.sh"
+  chmod +x "$UPGRADE_STAGE/rackup" "$UPGRADE_STAGE/rackup-core" "$UPGRADE_STAGE/rackup-bootstrap.sh"
   # Remove macOS quarantine flag so Gatekeeper does not kill the binary.
   if command -v xattr >/dev/null 2>&1; then
-    xattr -dr com.apple.quarantine "$PREFIX/bin" 2>/dev/null || true
+    xattr -dr com.apple.quarantine "$UPGRADE_STAGE" 2>/dev/null || true
   fi
-  # Ad-hoc sign on macOS so the binary passes code signature
-  # validation.  macOS 26 (Tahoe) can reject signatures produced
-  # by older macOS versions' codesign tool (see
-  # https://github.com/astral-sh/uv/pull/17123).  Re-signing with
-  # the user's local codesign ensures the signature is accepted.
+  # Ad-hoc sign on macOS so the binary passes code signature validation.
+  # macOS 26 (Tahoe) can reject signatures produced by older macOS versions'
+  # codesign tool (see https://github.com/astral-sh/uv/pull/17123).
+  # Re-signing with the user's local codesign ensures the signature is
+  # accepted.  Sign the staged binary before it goes live; a rename preserves
+  # the signature.
   if [ "$(uname -s)" = "Darwin" ]; then
     if command -v codesign >/dev/null 2>&1; then
-      codesign --sign - --force "$PREFIX/bin/rackup-core" || {
-        warn "Error: codesign failed on $PREFIX/bin/rackup-core"
+      codesign --sign - --force "$UPGRADE_STAGE/rackup-core" || {
+        warn "Error: codesign failed on rackup-core"
         warn "The binary may be killed by the kernel on macOS 26+."
       }
     else
@@ -429,14 +452,38 @@ install_binary_distribution() {
     fi
   fi
   if [ -d "$binary_dir/lib" ]; then
-    rm -rf "${PREFIX:?}/lib"
-    cp -R "$binary_dir/lib" "$PREFIX/lib"
+    cp -R "$binary_dir/lib" "$UPGRADE_STAGE/lib"
     if command -v xattr >/dev/null 2>&1; then
-      xattr -dr com.apple.quarantine "$PREFIX/lib" 2>/dev/null || true
+      xattr -dr com.apple.quarantine "$UPGRADE_STAGE/lib" 2>/dev/null || true
     fi
   fi
-  cp "$binary_dir/libexec/rackup-bootstrap.sh" "$PREFIX/libexec/rackup-bootstrap.sh"
-  chmod +x "$PREFIX/libexec/rackup-bootstrap.sh"
+
+  # Commit.  Prefer the shared atomic helpers: never `rm -rf` the live runtime
+  # (lib/) in place -- on a self-upgrade the running rackup-core still holds its
+  # boot files open, and on NFS the in-use delete triggers silly-rename and
+  # fails "Directory not empty", bricking the install.  rackup_atomic_replace_dir
+  # renames the old runtime aside (keeping those open files valid) and deletes
+  # it last and tolerantly.  Fall back to a plain swap only for older payloads
+  # whose bootstrap predates the helpers.
+  if command -v rackup_atomic_replace_dir >/dev/null 2>&1; then
+    if [ -d "$UPGRADE_STAGE/lib" ]; then
+      rackup_atomic_replace_dir "$PREFIX/lib" "$UPGRADE_STAGE/lib"
+    fi
+    rackup_atomic_replace_file "$PREFIX/bin/rackup-core" "$UPGRADE_STAGE/rackup-core"
+    rackup_atomic_replace_file "$PREFIX/bin/rackup" "$UPGRADE_STAGE/rackup"
+    rackup_atomic_replace_file "$PREFIX/libexec/rackup-bootstrap.sh" "$UPGRADE_STAGE/rackup-bootstrap.sh"
+  else
+    if [ -d "$UPGRADE_STAGE/lib" ]; then
+      rm -rf "${PREFIX:?}/lib"
+      mv "$UPGRADE_STAGE/lib" "$PREFIX/lib"
+    fi
+    mv "$UPGRADE_STAGE/rackup-core" "$PREFIX/bin/rackup-core"
+    mv "$UPGRADE_STAGE/rackup" "$PREFIX/bin/rackup"
+    mv "$UPGRADE_STAGE/rackup-bootstrap.sh" "$PREFIX/libexec/rackup-bootstrap.sh"
+  fi
+
+  rm -rf "$UPGRADE_STAGE" 2>/dev/null || true
+  UPGRADE_STAGE=""
   INSTALLED_PREBUILT=1
 }
 
