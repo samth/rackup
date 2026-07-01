@@ -209,6 +209,52 @@ rackup_mkdir_p() {
   mkdir -p "$1"
 }
 
+# --- Atomic, NFS-tolerant filesystem swaps ---------------------------------
+# Shared by the hidden-runtime install (below) and the prebuilt-exe
+# install/self-upgrade in scripts/install.sh, which sources this file to
+# reuse them.  Callers must stage on the SAME filesystem as the destination
+# so the moves are true renames, not cross-filesystem copies.
+
+# `rm -rf` that never fails the caller.  On NFS, unlinking files that a
+# running process still holds open triggers silly-rename (leftover .nfs*
+# files), which makes a plain `rm -rf` of the enclosing directory fail with
+# "Directory not empty".  Those leftovers are reaped once the process exits,
+# so tolerate the failure instead of aborting.
+rackup_tolerant_rmrf() {
+  rm -rf "$1" 2>/dev/null || true
+}
+
+# Atomically replace directory $1 with the already-staged directory $2 (same
+# filesystem).  Renames the live directory aside first -- a rename keeps a
+# running process's already-open files valid, unlike an in-place `rm -rf` --
+# moves the staged directory into place, then removes the old copy LAST and
+# tolerantly.  If the swap itself fails, the old directory is moved back so
+# the destination is never left missing.
+rackup_atomic_replace_dir() {
+  _rackup_dst="$1"
+  _rackup_staged="$2"
+  _rackup_old="${_rackup_dst}.old.$$"
+  if [ -e "$_rackup_dst" ] || [ -L "$_rackup_dst" ]; then
+    mv "$_rackup_dst" "$_rackup_old"
+  fi
+  if ! mv "$_rackup_staged" "$_rackup_dst"; then
+    if [ -e "$_rackup_old" ] || [ -L "$_rackup_old" ]; then
+      mv "$_rackup_old" "$_rackup_dst"
+    fi
+    return 1
+  fi
+  if [ -e "$_rackup_old" ] || [ -L "$_rackup_old" ]; then
+    rackup_tolerant_rmrf "$_rackup_old"
+  fi
+  return 0
+}
+
+# Atomically replace file $1 with the already-staged file $2 (same
+# filesystem) via a single rename.
+rackup_atomic_replace_file() {
+  mv "$2" "$1"
+}
+
 rackup_warn() {
   printf 'rackup bootstrap: %s\n' "$*" >&2
 }
@@ -596,8 +642,7 @@ rackup_hidden_runtime_install_if_missing() {
   esac
 
   rm -rf "$tmp_version_dir/_pkg_cache_install_log" 2>/dev/null || true
-  rm -rf "$version_dir"
-  mv "$tmp_version_dir" "$version_dir"
+  rackup_atomic_replace_dir "$version_dir" "$tmp_version_dir"
   final_real_bin="$(rackup_detect_bin_dir_shell "$version_dir/install")"
   ln -sfn "$final_real_bin" "$version_dir/bin"
   ln -sfn "$version_dir" "$current_link"
