@@ -16,6 +16,7 @@
                      racket/syntax
                      "commands-data.rkt")
          "commands-data.rkt"
+         "agents-guide.rkt"
          "install.rkt"
          "legacy-plt-catalog.rkt"
          "mac-apps.rkt"
@@ -115,12 +116,14 @@
   (usage-line "runtime status|install|upgrade"
               "Manage rackup's hidden internal runtime used to run rackup itself.")
   (usage-line "doctor" "Print diagnostics for paths, runtime, and installed toolchains.")
+  (usage-line "agents" "Print a guide for driving rackup from an AI agent or automation.")
   (usage-line "version" "Print rackup version info (git commit and date).")
   (usage-line "help [command]" "Show global help or help for a specific command.")
   (displayln "")
   (displayln version-help)
   (displayln "")
-  (displayln "Use `rackup <command> --help` or `rackup help <command>` for command help."))
+  (displayln "Use `rackup <command> --help` or `rackup help <command>` for command help.")
+  (displayln "Automating rackup (CI, scripts, coding agents)? See `rackup help agents`."))
 
 ;; If spec is a meta-name like "stable", try resolving it to an actual
 ;; version number and look up locally.  Returns the ID or #f.
@@ -1112,6 +1115,12 @@
                 #:args ()
                 (void))
   (doctor-report))
+
+;; `rackup agents` / `rackup help agents` (which dispatches here as
+;; `agents --help`) both print the agent guide, which is itself the help
+;; for this command.  Any extra args are ignored on purpose.
+(define (cmd-agents _rest)
+  (displayln agent-guide-text))
 
 ;; Build a name → handler lookup table from `rackup-commands` at compile
 ;; time, skipping `help` (dispatched by hand).  Adding a new subcommand
