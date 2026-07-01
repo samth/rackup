@@ -24,7 +24,7 @@ jobs:
           version: stable
       - name: Install Pages build deps
         shell: bash
-        run: raco pkg install --auto --skip-installed --batch plt-web
+        run: raco pkg install --auto --skip-installed --batch plt-web commonmark
       - name: Download all exe artifacts
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
