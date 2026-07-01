@@ -5,6 +5,7 @@
   nav.innerHTML = [
     '<a class="logo" href="https://samth.github.io/rackup/">rackup</a>',
     '<a href="docs.html">Docs</a>',
+    '<a href="agents.html">Agents</a>',
     '<a href="https://samth.github.io/rackup/install.sh">install.sh</a>',
     '<a href="https://github.com/samth/rackup">GitHub</a>',
     '<a href="https://github.com/samth/rackup/blob/main/README.md">README</a>'

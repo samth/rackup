@@ -649,6 +649,24 @@ Reports on:
 
 @; ────────────────────────────────────────────────────────────────────
 
+@section[#:tag "agents" #:style 'unnumbered]{@tt{rackup agents}}
+
+Print a guide for driving rackup non-interactively — from CI, scripts, or
+an AI coding agent.  @tt{rackup help agents} prints the same text.
+
+@shell-block{rackup agents}
+
+The guide is the single source of truth in
+@tt{libexec/rackup/agents-guide.rkt}; it is also published at
+@hyperlink["https://samth.github.io/rackup/agents.html"]{samth.github.io/rackup/agents.html},
+with a short paste-in version for your own project at
+@hyperlink["https://samth.github.io/rackup/agents-snippet.md"]{agents-snippet.md}.
+The one rule it stresses: to run a tool under a specific toolchain in a
+script, use @tt{rackup run <toolchain> -- <command>} rather than
+@tt{rackup switch}, which only takes effect in an interactive shell.
+
+@; ────────────────────────────────────────────────────────────────────
+
 @section[#:tag "version" #:style 'unnumbered]{@tt{rackup version}}
 
 Print rackup version information (git commit hash and date).

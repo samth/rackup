@@ -76,6 +76,20 @@ not `racket` through the rackup shim. The shim dispatcher saves,
 unsets, and re-sets Racket env vars, so testing through the shim
 gives misleading results about Racket's native behavior.
 
+## Agent-facing docs
+
+Two different audiences, two different files — don't conflate them:
+
+- **This file** (`CLAUDE.md`, and its `AGENTS.md` symlink) is for agents
+  *contributing to rackup*. `AGENTS.md` is a symlink to `CLAUDE.md` so
+  non-Claude tools (Codex, Cursor, Aider, Gemini CLI, …) pick up the same
+  contributor rules.
+- The guide for agents *using rackup as a tool* is a single source of truth in
+  `libexec/rackup/agents-guide.rkt` (`agent-guide-text`). It is printed by
+  `rackup help agents`, published at `agents.html` and `agents-snippet.md` by
+  the Pages build, and drift-guarded by `test/agents-guide.rkt`. Edit the
+  string in that module; do not duplicate its content elsewhere.
+
 ## Code ownership
 
 We own the entire project. There is no public API. Feel free to change any module's exports, signatures, or internal structure as needed — no backwards-compatibility workarounds required.
