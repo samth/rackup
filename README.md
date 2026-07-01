@@ -147,6 +147,22 @@ rackup reshim --short-aliases
 | `plt-fresh-build` | Build manually, then `rackup link` |
 | `r` / `dr` aliases | `rackup reshim --short-aliases` |
 
+## For AI agents and automation
+
+Driving rackup from CI, a script, or an AI coding agent? Run `rackup help agents`
+for a cheat sheet (also published at
+**[samth.github.io/rackup/agents.html](https://samth.github.io/rackup/agents.html)**).
+
+The one rule that matters: to run a tool under a specific toolchain
+non-interactively, use `rackup run <toolchain> -- <command>` (e.g.
+`rackup run stable -- raco test .`). It needs no shell integration, unlike
+`rackup switch`, which only takes effect in an interactive shell. State is
+available in line-oriented form via `rackup list --ids`, `rackup current line`,
+`rackup default status`, and `rackup which`.
+
+A short snippet to drop into your project's `AGENTS.md`/`CLAUDE.md` is published at
+**[agents-snippet.md](https://samth.github.io/rackup/agents-snippet.md)**.
+
 ## Documentation
 
 Full command reference and usage guide: **[samth.github.io/rackup/docs.html](https://samth.github.io/rackup/docs.html)**
