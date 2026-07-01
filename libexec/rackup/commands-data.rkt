@@ -31,6 +31,7 @@
     ("self-upgrade" . "Upgrade rackup code")
     ("runtime"      . "Manage internal runtime")
     ("doctor"       . "Print diagnostics")
+    ("agents"       . "Print a guide for AI agents and automation")
     ("version"      . "Print version info")
     ("help"         . "Show help")))
 

@@ -498,6 +498,37 @@ else
 fi
 
 echo
+echo "== Agent-facing command smoke (see 'rackup help agents') =="
+# The agent guide promises these commands work non-interactively and print
+# stable, line-oriented output. Keep this in step with libexec/rackup/agents-guide.rkt.
+run_rackup default "$primary_id"
+
+agents_guide="$(run_rackup help agents)"
+assert_contains "rackup run" "$agents_guide" "'rackup help agents' should print the guide"
+
+ids_out="$(run_rackup list --ids)"
+assert_nonempty "$ids_out" "'rackup list --ids' should list installed toolchain IDs"
+assert_contains "$primary_id" "$ids_out" "'rackup list --ids' should include the primary toolchain"
+
+current_id="$(run_rackup current id)"
+assert_eq "$primary_id" "$current_id" "'rackup current id' should print just the active id"
+
+current_line="$(run_rackup current line)"
+assert_contains "$primary_id" "$current_line" "'rackup current line' should report the active id"
+assert_contains "default" "$current_line" "'rackup current line' should report the source"
+
+default_status="$(run_rackup default status)"
+assert_contains "set" "$default_status" "'rackup default status' should report the default is set"
+assert_contains "$primary_id" "$default_status" "'rackup default status' should include the default id"
+
+which_racket="$(run_rackup which racket)"
+assert_nonempty "$which_racket" "'rackup which racket' should print a path"
+case "$which_racket" in
+  /*) : ;;
+  *) fail "'rackup which racket' should print an absolute path (got '$which_racket')" ;;
+esac
+
+echo
 echo "== Package install / isolation tests =="
 if [[ "$SKIP_PACKAGE_TESTS" == "1" ]]; then
   echo "Skipping package tests for this scenario"
