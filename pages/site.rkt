@@ -455,6 +455,7 @@ sh install.sh && rm install.sh})
           @tr{@td{@code{rackup prompt}} @td{Print toolchain info for shell prompt}}
           @tr{@td{@code{rackup reshim}} @td{Rebuild shims from installed toolchains}}
           @tr{@td{@code{rackup doctor}} @td{Print diagnostics}}
+          @tr{@td{@code{rackup agents}} @td{Print a guide for AI agents and automation}}
           @tr{@td{@code{rackup init --shell @i{sh}}} @td{Set up shell integration}}
           @tr{@td{@code{rackup self-upgrade}} @td{Upgrade rackup itself}}
           @tr{@td{@code{rackup uninstall}} @td{Remove rackup and all managed state}}
