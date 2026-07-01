@@ -645,3 +645,56 @@
     (check-equal? (file->bytes dest) payload)
     (check-true (port-closed? in))
     (delete-file dest)))
+
+(module+ test
+  ;; parse-download-page-checksums must pair each installer with the
+  ;; checksum in its OWN row, not zip a flat filename list against a flat
+  ;; checksum list by position.  Racket snapshot pages list many
+  ;; installers but only some carry a checksum, so a positional zip slides
+  ;; each checksum onto the wrong installer (issue #92).
+  (define (installer-row name #:sum [sum #f])
+    (string-append
+     "<tr><td><span><a class=\"installer\" href=\"installers/" name "\">64-bit</a>"
+     "<span class=\"detail\">built on Debian</span></span></td>"
+     "<td><span class=\"detail\">259.8 MB</span></td>"
+     (if sum
+         (string-append "<td><span class=\"tinydetail\">SHA256:&nbsp;"
+                        "<span class=\"checksum\">" sum "</span></span></td>")
+         "<td>&nbsp;</td>")
+     "</tr>"))
+
+  (let ()
+    (define ha (make-string 64 #\a))
+    (define hc (make-string 64 #\c))
+    (define hd (make-string 64 #\d))
+    ;; Installer B has no checksum in its row; a positional zip would
+    ;; slide C's checksum onto B and D's onto C.
+    (define html
+      (string-append
+       "<table>"
+       (installer-row "racket-9.9-x86_64-linux-A-cs.sh" #:sum ha)
+       (installer-row "racket-9.9-x86_64-linux-B-cs.sh")
+       (installer-row "racket-9.9-x86_64-linux-C-cs.sh" #:sum hc)
+       (installer-row "racket-9.9-x86_64-linux-D-cs.sh" #:sum hd)
+       "</table>"))
+    (define parsed (parse-download-page-checksums html))
+    (check-equal? (hash-ref parsed "racket-9.9-x86_64-linux-A-cs.sh" #f) (cons 'sha256 ha))
+    (check-false (hash-ref parsed "racket-9.9-x86_64-linux-B-cs.sh" #f)
+                 "installer with no checksum in its row must not borrow a later one")
+    (check-equal? (hash-ref parsed "racket-9.9-x86_64-linux-C-cs.sh" #f) (cons 'sha256 hc)
+                  "C must get its own checksum, not D's (positional-zip regression)")
+    (check-equal? (hash-ref parsed "racket-9.9-x86_64-linux-D-cs.sh" #f) (cons 'sha256 hd)))
+
+  ;; Release-style pages are 1:1 (every installer has a checksum, in
+  ;; order) and must still parse correctly; SHA-1-only old releases are
+  ;; labelled 'sha1 by hex length.
+  (let ()
+    (define h256 (make-string 64 #\e))
+    (define h1 (make-string 40 #\f))
+    (define html
+      (string-append
+       (installer-row "racket-8.18-x86_64-linux-cs.sh" #:sum h256)
+       (installer-row "racket-6.0-x86_64-linux.sh" #:sum h1)))
+    (define parsed (parse-download-page-checksums html))
+    (check-equal? (hash-ref parsed "racket-8.18-x86_64-linux-cs.sh" #f) (cons 'sha256 h256))
+    (check-equal? (hash-ref parsed "racket-6.0-x86_64-linux.sh" #f) (cons 'sha1 h1))))
