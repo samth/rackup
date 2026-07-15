@@ -539,12 +539,15 @@
      (check-not-false (member "scheme" (hash-ref linked-meta 'executables)))
      (check-not-false (member "petite" (hash-ref linked-meta 'executables)))
      (check-true (file-exists? (rackup-toolchain-env-file linked-id)))
-     ;; Linked toolchain env.sh should use a local-name-suffixed key so it
-     ;; doesn't share a compiled/<version>-<variant>/ dir with an
-     ;; installer-built toolchain at the same version+variant.
+     ;; Linked toolchain env.sh should key its compiled dir on the
+     ;; installation name (not the version), so it neither shares a
+     ;; compiled/<version>-<variant>/ dir with an installer-built
+     ;; toolchain nor spawns a new dir when the source is rebuilt.
      (let ([env-sh (file->string (rackup-toolchain-env-file linked-id))])
-       (check-true (string-contains? env-sh "compiled/9.99-cs-local-devsrc")
-                   "linked env.sh uses local-name-suffixed compiled dir"))
+       (check-true (string-contains? env-sh "compiled/cs-local-devsrc")
+                   "linked env.sh keys compiled dir on installation name")
+       (check-false (string-contains? env-sh "compiled/9.99")
+                    "linked compiled dir does not encode the version"))
 
      (write-exe "racket"
                 (fake-racket-script
@@ -557,9 +560,13 @@
                      printf 'ARGS=%s\n' "$*"}))
      (check-equal? (link-toolchain! "devsrc" (path->string src-root) '("--force")) linked-id)
      (check-equal? (hash-ref (read-toolchain-meta linked-id) 'resolved-version) "9.98")
+     ;; Even though the probed version changed (9.99 -> 9.98), the compiled
+     ;; dir stays the same: it is keyed on the installation name.
      (let ([env-sh (file->string (rackup-toolchain-env-file linked-id))])
-       (check-true (string-contains? env-sh "compiled/9.98-cs-local-devsrc")
-                   "relinked env.sh uses local-name-suffixed compiled dir"))
+       (check-true (string-contains? env-sh "compiled/cs-local-devsrc")
+                   "relinked env.sh keeps the same name-keyed compiled dir")
+       (check-false (string-contains? env-sh "compiled/9.98")
+                    "relinked compiled dir does not encode the new version"))
 
      (define shim-racket (build-path (rackup-shims-dir) "racket"))
      (define old-pltaddon (getenv "PLTADDONDIR"))
@@ -2006,8 +2013,8 @@
                 "compiled/9.1-cs:/abs/root:."
                 "mixed roots: absolute + same (no duplicate .)")
   (check-equal? (compiled-roots-value "9.1" 'cs '(same) "dev")
-                "compiled/9.1-cs-local-dev:."
-                "linked toolchain: local-name suffix distinguishes from installer")
+                "compiled/cs-local-dev:."
+                "linked toolchain: keyed on installation name, not version")
   (check-equal? (compiled-roots-value "9.1" 'cs '(same) #f)
                 "compiled/9.1-cs:."
                 "no local-name: no suffix")
@@ -2015,13 +2022,24 @@
                 "compiled/9.1-cs:."
                 "blank local-name: no suffix")
   (check-equal? (compiled-roots-value "9.1" 'cs '("/usr/lib/racket/compiled") "dev")
-                "compiled/9.1-cs-local-dev:/usr/lib/racket/compiled:."
-                "linked FHS layout: local-name applies to key only")
+                "compiled/cs-local-dev:/usr/lib/racket/compiled:."
+                "linked FHS layout: name-keyed dir, then existing roots")
+  ;; The key point: a linked toolchain's compiled dir is version-
+  ;; independent, so rebuilding (which bumps the version) reuses one dir
+  ;; instead of spawning a fresh compiled tree per rebuild.
+  (check-equal? (compiled-roots-value "9.1" 'cs '(same) "dev")
+                (compiled-roots-value "9.9.0.7" 'cs '(same) "dev")
+                "linked toolchain compiled key does not change with the version")
+  ;; A linked toolchain still gets a stable key even if the version
+  ;; couldn't be probed, since the name carries the identity.
+  (check-equal? (compiled-roots-value "local" 'cs '(same) "dev")
+                "compiled/cs-local-dev:."
+                "linked toolchain: name-keyed even when version is unknown")
   (check-false (compiled-roots-value "9.1" 'unknown) "variant 'unknown disables")
-  (check-false (compiled-roots-value "local" 'cs) "\"local\" version disables")
-  (check-false (compiled-roots-value #f 'cs) "#f version disables")
-  (check-false (compiled-roots-value "9.1" #f) "#f variant disables")
-  (check-false (compiled-roots-value "" 'cs) "blank version disables")
+  (check-false (compiled-roots-value "local" 'cs) "\"local\" version disables (no name)")
+  (check-false (compiled-roots-value #f 'cs) "#f version disables (no name)")
+  (check-false (compiled-roots-value "9.1" #f) "#f variant disables (installer)")
+  (check-false (compiled-roots-value "" 'cs) "blank version disables (no name)")
 
   ;; Unit tests: env-var-export-line — all vars exported unconditionally
   (check-equal? (env-var-export-line "PLTADDONDIR" "/foo/bar")
@@ -2475,8 +2493,8 @@
                    "reshim updated PLTADDONDIR to probed value")
      (define pcr (assoc "PLTCOMPILEDROOTS" new-env-vars))
      (check-not-false pcr "reshim wrote PLTCOMPILEDROOTS")
-     (check-equal? (cdr pcr) "compiled/9.7.0.5-cs-local-stale:."
-                   "reshim PLTCOMPILEDROOTS uses re-probed version")
+     (check-equal? (cdr pcr) "compiled/cs-local-stale:."
+                   "reshim PLTCOMPILEDROOTS keys on installation name, not the re-probed version")
 
      ;; env.sh should also reflect the new values.
      (define env-sh (file->string (rackup-toolchain-env-file id)))
