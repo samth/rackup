@@ -142,13 +142,15 @@ The env file exports all variables unconditionally (`PLTADDONDIR`, `PLTCOMPILEDR
 
 ## Per-toolchain PLTCOMPILEDROOTS
 
-Different Racket versions (and CS vs BC) produce incompatible `.zo` bytecode. To prevent cross-version contamination in `compiled/` directories under user source trees, rackup sets `PLTCOMPILEDROOTS` per toolchain so each version+variant writes compiled output to its own subdirectory while preserving access to the toolchain's existing compiled files.
+Different Racket versions (and CS vs BC), and source builds versus installer binaries, produce incompatible `.zo` bytecode. To prevent one toolchain from invalidating another's compiled files in `compiled/` directories under shared user source trees, rackup sets `PLTCOMPILEDROOTS` per toolchain so each **installation** writes compiled output to its own subdirectory while preserving access to the toolchain's existing compiled files. The goal is one compiled directory per installation.
 
 ### How the value is constructed
 
 At toolchain install or link time, `compiled-roots-value` in `state.rkt` constructs a colon-separated PLTCOMPILEDROOTS string:
 
-1. The first entry is `compiled/<version>-<variant>` (e.g., `compiled/9.1-cs`), which is where new `.zo` files are written.
+1. The first entry is the per-installation key, which is where new `.zo` files are written:
+   - **Installer toolchains** have a stable version, so they key on `compiled/<version>-<variant>` (e.g., `compiled/9.1-cs`). This lets `.zo`-compatible variants (full and minimal at the same version) share one directory.
+   - **Linked source toolchains** key on the installation name instead — `compiled/<variant>-local-<name>` (e.g., `compiled/cs-local-dev`). A linked toolchain's version drifts on every `make`, so keying on the version would spawn a fresh compiled tree per rebuild and go stale whenever the source is rebuilt outside `rackup rebuild`. The name is stable across rebuilds and already unique per installation, and it keeps the linked toolchain from sharing a dir with an installer toolchain at the same version+variant.
 2. The remaining entries are the toolchain's existing `compiled-file-roots`, read from its `config.rktd` by `read-toolchain-compiled-file-roots`. This preserves the toolchain's native compiled-file layout:
    - **In-place installs** (rackup's default): existing roots = `(same)`, serialized as `.` → `compiled/9.1-cs:.`
    - **FHS installs** (e.g., setup-racket on CI): existing roots include an absolute reroot path → `compiled/9.1-cs:/usr/lib/racket/compiled:.`
@@ -156,7 +158,7 @@ At toolchain install or link time, `compiled-roots-value` in `state.rkt` constru
 
 The `'same` symbol in `current-compiled-file-roots` cannot be spelled directly in PLTCOMPILEDROOTS because `path-list-string->path-list` converts all entries to path objects. However, `.` is a relative path that `(build-path dir ".")` resolves to `dir` itself, which is functionally equivalent.
 
-For linked toolchains where version or variant cannot be probed, PLTCOMPILEDROOTS is omitted. The value flows through the existing `env-vars` metadata pipeline: `write-toolchain-env-file!` (in `shims.rkt`) emits an unconditional export in env.sh, and `cmd-run` in `main.rkt` preserves a user-restored value before overlaying toolchain env vars.
+A linked toolchain gets a key from its name as long as the variant is known (and, as a last resort, from the name alone). PLTCOMPILEDROOTS is omitted only for an installer toolchain whose version or variant cannot be determined. The value flows through the existing `env-vars` metadata pipeline: `write-toolchain-env-file!` (in `shims.rkt`) emits an unconditional export in env.sh, and `cmd-run` in `main.rkt` preserves a user-restored value before overlaying toolchain env vars.
 
 ### Migration for existing installs
 

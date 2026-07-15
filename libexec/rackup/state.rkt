@@ -162,20 +162,33 @@
     [(string? r) r]
     [else (format "~a" r)]))
 
-;; Compute a PLTCOMPILEDROOTS value that prepends a version-variant-
-;; specific subdirectory to the toolchain's existing compiled-file
-;; roots.  `existing-roots` is a list as found in config.rktd's
+;; Compute a PLTCOMPILEDROOTS value that prepends a per-installation
+;; subdirectory to the toolchain's existing compiled-file roots.  The
+;; goal is one compiled directory per installation, so that switching
+;; between toolchains that share a user source tree doesn't invalidate
+;; each other's (mutually incompatible) .zo files.
+;;
+;; `existing-roots` is a list as found in config.rktd's
 ;; 'compiled-file-roots key (e.g., (same) for in-place installs, or
 ;; ("/usr/lib/racket/compiled") for FHS installs).  When not provided,
 ;; defaults to (same).  `local-name` is the local name of a linked
-;; toolchain (e.g., "dev" for `rackup link dev`), and when non-#f is
-;; appended to the key so locally-built toolchains don't share
-;; compiled-file directories with release installs of the same
-;; version+variant.
+;; toolchain (e.g., "dev" for `rackup link dev`).
 ;;
-;; Returns a string like "compiled/9.1-cs:." or
-;; "compiled/9.1-cs-local-dev:." (for linked toolchains), or #f when
-;; the version/variant are too incomplete to form a stable key.
+;; Keying:
+;;  - A linked source toolchain's version drifts on every `make`, so
+;;    keying its dir on the version would spawn a fresh compiled tree
+;;    per rebuild -- and go stale whenever the source is rebuilt outside
+;;    `rackup rebuild`.  Key those on the installation name instead
+;;    (e.g. "compiled/cs-local-dev"), which is stable across rebuilds
+;;    and already unique per installation.
+;;  - Installer toolchains have a stable version, so they keep the
+;;    version+variant key (e.g. "compiled/9.1-cs").  That also lets
+;;    .zo-compatible variants (full/minimal at the same version) share a
+;;    directory.
+;;
+;; Returns a string like "compiled/9.1-cs:." or "compiled/cs-local-dev:."
+;; (for linked toolchains), or #f when there is not enough information to
+;; form a stable key.
 (define (compiled-roots-value version variant [existing-roots '(same)] [local-name #f])
   (define variant-str
     (cond
@@ -187,14 +200,18 @@
       [(and (string? version) (not (string-blank? version)) (not (equal? version "local")))
        version]
       [else #f]))
-  (define local-suffix
+  (define local-name-str
+    (and (string? local-name) (not (string-blank? local-name)) local-name))
+  (define key
     (cond
-      [(and (string? local-name) (not (string-blank? local-name)))
-       (format "-local-~a" local-name)]
-      [else ""]))
+      ;; Linked toolchain: key on the installation name (version-independent).
+      [(and local-name-str variant-str) (format "compiled/~a-local-~a" variant-str local-name-str)]
+      [local-name-str (format "compiled/local-~a" local-name-str)]
+      ;; Installer toolchain: key on the stable version+variant.
+      [(and version-str variant-str) (format "compiled/~a-~a" version-str variant-str)]
+      [else #f]))
   (cond
-    [(and version-str variant-str)
-     (define key (format "compiled/~a-~a~a" version-str variant-str local-suffix))
+    [key
      ;; Always include 'same (serialized as ".") so that user code's
      ;; compiled/ directories are found, even on FHS installs where the
      ;; existing roots only contain absolute reroot paths for system
