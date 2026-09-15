@@ -154,15 +154,28 @@ At toolchain install or link time, `compiled-roots-value` in `state.rkt` constru
 2. The remaining entries are the toolchain's existing `compiled-file-roots`, read from its `config.rktd` by `read-toolchain-compiled-file-roots`. This preserves the toolchain's native compiled-file layout:
    - **In-place installs** (rackup's default): existing roots = `(same)`, serialized as `.` → `compiled/9.1-cs:.`
    - **FHS installs** (e.g., setup-racket on CI): existing roots include an absolute reroot path → `compiled/9.1-cs:/usr/lib/racket/compiled:.`
-3. `.` (equivalent to `'same`) is always included in the fallbacks so that user code's `compiled/` directories are found regardless of install layout.
+3. `.` (equivalent to `'same`) is always included in the fallbacks so that user code's `compiled/` directories are found regardless of install layout — except for keyed-only linked toolchains (see below), which have no fallback.
 
 The `'same` symbol in `current-compiled-file-roots` cannot be spelled directly in PLTCOMPILEDROOTS because `path-list-string->path-list` converts all entries to path objects. However, `.` is a relative path that `(build-path dir ".")` resolves to `dir` itself, which is functionally equivalent.
 
 A linked toolchain gets a key from its name as long as the variant is known (and, as a last resort, from the name alone). PLTCOMPILEDROOTS is omitted only for an installer toolchain whose version or variant cannot be determined. The value flows through the existing `env-vars` metadata pipeline: `write-toolchain-env-file!` (in `shims.rkt`) emits an unconditional export in env.sh, and `cmd-run` in `main.rkt` preserves a user-restored value before overlaying toolchain env vars.
 
+### Isolated compiled output for linked git checkouts
+
+The `.` fallback is a hazard for a *linked* toolchain: it lets the running racket read a `.zo` from the tree's default `compiled/` dir, which a bare `make`, a direct `raco`, or a different version writes to. If that `.zo`'s version differs from the running binary, loading it is a hard `version mismatch` error, not a graceful recompile. (Installer toolchains are safe: their default dir holds the shipped, version-matching `.zo`.)
+
+So a linked toolchain that lives in a **git work tree** uses a **keyed-only** value — the bare key with no `.` fallback (e.g. `compiled/cs-local-dev`). With one root and no fallback, a missing `.zo` compiles from source instead of erroring, and a wrong-version `.zo` in the default dir is never reached. This is recorded two ways so every invocation path agrees:
+
+- `compiled-roots-value ... #:keyed-only? #t` drops the fallback in the env; `compute-local-env-vars` (in `shims.rkt`) passes `#:keyed-only?` when the toolchain's meta carries `compiled-roots-scheme: 'keyed-only`.
+- `set-toolchain-compiled-file-roots!` writes the same single root into the tree's `config.rktd`, which is what non-shim callers honor — bare `make`, direct `raco`/`racket`, and, crucially, `rackup rebuild`'s own `make` (which runs with no `PLTCOMPILEDROOTS`). It preserves other config keys and refuses to overwrite a user's custom `compiled-file-roots`.
+
+`rackup link` and `rackup rebuild` apply this automatically for git checkouts (default on; detected via `source-git-work-tree?` / `git-work-tree?`). `rebuild` writes `config.rktd` *before* `make` so the build fills a complete keyed dir in one pass. The migration is suppressed under `rackup-testing?` (a non-empty `RACKUP_TESTING`), so rackup never writes `config.rktd` into a shared source tree during its own test suite; the keyed-only path is exercised against throwaway temp trees instead.
+
 ### Migration for existing installs
 
 Toolchains installed by an older rackup do not have PLTCOMPILEDROOTS in their `meta.rktd`. `regenerate-env-files!` in `shims.rkt` backfills it: on every `reshim!` call (which runs as part of `commit-state-change!` for any state-modifying command), each installed toolchain's metadata is checked, and if it lacks PLTCOMPILEDROOTS but the version+variant yield a value, the entry is added to `meta.rktd` and `env.sh` is rewritten. The backfill is idempotent — subsequent reshims see the entry and do nothing. Users only need to run any state-changing command (e.g., `rackup reshim`, `rackup install`) after upgrading rackup to pick up the new PLTCOMPILEDROOTS for existing toolchains.
+
+The keyed-only scheme migrates only through `rackup rebuild`/`link` on a git checkout — never a bare `reshim`. `compute-local-env-vars` reads the persisted `compiled-roots-scheme` flag but never sets it, so a reshim keeps a not-yet-migrated linked toolchain on the legacy `:.` value until the user rebuilds. `rebuild` produces a complete keyed dir in the same step that flips the flag, so there is no window where the keyed dir is authoritative but incomplete. Existing linked-toolchain users see no change until their next `rackup rebuild`, which they run routinely.
 
 ### Cleaning up on removal
 

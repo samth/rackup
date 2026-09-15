@@ -130,6 +130,27 @@
   (define argv (make-argv resolved-jobs make-args))
   (define system*-proc (current-rebuild-system*-proc))
   (define displayln-proc (current-rebuild-displayln-proc))
+  ;; Isolate compiled output for git source checkouts (default on).  Write
+  ;; config.rktd BEFORE `make` so the build -- which runs with no
+  ;; PLTCOMPILEDROOTS -- writes a complete keyed dir instead of the shared
+  ;; default `compiled/`, and record 'keyed-only so the shim env drops the
+  ;; `.` fallback.  Skipped on dry runs (no side effects).
+  (define scheme
+    (cond
+      [(or dry-run? (rackup-testing?)
+           (not (git-work-tree? (or source-root cwd) system*-proc)))
+       (hash-ref meta 'compiled-roots-scheme #f)]
+      [else
+       (define key (compiled-roots-key (hash-ref meta 'resolved-version #f)
+                                       (hash-ref meta 'variant #f)
+                                       (hash-ref meta 'requested-spec #f)))
+       (cond
+         [(and key
+               (memq (set-toolchain-compiled-file-roots!
+                      (string->path (hash-ref layout 'bin-dir)) (list key))
+                     '(written unchanged)))
+          'keyed-only]
+         [else (hash-ref meta 'compiled-roots-scheme #f)])]))
   (cond
     [(and pull? dry-run?)
      (displayln-proc (format "+ git -C ~a pull --ff-only" (or source-root cwd)))]
@@ -144,6 +165,7 @@
     [else
      (finalize-local-toolchain! id (hash-ref meta 'requested-spec id) layout
                                 #:installed-at (hash-ref meta 'installed-at #f)
-                                #:last-rebuilt-at (current-iso8601))
+                                #:last-rebuilt-at (current-iso8601)
+                                #:compiled-roots-scheme scheme)
      (displayln-proc (format "Rebuilt ~a" id))
      id]))

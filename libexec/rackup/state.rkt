@@ -30,7 +30,9 @@
          env-vars->meta
          toolchain-env-var-entries
          compiled-roots-value
+         compiled-roots-key
          read-toolchain-compiled-file-roots
+         set-toolchain-compiled-file-roots!
          register-toolchain!
          unregister-toolchain!
          find-local-toolchain
@@ -151,6 +153,50 @@
      (hash-ref config 'compiled-file-roots)]
     [else '(same)]))
 
+;; The config.rktd path for a toolchain's real bin dir -- the same file
+;; read-toolchain-compiled-file-roots consults -- preferring an existing
+;; one and otherwise defaulting to <plthome>/etc/config.rktd.
+(define (toolchain-config-rktd-path real-bin-dir)
+  (define parent
+    (and real-bin-dir
+         (let-values ([(d _ __) (split-path (if (path? real-bin-dir)
+                                                real-bin-dir
+                                                (string->path (format "~a" real-bin-dir))))])
+           d)))
+  (and parent
+       (let ([primary (build-path parent "etc" "config.rktd")]
+             [alt (build-path parent "etc" "racket" "config.rktd")])
+         (cond
+           [(file-exists? primary) primary]
+           [(file-exists? alt) alt]
+           [else primary]))))
+
+;; Record 'compiled-file-roots in a linked toolchain's config.rktd so
+;; that non-shim invocations (bare `make`, direct `raco`/`racket`)
+;; resolve the same isolated compiled dir the shim uses -- and, crucially,
+;; so that `rackup rebuild`'s `make` (which runs with no PLTCOMPILEDROOTS)
+;; writes a complete keyed dir instead of the default `compiled/`.
+;; Preserves every other config key.  Refuses to overwrite a user's
+;; pre-existing non-default value.  Returns 'written, 'unchanged, or
+;; 'refused.
+(define (set-toolchain-compiled-file-roots! real-bin-dir roots)
+  (define path (toolchain-config-rktd-path real-bin-dir))
+  (cond
+    [(not path) 'refused]
+    [else
+     (define config
+       (let ([v (and (file-exists? path) (read-rktd-file path #f))])
+         (if (hash? v) v (hash))))
+     (define current (hash-ref config 'compiled-file-roots #f))
+     (cond
+       [(equal? current roots) 'unchanged]
+       [(and current (not (equal? current '(same)))) 'refused]
+       [else
+        (let-values ([(dir _ __) (split-path path)])
+          (make-directory* dir))
+        (write-rktd-file path (hash-set config 'compiled-file-roots roots))
+        'written])]))
+
 ;; Serialize a compiled-file-roots entry (as found in config.rktd or
 ;; returned by find-compiled-file-roots) into a string suitable for a
 ;; colon-separated PLTCOMPILEDROOTS value.  'same cannot be represented
@@ -189,7 +235,13 @@
 ;; Returns a string like "compiled/9.1-cs:." or "compiled/cs-local-dev:."
 ;; (for linked toolchains), or #f when there is not enough information to
 ;; form a stable key.
-(define (compiled-roots-value version variant [existing-roots '(same)] [local-name #f])
+;; The per-installation compiled-dir key -- the "compiled/<...>" prefix
+;; where a toolchain writes its own `.zo` files -- or #f when the
+;; version/variant are too incomplete to form a stable key.  Linked
+;; source toolchains key on the installation name (stable across the
+;; version drift that every `make` causes); installer toolchains key on
+;; version+variant (stable, and shareable by `.zo`-compatible variants).
+(define (compiled-roots-key version variant [local-name #f])
   (define variant-str
     (cond
       [(symbol? variant) (and (not (eq? variant 'unknown)) (symbol->string variant))]
@@ -202,38 +254,46 @@
       [else #f]))
   (define local-name-str
     (and (string? local-name) (not (string-blank? local-name)) local-name))
-  (define key
-    (cond
-      ;; Linked toolchain: key on the installation name (version-independent).
-      [(and local-name-str variant-str) (format "compiled/~a-local-~a" variant-str local-name-str)]
-      [local-name-str (format "compiled/local-~a" local-name-str)]
-      ;; Installer toolchain: key on the stable version+variant.
-      [(and version-str variant-str) (format "compiled/~a-~a" version-str variant-str)]
-      [else #f]))
   (cond
-    [key
-     ;; Always include 'same (serialized as ".") so that user code's
-     ;; compiled/ directories are found, even on FHS installs where the
-     ;; existing roots only contain absolute reroot paths for system
-     ;; collections.
+    ;; Linked toolchain: key on the installation name (version-independent).
+    [(and local-name-str variant-str) (format "compiled/~a-local-~a" variant-str local-name-str)]
+    [local-name-str (format "compiled/local-~a" local-name-str)]
+    ;; Installer toolchain: key on the stable version+variant.
+    [(and version-str variant-str) (format "compiled/~a-~a" version-str variant-str)]
+    [else #f]))
+
+(define (compiled-roots-value version variant [existing-roots '(same)] [local-name #f]
+                              #:keyed-only? [keyed-only? #f])
+  (define key (compiled-roots-key version variant local-name))
+  (cond
+    [(not key) #f]
+    ;; Keyed-only: a single root, no fallback.  Used for linked source
+    ;; toolchains that own an isolated, complete compiled dir, so a
+    ;; wrong-version `.zo` in the default `compiled/` can never be reached
+    ;; via `.` (which is a hard version-mismatch load error).
+    [keyed-only? key]
+    [else
+     ;; Include 'same (serialized as ".") so that user code's compiled/
+     ;; directories are found, even on FHS installs where the existing
+     ;; roots only contain absolute reroot paths for system collections.
      (define roots-with-same
        (let ([roots (if (null? existing-roots) '(same) existing-roots)])
          (if (memq 'same roots) roots (append roots '(same)))))
      (define fallbacks (map serialize-compiled-root roots-with-same))
-     (string-join (cons key fallbacks) ":")]
-    [else #f]))
+     (string-join (cons key fallbacks) ":")]))
 
 ;; Build the env-var alist recorded for a toolchain: PLTADDONDIR (when
 ;; a usable addon dir is known) and PLTCOMPILEDROOTS (when the
 ;; version+variant yield a stable key).  Entries are omitted when
 ;; unavailable.
-(define (toolchain-env-var-entries addon-dir version variant existing-roots local-name)
+(define (toolchain-env-var-entries addon-dir version variant existing-roots local-name
+                                   #:keyed-only? [keyed-only? #f])
   (append
    (if (and (string? addon-dir) (not (string-blank? addon-dir)))
        (list (cons "PLTADDONDIR" addon-dir))
        null)
    (cond
-     [(compiled-roots-value version variant existing-roots local-name)
+     [(compiled-roots-value version variant existing-roots local-name #:keyed-only? keyed-only?)
       =>
       (lambda (v) (list (cons "PLTCOMPILEDROOTS" v)))]
      [else null])))
