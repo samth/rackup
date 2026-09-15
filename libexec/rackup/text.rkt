@@ -6,6 +6,7 @@
 
 (provide path->string*
          string-blank?
+         rackup-testing?
          current-iso8601
          path-basename-string
          sh-single-quote
@@ -19,6 +20,15 @@
 
 (define (string-blank? s)
   (string=? "" (string-trim s)))
+
+;; True when running under the test harness.  RACKUP_TESTING is set to "1"
+;; during tests and restored to "" (empty, not unset) afterward, so an
+;; empty value must read as "not testing".  Used to keep rackup from
+;; mutating shared source trees (e.g. writing config.rktd) during its own
+;; test suite.
+(define (rackup-testing?)
+  (define t (getenv "RACKUP_TESTING"))
+  (and t (not (string=? t "")) #t))
 
 ;; "YYYY-MM-DDTHH:MM:SSZ" (UTC). `racket/date`'s 'iso-8601 format omits
 ;; the timezone, so append the trailing "Z" ourselves.

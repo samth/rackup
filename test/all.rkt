@@ -4,6 +4,8 @@
 ;; modules would skip everything wrapped in (module+ test ...).
 (require (submod "agents-guide.rkt" test)
          (submod "checksum.rkt" test)
+         (submod "compiled-roots.rkt" test)
+         (submod "compiled-roots-migration.rkt" test)
          (submod "copy-filtered-tree.rkt" test)
          (submod "env.rkt" test)
          (submod "install-prefix.rkt" test)

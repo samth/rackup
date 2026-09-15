@@ -421,7 +421,13 @@ EOF
   (define local-name
     (and (eq? (hash-ref meta 'kind #f) 'local)
          (hash-ref meta 'requested-spec #f)))
-  (values (toolchain-env-var-entries addon-dir version variant existing-roots local-name)
+  ;; Only a toolchain migrated by `rackup rebuild`/`link` (which produce a
+  ;; complete keyed dir) carries 'keyed-only.  A bare reshim never sets
+  ;; it, so this preserves the legacy `:.` value until the user rebuilds.
+  (define keyed-only?
+    (eq? (hash-ref meta 'compiled-roots-scheme #f) 'keyed-only))
+  (values (toolchain-env-var-entries addon-dir version variant existing-roots local-name
+                                     #:keyed-only? keyed-only?)
           version
           variant))
 
