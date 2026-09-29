@@ -72,10 +72,16 @@ rackup_default_toolchain_file() {
   printf '%s\n' "$(rackup_state_dir)/default-toolchain"
 }
 
+# Mirror get-default-toolchain (and the shim dispatcher): trim surrounding
+# whitespace and treat an invalid id as no default.
 rackup_read_default_toolchain_shell() {
   f="$(rackup_default_toolchain_file)"
   if [ -f "$f" ]; then
-    tr -d '\r\n' <"$f"
+    _rackup_default="$(tr '\r\n\t' '   ' <"$f" | sed -e 's/^ *//' -e 's/ *$//')"
+    case "$_rackup_default" in
+      "" | *[!A-Za-z0-9._-]*) ;;
+      *) printf '%s' "$_rackup_default" ;;
+    esac
   fi
 }
 
@@ -150,6 +156,11 @@ rackup_prompt_short_shell() {
 rackup_prompt_shell() {
   mode="${1:-}"
   active="${RACKUP_TOOLCHAIN:-}"
+  # A whitespace-only RACKUP_TOOLCHAIN counts as unset, as in rackup.
+  case "$active" in
+    *[![:space:]]*) ;;
+    *) active="" ;;
+  esac
   source_kind=""
   if [ -n "$active" ]; then
     source_kind="env"

@@ -1764,7 +1764,7 @@
      ;; Re-run ensure-index! (simulating what happens after self-upgrade)
      (define idx3 (ensure-index!))
      (check-true (toolchain-exists? id idx3))
-     (check-equal? (get-default-toolchain idx3) id)))
+     (check-equal? (get-default-toolchain) id)))
 
   ;; Upgrade path: self-upgrade preserves state when install.sh reruns
   (with-temp-rackup-home
@@ -2091,14 +2091,16 @@
      ;; Write the env.sh as the install flow would
      (write-toolchain-env-file! id env-vars)
 
-     ;; env.sh should contain an unconditional export for PLTCOMPILEDROOTS
+     ;; env.sh applies the same precedence as `rackup run`: it sets the
+     ;; toolchain value unless the user set one, and records what it set in
+     ;; the marker so a nested launch can tell rackup's value from the user's.
      (define env-sh-content
        (file->string (rackup-toolchain-env-file id)))
      (check-true (string-contains? env-sh-content "export PLTCOMPILEDROOTS='compiled/9.1-cs:.'")
-                 "env.sh contains unconditional PLTCOMPILEDROOTS export")
-     (check-false (regexp-match? #px"if \\[ -z \"\\$\\{PLTCOMPILEDROOTS:-\\}\" \\];"
-                                 env-sh-content)
-                  "env.sh does NOT use conditional guard")
+                 "env.sh exports the toolchain PLTCOMPILEDROOTS")
+     (check-true (string-contains? env-sh-content
+                                   "export _RACKUP_MANAGED_PLTCOMPILEDROOTS='compiled/9.1-cs:.'")
+                 "env.sh records the value it exported")
 
      ;; Verify rackup run respects user-set PLTCOMPILEDROOTS
      (define old-cr (getenv "PLTCOMPILEDROOTS"))
@@ -2122,7 +2124,25 @@
       (lambda ()
         (if old-cr
             (putenv "PLTCOMPILEDROOTS" old-cr)
-            (putenv "PLTCOMPILEDROOTS" ""))))))
+            (putenv "PLTCOMPILEDROOTS" ""))))
+
+     ;; A PLTCOMPILEDROOTS that an enclosing rackup launch exported (it
+     ;; equals the marker) is not a user override: rackup run replaces it.
+     (define old-marker (getenv "_RACKUP_MANAGED_PLTCOMPILEDROOTS"))
+     (dynamic-wind
+      (lambda ()
+        (putenv "PLTCOMPILEDROOTS" "compiled/other-toolchain:.")
+        (putenv "_RACKUP_MANAGED_PLTCOMPILEDROOTS" "compiled/other-toolchain:."))
+      (lambda ()
+        (expect (begin (apply system* rackup-bin (list "run" id "--" "print-compiled-roots")) (void))
+                "PLTCOMPILEDROOTS=compiled/9.1-cs:." #:match 'contains))
+      (lambda ()
+        (if old-cr
+            (putenv "PLTCOMPILEDROOTS" old-cr)
+            (putenv "PLTCOMPILEDROOTS" ""))
+        (if old-marker
+            (putenv "_RACKUP_MANAGED_PLTCOMPILEDROOTS" old-marker)
+            (putenv "_RACKUP_MANAGED_PLTCOMPILEDROOTS" ""))))))
 
   ;; Integration test: clean-toolchain-compiled-dirs! walks linked package
   ;; directories (reported by the toolchain's racket) and removes

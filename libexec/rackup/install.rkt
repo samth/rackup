@@ -163,17 +163,6 @@
                       (format "--create-dir --in-place --dest ~a" (path->string* dest)))))
   (delete-log!))
 
-(define (file-executable?/safe p)
-  (and (file-exists? p)
-       (try-or #f
-         (member 'execute (file-or-directory-permissions p)))))
-
-(define (enumerate-toolchain-executables real-bin-dir)
-  (sort (for/list ([p (in-list (directory-list real-bin-dir #:build? #t))]
-                   #:when (and (file-exists? p) (file-executable?/safe p)))
-          (path-basename-string p))
-        string<?))
-
 (define (make-bin-link! id real-bin-dir)
   (define link (rackup-toolchain-bin-link id))
   (replace-path! link real-bin-dir #:mode 'link)
@@ -1260,7 +1249,7 @@
   (ensure-index!)
   (define idx (load-index))
   (define ids (installed-toolchain-ids idx))
-  (define default-id (get-default-toolchain idx))
+  (define default-id (get-default-toolchain))
   (define runtime-status (hidden-runtime-status))
   (define runtime-mode (hash-ref runtime-status 'mode #f))
   (define runtime-meta (hash-ref runtime-status 'meta #f))
