@@ -397,12 +397,12 @@ EOF
   (define p (assoc key alist))
   (and p (cadr p)))
 
-;; Re-probe the linked toolchain's racket binary on every call so
-;; addon-dir, version, and variant reflect the current source-tree
-;; state.  Returns the new env-vars list and the probed (or fallback)
-;; version+variant.  Does not fall back to <source-root>/add-on for
-;; PLTADDONDIR: that location is usually wrong for users whose
-;; packages live in their native addon-dir.
+;; Re-probe the linked toolchain's racket binary on every call so version
+;; and variant reflect the current source-tree state.  Returns the new
+;; env-vars list and the probed (or fallback) version+variant.  PLTADDONDIR
+;; is the rackup-managed per-toolchain addon dir (see the addon-dir binding
+;; below), matching what `rackup run` sets, so the shim and `rackup run`
+;; resolve the same user packages.
 (define (compute-local-env-vars meta)
   (define real-bin-dir-str (hash-ref meta 'real-bin-dir #f))
   (define-values (probed-version probed-variant probed-addon)
@@ -411,9 +411,18 @@ EOF
   (define variant
     (or (and probed-variant (string->symbol probed-variant))
         (hash-ref meta 'variant #f)))
+  ;; Use the rackup-managed per-toolchain addon dir so the shim resolves the
+  ;; same user packages as `rackup run`, which sets PLTADDONDIR to this dir
+  ;; via `toolchain-runtime-env`.  The shim previously used the probed native
+  ;; addon dir; that diverged from `rackup run` and hid user-scope packages
+  ;; installed under the managed addon (e.g. `rackup run ... raco pkg install`).
+  ;; Fall back to the probe / recorded value only when the id is unavailable.
   (define addon-dir
-    (or probed-addon
-        (lookup-env-var (hash-ref meta 'env-vars '()) "PLTADDONDIR")))
+    (let ([id (hash-ref meta 'id #f)])
+      (if id
+          (path->string (rackup-addon-dir id))
+          (or probed-addon
+              (lookup-env-var (hash-ref meta 'env-vars '()) "PLTADDONDIR")))))
   (define existing-roots
     (if real-bin-dir-str
         (read-toolchain-compiled-file-roots (string->path real-bin-dir-str))

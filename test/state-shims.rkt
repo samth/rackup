@@ -590,11 +590,13 @@
      ;; Racket env vars, and the binary finds its own collects.
      (check-true (string-contains? shim-out "PLTHOME=\n"))
      (check-true (string-contains? shim-out "PLTCOLLECTS=\n"))
+     ;; The shim sets PLTADDONDIR to the rackup-managed per-toolchain addon
+     ;; dir (matching `rackup run`), not the probed native addon-dir.
      (check-true (regexp-match?
                   (regexp (regexp-quote (format "PLTADDONDIR=~a"
-                                                (path->string addon-dir))))
+                                                (path->string (rackup-addon-dir linked-id)))))
                   shim-out)
-                 "shim dispatcher sets PLTADDONDIR")
+                 "shim dispatcher sets PLTADDONDIR to the managed addon dir")
 
      (define scheme-out
        (capture-output
@@ -750,8 +752,9 @@
      ;; PLTHOME and PLTCOLLECTS should NOT be set for linked toolchains
      (check-true (string-contains? shim-out "PLTHOME=\n"))
      (check-true (string-contains? shim-out "PLTCOLLECTS=\n"))
+     ;; Shim sets PLTADDONDIR to the rackup-managed per-toolchain addon dir.
      (check-true (regexp-match? (regexp (regexp-quote (format "PLTADDONDIR=~a"
-                                                              (path->string addon-dir))))
+                                                              (path->string (rackup-addon-dir linked-id)))))
                                 shim-out))))
 
   (with-temp-rackup-home
@@ -2489,8 +2492,9 @@
                   "reshim cleaned stale PLTHOME from env-vars")
      (check-false (assoc "PLTCOLLECTS" new-env-vars)
                   "reshim cleaned stale PLTCOLLECTS from env-vars")
-     (check-equal? (cdr (assoc "PLTADDONDIR" new-env-vars)) new-addon
-                   "reshim updated PLTADDONDIR to probed value")
+     (check-equal? (cdr (assoc "PLTADDONDIR" new-env-vars))
+                   (path->string (rackup-addon-dir id))
+                   "reshim sets PLTADDONDIR to the rackup-managed addon dir")
      (define pcr (assoc "PLTCOMPILEDROOTS" new-env-vars))
      (check-not-false pcr "reshim wrote PLTCOMPILEDROOTS")
      (check-equal? (cdr pcr) "compiled/cs-local-stale:."
@@ -2499,8 +2503,9 @@
      ;; env.sh should also reflect the new values.
      (define env-sh (file->string (rackup-toolchain-env-file id)))
      (check-true (string-contains? env-sh
-                                   (format "export PLTADDONDIR='~a'" new-addon))
-                 "env.sh has new PLTADDONDIR")
+                                   (format "export PLTADDONDIR='~a'"
+                                           (path->string (rackup-addon-dir id))))
+                 "env.sh has the managed PLTADDONDIR")
      (check-false (string-contains? env-sh "PLTHOME")
                   "env.sh does NOT contain stale PLTHOME")
      (check-false (string-contains? env-sh "PLTCOLLECTS")

@@ -431,13 +431,10 @@
 
 (define (local-layout-env-vars layout [addon-dir #f] [version #f] [variant #f] [local-name #f]
                                #:keyed-only? [keyed-only? #f])
-  ;; If the probe gave us an addon-dir, use it.  Otherwise leave
-  ;; PLTADDONDIR unset and let the shim dispatcher fall back to its
-  ;; default (which is per-toolchain under ~/.rackup/addons/).  We
-  ;; intentionally do NOT fall back to <source-root>/add-on: that
-  ;; tends to be wrong for users whose packages live in their native
-  ;; addon-dir (e.g., ~/.local/share/racket/<install-name>/), and the
-  ;; old behavior caused silent breakage of `raco pkg` operations.
+  ;; `addon-dir` is the rackup-managed per-toolchain addon dir (passed by
+  ;; callers), so the shim resolves the same user packages as `rackup run`.
+  ;; When it is #f, PLTADDONDIR is left unset and the shim dispatcher falls
+  ;; back to its own per-toolchain default under ~/.rackup/addons/.
   (define bin-dir-str (hash-ref layout 'bin-dir #f))
   (define existing-roots
     (if bin-dir-str
@@ -715,16 +712,18 @@
     (rackup-error "linked toolchain does not contain an executable racket binary at ~a"
                   (path->string* racket-exe)))
   (define extra-exes (find-local-chez-extra-executables layout))
-  ;; Probe the linked racket with a clean environment so
-  ;; find-system-path returns the binary's native addon-dir.
+  ;; Probe the linked racket for version and variant.  (PLTADDONDIR no
+  ;; longer comes from the probe -- it is the rackup-managed addon dir --
+  ;; but a failed probe still signals the binary is not ready, so the
+  ;; recorded version/variant may be stale.)
   (define-values (version* variant* addon-dir*)
     (reprobe-local-toolchain (path->string* real-bin-dir)))
   (unless addon-dir*
     (install-warn
      (string-append
-      "could not probe addon-dir from ~a; PLTADDONDIR will be unset.\n"
+      "could not probe ~a; recorded version/variant may be stale.\n"
       "  Run `rackup link --force ~a ~a` after fixing the binary\n"
-      "  (e.g., once `raco setup` finishes) to record the correct value.")
+      "  (e.g., once `raco setup` finishes) to record the correct values.")
      (path->string* real-bin-dir) name (hash-ref layout 'input-path)))
   ;; Isolate compiled output (keyed-only, no `.` fallback) when requested,
   ;; but only if we can form a stable key and record it in config.rktd.
@@ -754,8 +753,13 @@
            (hash-ref layout 'plthome) id)
           #f]
          [else 'keyed-only])]))
+  ;; PLTADDONDIR is the rackup-managed per-toolchain addon dir, matching
+  ;; what `rackup run` and the shim (compute-local-env-vars) use, so all
+  ;; three resolve the same user packages.  addon-dir* (the probe result)
+  ;; is only a readiness signal now.
   (define env-vars
-    (local-layout-env-vars layout addon-dir* version* variant* name
+    (local-layout-env-vars layout (path->string (rackup-addon-dir id))
+                           version* variant* name
                            #:keyed-only? (eq? effective-scheme 'keyed-only)))
   (make-bin-overlay! id real-bin-dir extra-exes)
   (maybe-wrap-local-chez-extra-executables! id extra-exes layout)
