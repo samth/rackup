@@ -40,6 +40,9 @@
                 "compiled/cs-local-dev")
   ;; legacy: key plus the `.` fallback.
   (check-equal? (compiled-roots-value "9.99" 'cs '(same) "dev") "compiled/cs-local-dev:.")
+  ;; legacy with a config.rktd that already names the key: no doubled key.
+  (check-equal? (compiled-roots-value "9.99" 'cs '("compiled/cs-local-dev") "dev")
+                "compiled/cs-local-dev:.")
   ;; installer: version+variant key plus fallback (unchanged behavior).
   (check-equal? (compiled-roots-value "9.1" 'cs '(same) #f) "compiled/9.1-cs:.")
   ;; keyed-only with no derivable key -> #f (no PLTCOMPILEDROOTS emitted).
