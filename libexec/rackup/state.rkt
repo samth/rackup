@@ -31,6 +31,7 @@
          toolchain-env-var-entries
          compiled-roots-value
          compiled-roots-key
+         serialize-compiled-root
          read-toolchain-compiled-file-roots
          set-toolchain-compiled-file-roots!
          register-toolchain!
@@ -69,7 +70,16 @@
     (save-index! (empty-index)))
   (unless (file-exists? (rackup-config-file))
     (write-string-file (rackup-config-file) ""))
-  (load-index))
+  (define idx (load-index))
+  ;; The default-toolchain file is the only source of truth, because the
+  ;; bash shim dispatcher reads nothing else.  Migrate a default recorded
+  ;; only in the index by older rackup versions.
+  (define legacy-default (hash-ref idx 'default-toolchain #f))
+  (when (and (not (file-exists? (rackup-default-file)))
+             (string? legacy-default)
+             (valid-toolchain-id? legacy-default))
+    (write-string-file (rackup-default-file) legacy-default))
+  idx)
 
 (define (installed-toolchains [idx (load-index)])
   (hash-ref idx 'installed-toolchains (hash)))
@@ -80,8 +90,10 @@
 (define (toolchain-exists? id [idx (load-index)])
   (hash-has-key? (installed-toolchains idx) id))
 
-(define (get-default-toolchain [idx (load-index)])
-  (define raw (or (read-string-file (rackup-default-file) #f) (hash-ref idx 'default-toolchain #f)))
+;; Read only the default-toolchain file, exactly as the shim dispatcher
+;; does, so `rackup` and the shims always agree on the default.
+(define (get-default-toolchain)
+  (define raw (read-string-file (rackup-default-file) #f))
   (and raw (valid-toolchain-id? raw) raw))
 
 (define/state-locked (set-default-toolchain! id)
@@ -279,7 +291,12 @@
      (define roots-with-same
        (let ([roots (if (null? existing-roots) '(same) existing-roots)])
          (if (memq 'same roots) roots (append roots '(same)))))
-     (define fallbacks (map serialize-compiled-root roots-with-same))
+     ;; Drop an existing root equal to the key: a config.rktd that already
+     ;; names the key (e.g. written by a keyed-only migration) must not
+     ;; produce "key:key:.".
+     (define fallbacks
+       (filter (lambda (s) (not (equal? s key)))
+               (map serialize-compiled-root roots-with-same)))
      (string-join (cons key fallbacks) ":")]))
 
 ;; Build the env-var alist recorded for a toolchain: PLTADDONDIR (when
@@ -329,7 +346,7 @@
   (define new-installed (hash-remove (installed-toolchains idx) id))
   (define new-idx (hash-set idx 'installed-toolchains new-installed))
   (save-index! new-idx)
-  (when (equal? (get-default-toolchain idx) id)
+  (when (equal? (get-default-toolchain) id)
     (clear-default-toolchain!)
     (when (pair? (hash-keys new-installed))
       (set-default-toolchain! (car (sort (hash-keys new-installed) string<?))))))
@@ -424,7 +441,7 @@
 
 (define (find-local-toolchain name [idx (load-index)])
   (cond
-    [(or (not name) (string-blank? name)) (get-default-toolchain idx)]
+    [(or (not name) (string-blank? name)) (get-default-toolchain)]
     [else
      (define ids (installed-toolchain-ids idx))
      (define all-meta

@@ -6,8 +6,10 @@
          racket/system
          "error.rkt"
          "install.rkt"
+         "paths.rkt"
          "shims.rkt"
          "state.rkt"
+         "state-lock.rkt"
          "text.rkt")
 
 (provide rebuild-toolchain!
@@ -85,6 +87,15 @@
     (unless (apply system*-proc make-exe (cdr argv))
       (rackup-error "make failed in ~a" cwd))))
 
+;; Environment for the rebuild's `make`: the current one plus the
+;; toolchain's rackup-managed addon dir, the same PLTADDONDIR the shim and
+;; `rackup run` use.
+(define (build-environment id)
+  (define env (environment-variables-copy (current-environment-variables)))
+  (environment-variables-set! env #"PLTADDONDIR"
+                              (string->bytes/utf-8 (path->string (rackup-addon-dir id))))
+  env)
+
 (define (resolve-rebuild-target name)
   (cond
     [(or (not name) (string-blank? name))
@@ -149,6 +160,10 @@
                (memq (set-toolchain-compiled-file-roots!
                       (string->path (hash-ref layout 'bin-dir)) (list key))
                      '(written unchanged)))
+          ;; Record the scheme now, together with config.rktd, so a failed
+          ;; `make` cannot leave config.rktd keyed-only while meta and the
+          ;; shim's env.sh stay legacy.
+          (with-state-lock (refresh-local-toolchain! id))
           'keyed-only]
          [else (hash-ref meta 'compiled-roots-scheme #f)])]))
   (cond
@@ -159,7 +174,13 @@
   (cond
     [dry-run?
      (displayln-proc (format "+ cd ~a && ~a" cwd (string-join argv " ")))]
-    [else (run-make! cwd argv system*-proc displayln-proc)])
+    [else
+     ;; bin/rackup clears PLTADDONDIR, so without this the build's
+     ;; `raco setup` would use the native addon dir and miss user-scope
+     ;; packages that the shim and `rackup run` see under the managed dir,
+     ;; and could drop their launchers.
+     (parameterize ([current-environment-variables (build-environment id)])
+       (run-make! cwd argv system*-proc displayln-proc))])
   (cond
     [(or dry-run? (not update-meta?)) id]
     [else

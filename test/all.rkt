@@ -8,6 +8,7 @@
          (submod "compiled-roots-migration.rkt" test)
          (submod "copy-filtered-tree.rkt" test)
          (submod "env.rkt" test)
+         (submod "env-consistency.rkt" test)
          (submod "install-prefix.rkt" test)
          (submod "mac-apps.rkt" test)
          (submod "paths.rkt" test)
