@@ -33,7 +33,7 @@
          compiled-roots-key
          serialize-compiled-root
          read-toolchain-compiled-file-roots
-         set-toolchain-compiled-file-roots!
+         unset-toolchain-compiled-file-roots!
          register-toolchain!
          unregister-toolchain!
          find-local-toolchain
@@ -183,31 +183,21 @@
            [(file-exists? alt) alt]
            [else primary]))))
 
-;; Record 'compiled-file-roots in a linked toolchain's config.rktd so
-;; that non-shim invocations (bare `make`, direct `raco`/`racket`)
-;; resolve the same isolated compiled dir the shim uses -- and, crucially,
-;; so that `rackup rebuild`'s `make` (which runs with no PLTCOMPILEDROOTS)
-;; writes a complete keyed dir instead of the default `compiled/`.
-;; Preserves every other config key.  Refuses to overwrite a user's
-;; pre-existing non-default value.  Returns 'written, 'unchanged, or
-;; 'refused.
-(define (set-toolchain-compiled-file-roots! real-bin-dir roots)
+;; Undo the keyed-only migration of earlier rackup versions, which wrote a
+;; linked toolchain's key as the sole 'compiled-file-roots in its tree's
+;; config.rktd.  The in-place build's own `raco setup` ignores that file
+;; (it runs with `-G build/config`), so after a version bump the keyed dir
+;; went stale while config.rktd kept every later caller pointed at it.
+;; Removes the entry only when it equals `roots`, preserving every other
+;; key and any user-set value.  Returns #t when it rewrote the file.
+(define (unset-toolchain-compiled-file-roots! real-bin-dir roots)
   (define path (toolchain-config-rktd-path real-bin-dir))
+  (define config (and path (file-exists? path) (read-rktd-file path #f)))
   (cond
-    [(not path) 'refused]
-    [else
-     (define config
-       (let ([v (and (file-exists? path) (read-rktd-file path #f))])
-         (if (hash? v) v (hash))))
-     (define current (hash-ref config 'compiled-file-roots #f))
-     (cond
-       [(equal? current roots) 'unchanged]
-       [(and current (not (equal? current '(same)))) 'refused]
-       [else
-        (let-values ([(dir _ __) (split-path path)])
-          (make-directory* dir))
-        (write-rktd-file path (hash-set config 'compiled-file-roots roots))
-        'written])]))
+    [(and (hash? config) (equal? (hash-ref config 'compiled-file-roots #f) roots))
+     (write-rktd-file path (hash-remove config 'compiled-file-roots))
+     #t]
+    [else #f]))
 
 ;; Serialize a compiled-file-roots entry (as found in config.rktd or
 ;; returned by find-compiled-file-roots) into a string suitable for a
@@ -238,7 +228,10 @@
 ;;    per rebuild -- and go stale whenever the source is rebuilt outside
 ;;    `rackup rebuild`.  Key those on the installation name instead
 ;;    (e.g. "compiled/cs-local-dev"), which is stable across rebuilds
-;;    and already unique per installation.
+;;    and already unique per installation.  The keyed dirs inside the
+;;    source tree then go stale at a version bump; `rackup rebuild`
+;;    purges them (see purge-keyed-compiled-dirs!), and the `.` fallback
+;;    reaches the default `compiled/` that the build itself refreshed.
 ;;  - Installer toolchains have a stable version, so they keep the
 ;;    version+variant key (e.g. "compiled/9.1-cs").  That also lets
 ;;    .zo-compatible variants (full/minimal at the same version) share a
@@ -274,16 +267,10 @@
     [(and version-str variant-str) (format "compiled/~a-~a" version-str variant-str)]
     [else #f]))
 
-(define (compiled-roots-value version variant [existing-roots '(same)] [local-name #f]
-                              #:keyed-only? [keyed-only? #f])
+(define (compiled-roots-value version variant [existing-roots '(same)] [local-name #f])
   (define key (compiled-roots-key version variant local-name))
   (cond
     [(not key) #f]
-    ;; Keyed-only: a single root, no fallback.  Used for linked source
-    ;; toolchains that own an isolated, complete compiled dir, so a
-    ;; wrong-version `.zo` in the default `compiled/` can never be reached
-    ;; via `.` (which is a hard version-mismatch load error).
-    [keyed-only? key]
     [else
      ;; Include 'same (serialized as ".") so that user code's compiled/
      ;; directories are found, even on FHS installs where the existing
@@ -291,9 +278,9 @@
      (define roots-with-same
        (let ([roots (if (null? existing-roots) '(same) existing-roots)])
          (if (memq 'same roots) roots (append roots '(same)))))
-     ;; Drop an existing root equal to the key: a config.rktd that already
-     ;; names the key (e.g. written by a keyed-only migration) must not
-     ;; produce "key:key:.".
+     ;; Drop an existing root equal to the key: a config.rktd that still
+     ;; names the key (written by an earlier keyed-only migration that
+     ;; could not be undone) must not produce "key:key:.".
      (define fallbacks
        (filter (lambda (s) (not (equal? s key)))
                (map serialize-compiled-root roots-with-same)))
@@ -303,14 +290,13 @@
 ;; a usable addon dir is known) and PLTCOMPILEDROOTS (when the
 ;; version+variant yield a stable key).  Entries are omitted when
 ;; unavailable.
-(define (toolchain-env-var-entries addon-dir version variant existing-roots local-name
-                                   #:keyed-only? [keyed-only? #f])
+(define (toolchain-env-var-entries addon-dir version variant existing-roots local-name)
   (append
    (if (and (string? addon-dir) (not (string-blank? addon-dir)))
        (list (cons "PLTADDONDIR" addon-dir))
        null)
    (cond
-     [(compiled-roots-value version variant existing-roots local-name #:keyed-only? keyed-only?)
+     [(compiled-roots-value version variant existing-roots local-name)
       =>
       (lambda (v) (list (cons "PLTCOMPILEDROOTS" v)))]
      [else null])))

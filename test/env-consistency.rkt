@@ -124,7 +124,6 @@
 
 (module+ test
   (define make-exe (find-executable-path "make"))
-  (define git-exe (find-executable-path "git"))
 
   ;; --- #1: rebuild's `make` uses the managed addon dir ---------------------
   ;; bin/rackup clears PLTADDONDIR, so the build's `raco setup` used to fall
@@ -143,47 +142,30 @@
        (check-equal? seen (path->string (rackup-addon-dir "local-addon1"))
                      "rebuild's make sees the managed addon dir"))))
 
-  ;; --- #2a: a failed make leaves meta, env.sh and config.rktd consistent -
-  ;; rebuild writes config.rktd before `make`; the scheme must be recorded
-  ;; at the same time, not only after a successful build.
-  (when (and make-exe git-exe)
+  ;; --- #2: a failed make leaves meta, env.sh and config.rktd consistent -
+  ;; An older rackup could leave config.rktd keyed-only while meta and env.sh
+  ;; stayed on `key:.`.  rebuild now removes the keyed-only entry before
+  ;; `make`, so a failed build leaves every caller on `key:.`.
+  (when make-exe
     (with-temp-rackup-home
      (lambda (home)
        (define src (link-fake! home "failmake"))
        (define id "local-failmake")
        (define key (linked-key id))
+       (define cfg-path (build-path src "racket" "etc" "config.rktd"))
+       (make-directory* (build-path src "racket" "etc"))
+       (write-rktd-file cfg-path (hash 'compiled-file-roots (list key)))
        (check-exn exn:fail?
                   (lambda ()
                     (parameterize ([current-rebuild-system*-proc
                                     (lambda (exe . _args) (not (equal? exe make-exe)))])
                       (quietly (lambda () (cmd-rebuild '("failmake"))))))
                   "stubbed make fails")
-       (define cfg (read-rktd-file (build-path src "racket" "etc" "config.rktd") #f))
-       (check-equal? (hash-ref cfg 'compiled-file-roots #f) (list key))
-       (check-equal? (hash-ref (read-toolchain-meta id) 'compiled-roots-scheme #f) 'keyed-only
-                     "scheme recorded even though make failed")
-       (define env-sh (file->string (rackup-toolchain-env-file id)))
-       (check-true (string-contains? env-sh (format "'~a'" key)))
-       (check-false (string-contains? env-sh (string-append key ":"))
-                    "shim env matches config.rktd: no fallback"))))
-
-  ;; --- #2b: reshim adopts a keyed-only config.rktd and never doubles the key
-  ;; This is the state an interrupted migration left behind: config.rktd
-  ;; names the key but meta lacks the scheme.
-  (with-temp-rackup-home
-   (lambda (home)
-     (link-fake! home "reconcile")
-     (define id "local-reconcile")
-     (define meta (read-toolchain-meta id))
-     (check-false (hash-ref meta 'compiled-roots-scheme #f) "non-git link starts legacy")
-     (define key (linked-key id))
-     (set-toolchain-compiled-file-roots! (hash-ref meta 'real-bin-dir) (list key))
-     (with-state-lock (reshim!))
-     (check-equal? (hash-ref (read-toolchain-meta id) 'compiled-roots-scheme #f) 'keyed-only)
-     (define env-sh (file->string (rackup-toolchain-env-file id)))
-     (check-true (string-contains? env-sh (format "'~a'" key)))
-     (check-false (string-contains? env-sh (string-append key ":"))
-                  "no fallback and no doubled key")))
+       (check-false (hash-ref (read-rktd-file cfg-path #f) 'compiled-file-roots #f)
+                    "config.rktd no longer names only the key")
+       (check-true (string-contains? (file->string (rackup-toolchain-env-file id))
+                                     (string-append key ":."))
+                   "env.sh keeps the `.` fallback"))))
 
   ;; --- #3: env.sh gives PLTCOMPILEDROOTS the same precedence as rackup run -
   (with-temp-rackup-home
