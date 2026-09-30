@@ -109,7 +109,7 @@
   (usage-line "reshim [--short-aliases|--mac-apps]"
               "Rebuild executable shims (and, with --mac-apps, macOS GUI app wrappers).")
   (usage-line "init [--shell bash|zsh]" "Install/update shell integration in ~/.bashrc or ~/.zshrc.")
-  (usage-line "uninstall [--dangerously-delete-without-prompting]"
+  (usage-line "uninstall [--dangerously-delete-without-prompting <rackup-home>]"
               "Remove rackup, its toolchains/runtime, and shell init blocks (destructive).")
   (usage-line "self-upgrade [--with-init] [--exe | --source] [--ref <ref>] [--repo <owner/repo>]"
               "Upgrade rackup's code by rerunning the installer into the current RACKUP_HOME.")
@@ -823,15 +823,28 @@
                       #:make-args make-args)
   (void))
 
+;; Returns the path given to --dangerously-delete-without-prompting, or #f.
 (define (parse-uninstall-options rest)
-  (define yes? #f)
+  (define confirm-path #f)
   (command-line #:program "rackup uninstall"
                 #:argv rest
                 #:once-each
-                [("--dangerously-delete-without-prompting") "Skip confirmation prompt" (set! yes? #t)]
+                [("--dangerously-delete-without-prompting")
+                 rackup-home
+                 "Skip the prompt; <rackup-home> must name RACKUP_HOME exactly"
+                 (set! confirm-path rackup-home)]
                 #:args ()
                 (void))
-  yes?)
+  confirm-path)
+
+;; The exit status by which the Racket side of `rackup uninstall` tells the
+;; bin/rackup wrapper that the user confirmed the uninstall.  The wrapper
+;; deletes RACKUP_HOME on this status only, so help output, a refusal, an
+;; abort, or any error can never delete anything.
+(define uninstall-confirmed-exit-code 10)
+
+(define current-uninstall-exit-proc
+  (make-parameter exit))
 
 (define (installed-toolchain-metas/safe)
   (try-or null
@@ -872,16 +885,38 @@
     (for ([p (in-list linked-paths)])
       (eprintf "  - external source tree: ~a\n" p))))
 
-(define (confirm-uninstall! home-path yes?)
-  (unless yes?
-    (unless (terminal-port? (current-input-port))
-      (rackup-error "refusing to uninstall without interactive confirmation (rerun with --dangerously-delete-without-prompting)"))
-    (displayln "")
-    (printf "Type DELETE to uninstall rackup and remove ~a: " (path->string home-path))
-    (flush-output)
-    (define answer (read-line))
-    (unless (and (string? answer) (equal? (string-trim answer) "DELETE"))
-      (rackup-error "uninstall aborted"))))
+(define (confirm-uninstall! home-path confirm-path)
+  (cond
+    [confirm-path
+     (define given
+       (try-or #f (normalized-path (string->path confirm-path))))
+     (unless (equal? given home-path)
+       (rackup-error
+        (string-append
+         "refusing to uninstall: --dangerously-delete-without-prompting names ~a,\n"
+         "but RACKUP_HOME is ~a; pass that exact path to confirm")
+        confirm-path (path->string home-path)))]
+    [else
+     ;; Read the answer from the controlling terminal, never from stdin, and
+     ;; ask for a code that changes on every run, so neither a pipe nor a
+     ;; script that expects a fixed word can confirm.
+     (define code (format "DELETE-~a" (+ 1000 (random 9000))))
+     (define answer
+       (call-with-user-tty
+        (lambda (in out)
+          (fprintf out "\nType ~a to uninstall rackup and remove ~a: "
+                   code (path->string home-path))
+          (flush-output out)
+          (let ([line (read-line in)])
+            (if (string? line) (string-trim line) "")))))
+     (unless answer
+       (rackup-error
+        (string-append
+         "refusing to uninstall without an interactive terminal\n"
+         "(to uninstall non-interactively, pass --dangerously-delete-without-prompting ~a)")
+        (path->string home-path)))
+     (unless (equal? answer code)
+       (rackup-error "uninstall aborted"))]))
 
 (define current-remove-shell-init-blocks-proc
   (make-parameter remove-shell-init-blocks!))
@@ -930,10 +965,10 @@
                   (path->string normalized-home))))
 
 (define (cmd-uninstall rest)
-  (define yes? (parse-uninstall-options rest))
+  (define confirm-path (parse-uninstall-options rest))
   (define home-path (validate-uninstall-home-path! (rackup-home)))
   (warn-uninstall-summary home-path)
-  (confirm-uninstall! home-path yes?)
+  (confirm-uninstall! home-path confirm-path)
   (define removed-rcs
     (with-handlers ([exn:fail? (lambda (e)
                                  (eprintf "rackup: warning: failed to clean shell init blocks: ~a\n"
@@ -953,9 +988,12 @@
       (printf "  ~a\n" (path->string p))))
   (displayln "Your current shell may still have rackup-related PATH/env changes until you start a new shell.")
   ;; The actual rm -rf is done by the shell wrapper after this process
-  ;; exits. In source mode, RACKUP_HOME contains the running .rkt/.zo
-  ;; files, so deleting in-process would crash during exit.
-  )
+  ;; exits, and only on uninstall-confirmed-exit-code.  RACKUP_HOME holds
+  ;; the running .rkt/.zo files (source mode) or executable (prebuilt), so
+  ;; deleting in-process would crash during exit.
+  (flush-output (current-output-port))
+  (flush-output (current-error-port))
+  ((current-uninstall-exit-proc) uninstall-confirmed-exit-code))
 
 (define default-rackup-repo "samth/rackup")
 
@@ -1173,5 +1211,7 @@
            delete-rackup-home!/external
            installed-toolchain-metas/safe
            current-open-user-tty
+           current-uninstall-exit-proc
+           uninstall-confirmed-exit-code
            current-remove-shell-init-blocks-proc
            current-uninstall-system*-proc))

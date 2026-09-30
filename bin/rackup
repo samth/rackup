@@ -66,9 +66,32 @@ rackup_save_and_clear_racket_env() {
   unset PLTCOLLECTS PLTADDONDIR PLTCOMPILEDROOTS PLTUSERHOME RACKET_XPATCH PLT_COMPILED_FILE_CHECK
 }
 
+# Uninstall: the Racket side validates the target, asks for confirmation,
+# and cleans shell init blocks, but does NOT delete RACKUP_HOME, which holds
+# the running code.  It exits with RACKUP_UNINSTALL_CONFIRMED only after the
+# user confirmed; the wrapper deletes RACKUP_HOME on that status alone.  Any
+# other status -- help output (0), a refusal or abort (2), an error --
+# deletes nothing and is passed through.
+RACKUP_UNINSTALL_CONFIRMED=10
+rackup_run_uninstall() {
+  _rackup_home="$(rackup_home)"
+  _rackup_status=0
+  "$@" || _rackup_status=$?
+  if [ "$_rackup_status" -ne "$RACKUP_UNINSTALL_CONFIRMED" ]; then
+    exit "$_rackup_status"
+  fi
+  if [ -d "$_rackup_home" ]; then
+    rm -rf -- "$_rackup_home"
+  fi
+  exit 0
+}
+
 # --- Prebuilt binary path: if rackup-core binary exists, use it directly ---
 if [ -x "$CORE_EXE" ]; then
   rackup_save_and_clear_racket_env
+  if [ "${1:-}" = "uninstall" ]; then
+    rackup_run_uninstall "$CORE_EXE" "$@"
+  fi
   exec "$CORE_EXE" "$@"
 fi
 # --- End prebuilt binary path ---
@@ -85,17 +108,9 @@ fi
 rackup_mkdir_p "$RUNTIME_ADDON_DIR"
 rackup_save_and_clear_racket_env
 
-# Uninstall: the Racket code handles confirmation and RC cleanup but does
-# NOT delete RACKUP_HOME. The wrapper does the rm -rf after Racket exits,
-# avoiding issues with deleting .zo files the running process needs.
 if [ "${1:-}" = "uninstall" ]; then
-  _rackup_home="$(rackup_home)"
   # Always use -y for uninstall to handle stale bytecode from runtime upgrades.
-  "$RACKET_EXE" -y -U -A "$RUNTIME_ADDON_DIR" "$CORE" "$@"
-  if [ -d "$_rackup_home" ]; then
-    rm -rf -- "$_rackup_home"
-  fi
-  exit 0
+  rackup_run_uninstall "$RACKET_EXE" -y -U -A "$RUNTIME_ADDON_DIR" "$CORE" "$@"
 fi
 
 if [ "$USE_Y" -eq 1 ]; then
