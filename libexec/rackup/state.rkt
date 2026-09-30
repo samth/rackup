@@ -223,29 +223,28 @@
 ;; toolchain (e.g., "dev" for `rackup link dev`).
 ;;
 ;; Keying:
-;;  - A linked source toolchain's version drifts on every `make`, so
-;;    keying its dir on the version would spawn a fresh compiled tree
-;;    per rebuild -- and go stale whenever the source is rebuilt outside
-;;    `rackup rebuild`.  Key those on the installation name instead
-;;    (e.g. "compiled/cs-local-dev"), which is stable across rebuilds
-;;    and already unique per installation.  The keyed dirs inside the
-;;    source tree then go stale at a version bump; `rackup rebuild`
-;;    purges them (see purge-keyed-compiled-dirs!), and the `.` fallback
-;;    reaches the default `compiled/` that the build itself refreshed.
+;;  - A linked source toolchain's version drifts with every `git pull`
+;;    and `make`, so rackup cannot bake the version into the value.  Key
+;;    the installation name instead (e.g. "compiled/cs-local-dev"), and
+;;    let Racket add the version: the value names the root
+;;    "compiled/cs-local-dev/@(version)", which racket expands at
+;;    startup (CS since 7.3, and BC) to the running binary's version.  A
+;;    bare `make` that bumps the version therefore moves the toolchain to
+;;    a fresh dir, never to stale `.zo`, with no reshim.  `rackup rebuild`
+;;    deletes the dirs of other versions (see prune-keyed-compiled-dirs!).
 ;;  - Installer toolchains have a stable version, so they keep the
 ;;    version+variant key (e.g. "compiled/9.1-cs").  That also lets
 ;;    .zo-compatible variants (full/minimal at the same version) share a
 ;;    directory.
 ;;
-;; Returns a string like "compiled/9.1-cs:." or "compiled/cs-local-dev:."
-;; (for linked toolchains), or #f when there is not enough information to
-;; form a stable key.
-;; The per-installation compiled-dir key -- the "compiled/<...>" prefix
-;; where a toolchain writes its own `.zo` files -- or #f when the
-;; version/variant are too incomplete to form a stable key.  Linked
-;; source toolchains key on the installation name (stable across the
-;; version drift that every `make` causes); installer toolchains key on
-;; version+variant (stable, and shareable by `.zo`-compatible variants).
+;; compiled-roots-value returns a string like "compiled/9.1-cs:." or
+;; "compiled/cs-local-dev/@(version):." (for linked toolchains), or #f
+;; when there is not enough information to form a stable key.
+;;
+;; compiled-roots-key returns the per-installation compiled-dir key -- the
+;; "compiled/<...>" prefix under which a toolchain writes its own `.zo`
+;; files, without any `@(version)` suffix -- or #f when the
+;; version/variant are too incomplete to form a stable key.
 (define (compiled-roots-key version variant [local-name #f])
   (define variant-str
     (cond
@@ -272,6 +271,10 @@
   (cond
     [(not key) #f]
     [else
+     (define root
+       (if (and (string? local-name) (not (string-blank? local-name)))
+           (string-append key "/@(version)")
+           key))
      ;; Include 'same (serialized as ".") so that user code's compiled/
      ;; directories are found, even on FHS installs where the existing
      ;; roots only contain absolute reroot paths for system collections.
@@ -280,11 +283,11 @@
          (if (memq 'same roots) roots (append roots '(same)))))
      ;; Drop an existing root equal to the key: a config.rktd that still
      ;; names the key (written by an earlier keyed-only migration that
-     ;; could not be undone) must not produce "key:key:.".
+     ;; could not be undone) must not put the key in the value twice.
      (define fallbacks
-       (filter (lambda (s) (not (equal? s key)))
+       (filter (lambda (s) (not (member s (list key root))))
                (map serialize-compiled-root roots-with-same)))
-     (string-join (cons key fallbacks) ":")]))
+     (string-join (cons root fallbacks) ":")]))
 
 ;; Build the env-var alist recorded for a toolchain: PLTADDONDIR (when
 ;; a usable addon dir is known) and PLTCOMPILEDROOTS (when the
