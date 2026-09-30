@@ -1,9 +1,9 @@
 #lang racket/base
 
 ;; Steady-state unit tests for the per-installation compiled-dir key and
-;; the config.rktd writer that isolates a linked toolchain's compiled
-;; output.  The upgrade/migration path (link/rebuild flipping a toolchain
-;; to keyed-only) is exercised in test/rebuild.rkt.
+;; for undoing the keyed-only config.rktd entry that older rackup versions
+;; wrote.  The upgrade path and rebuild's purge of stale keyed dirs are
+;; exercised in test/compiled-roots-migration.rkt.
 
 (require rackunit
          racket/file
@@ -32,70 +32,52 @@
   (check-equal? (compiled-roots-key #f #f #f) #f)
 
   ;; --- compiled-roots-value ----------------------------------------------
-  ;; keyed-only: a single root, no `.` fallback.
-  (check-equal? (compiled-roots-value "9.99" 'cs '(same) "dev" #:keyed-only? #t)
-                "compiled/cs-local-dev")
-  ;; keyed-only ignores existing roots entirely (no fallback of any kind).
-  (check-equal? (compiled-roots-value "9.99" 'cs '("/usr/lib/racket/compiled") "dev" #:keyed-only? #t)
-                "compiled/cs-local-dev")
-  ;; legacy: key plus the `.` fallback.
+  ;; key plus the `.` fallback.
   (check-equal? (compiled-roots-value "9.99" 'cs '(same) "dev") "compiled/cs-local-dev:.")
-  ;; legacy with a config.rktd that already names the key: no doubled key.
+  ;; a config.rktd that still names the key: no doubled key.
   (check-equal? (compiled-roots-value "9.99" 'cs '("compiled/cs-local-dev") "dev")
                 "compiled/cs-local-dev:.")
   ;; installer: version+variant key plus fallback (unchanged behavior).
   (check-equal? (compiled-roots-value "9.1" 'cs '(same) #f) "compiled/9.1-cs:.")
-  ;; keyed-only with no derivable key -> #f (no PLTCOMPILEDROOTS emitted).
-  (check-equal? (compiled-roots-value #f 'unknown '(same) #f #:keyed-only? #t) #f)
+  ;; no derivable key -> #f (no PLTCOMPILEDROOTS emitted).
+  (check-equal? (compiled-roots-value #f 'unknown '(same) #f) #f)
 
   ;; --- toolchain-env-var-entries -----------------------------------------
-  (check-equal? (toolchain-env-var-entries "/addon" "9.99" 'cs '(same) "dev" #:keyed-only? #t)
-                (list (cons "PLTADDONDIR" "/addon")
-                      (cons "PLTCOMPILEDROOTS" "compiled/cs-local-dev")))
   (check-equal? (toolchain-env-var-entries "/addon" "9.99" 'cs '(same) "dev")
                 (list (cons "PLTADDONDIR" "/addon")
                       (cons "PLTCOMPILEDROOTS" "compiled/cs-local-dev:.")))
 
-  ;; --- set-toolchain-compiled-file-roots! --------------------------------
+  ;; --- unset-toolchain-compiled-file-roots! ------------------------------
   (define (config-path root)
     (build-path root "racket" "etc" "config.rktd"))
   (define (bin-dir root)
     (build-path root "racket" "bin"))
   (define roots '("compiled/cs-local-dev"))
+  (define (write-config! root cfg)
+    (make-directory* (build-path root "racket" "etc"))
+    (write-rktd-file (config-path root) cfg))
 
-  ;; Fresh tree (no config.rktd): writes it.
+  ;; No config.rktd: nothing to do.
   (with-temp-dir (lambda (root)
                    (make-directory* (bin-dir root))
-                   (check-equal? (set-toolchain-compiled-file-roots! (bin-dir root) roots) 'written)
-                   (define cfg (read-rktd-file (config-path root) #f))
-                   (check-true (hash? cfg))
-                   (check-equal? (hash-ref cfg 'compiled-file-roots #f) roots)
-                   ;; Idempotent second call.
-                   (check-equal? (set-toolchain-compiled-file-roots! (bin-dir root) roots)
-                                 'unchanged)))
+                   (check-false (unset-toolchain-compiled-file-roots! (bin-dir root) roots))
+                   (check-false (file-exists? (config-path root)))))
 
-  ;; Preserves other keys.
+  ;; Removes the keyed entry and preserves other keys; idempotent.
   (with-temp-dir (lambda (root)
-                   (make-directory* (build-path root "racket" "etc"))
-                   (write-rktd-file (config-path root) (hash 'catalogs '("https://example.invalid")))
-                   (check-equal? (set-toolchain-compiled-file-roots! (bin-dir root) roots) 'written)
+                   (write-config! root (hash 'compiled-file-roots roots
+                                             'catalogs '("https://example.invalid")))
+                   (check-true (unset-toolchain-compiled-file-roots! (bin-dir root) roots))
                    (define cfg (read-rktd-file (config-path root) #f))
+                   (check-false (hash-ref cfg 'compiled-file-roots #f))
                    (check-equal? (hash-ref cfg 'catalogs #f) '("https://example.invalid"))
-                   (check-equal? (hash-ref cfg 'compiled-file-roots #f) roots)))
+                   (check-false (unset-toolchain-compiled-file-roots! (bin-dir root) roots))))
 
-  ;; Overwrites the default (same).
-  (with-temp-dir
-   (lambda (root)
-     (make-directory* (build-path root "racket" "etc"))
-     (write-rktd-file (config-path root) (hash 'compiled-file-roots '(same)))
-     (check-equal? (set-toolchain-compiled-file-roots! (bin-dir root) roots) 'written)
-     (check-equal? (hash-ref (read-rktd-file (config-path root) #f) 'compiled-file-roots #f) roots)))
-
-  ;; Refuses to clobber a user's custom value.
-  (with-temp-dir
-   (lambda (root)
-     (make-directory* (build-path root "racket" "etc"))
-     (write-rktd-file (config-path root) (hash 'compiled-file-roots '("/custom/abs")))
-     (check-equal? (set-toolchain-compiled-file-roots! (bin-dir root) roots) 'refused)
-     (check-equal? (hash-ref (read-rktd-file (config-path root) #f) 'compiled-file-roots #f)
-                   '("/custom/abs")))))
+  ;; Leaves a user's own value alone.
+  (for ([custom (in-list '(("/custom/abs") (same) ("compiled/cs-local-dev" same)))])
+    (with-temp-dir
+     (lambda (root)
+       (write-config! root (hash 'compiled-file-roots custom))
+       (check-false (unset-toolchain-compiled-file-roots! (bin-dir root) roots))
+       (check-equal? (hash-ref (read-rktd-file (config-path root) #f) 'compiled-file-roots #f)
+                     custom)))))

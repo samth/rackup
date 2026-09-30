@@ -477,23 +477,9 @@ EOF
   (define local-name
     (and (eq? (hash-ref meta 'kind #f) 'local)
          (hash-ref meta 'requested-spec #f)))
-  ;; A toolchain is keyed-only when a `rackup rebuild`/`link` migration
-  ;; recorded 'keyed-only, or when its config.rktd already names exactly its
-  ;; key.  In the second case bare `make` and direct `raco` already use the
-  ;; keyed dir with no fallback, so the shim must agree; this repairs a
-  ;; migration interrupted before the scheme was recorded.  A bare reshim
-  ;; never flips a toolchain whose config.rktd has not been migrated.
-  (define key (compiled-roots-key version variant local-name))
-  (define scheme
-    (if (or (eq? (hash-ref meta 'compiled-roots-scheme #f) 'keyed-only)
-            (and key (equal? (map serialize-compiled-root existing-roots) (list key))))
-        'keyed-only
-        (hash-ref meta 'compiled-roots-scheme #f)))
-  (values (toolchain-env-var-entries addon-dir version variant existing-roots local-name
-                                     #:keyed-only? (eq? scheme 'keyed-only))
+  (values (toolchain-env-var-entries addon-dir version variant existing-roots local-name)
           version
-          variant
-          scheme))
+          variant))
 
 ;; Backfill PLTCOMPILEDROOTS into an installed toolchain whose metadata
 ;; predates per-toolchain compiled roots.  Adds the entry to env-vars in
@@ -541,15 +527,33 @@ EOF
      (enumerate-toolchain-executables overlay)]
     [else #f]))
 
+;; Earlier rackup versions isolated a linked git checkout's compiled
+;; output by writing its key as the sole root in the tree's config.rktd
+;; and dropping the `.` fallback (meta 'compiled-roots-scheme 'keyed-only).
+;; The in-place build refreshes only the default `compiled/`, so that
+;; left every caller on stale keyed `.zo` after a version bump.  Remove
+;; the config.rktd entry and the meta flag; the toolchain returns to the
+;; `key:.` value.  Returns the meta without the flag.
+(define (undo-keyed-only-migration! meta)
+  (define real-bin-dir (hash-ref meta 'real-bin-dir #f))
+  (define key
+    (compiled-roots-key (hash-ref meta 'resolved-version #f)
+                        (hash-ref meta 'variant #f)
+                        (hash-ref meta 'requested-spec #f)))
+  (when (and (string? real-bin-dir) key)
+    (unset-toolchain-compiled-file-roots! (string->path real-bin-dir) (list key)))
+  (hash-remove meta 'compiled-roots-scheme))
+
 ;; Re-derive a linked toolchain's recorded state from its source tree:
-;; version, variant, env vars (and env.sh), the compiled-roots scheme, and
-;; the bin overlay plus executables list.  Reshim runs this for every
+;; version, variant, env vars (and env.sh), and the bin overlay plus
+;; executables list.  Reshim runs this for every
 ;; linked toolchain, so the shim, `rackup which`, and `rackup run` see the
 ;; same executables and environment that a fresh link would produce.
 ;; Replacing env-vars wholesale also cleans up legacy PLTHOME/PLTCOLLECTS
 ;; entries from older rackup versions.
-(define (refresh-local-toolchain! id [meta (read-toolchain-meta id)])
-  (define-values (env-vars new-version new-variant scheme)
+(define (refresh-local-toolchain! id [meta* (read-toolchain-meta id)])
+  (define meta (undo-keyed-only-migration! meta*))
+  (define-values (env-vars new-version new-variant)
     (compute-local-env-vars meta))
   (define executables (sync-local-bin-overlay! id meta))
   (define updates
@@ -557,12 +561,11 @@ EOF
             (list (cons 'env-vars (env-vars->meta env-vars))
                   (and new-version (cons 'resolved-version new-version))
                   (and new-variant (cons 'variant new-variant))
-                  (and scheme (cons 'compiled-roots-scheme scheme))
                   (and executables (cons 'executables executables)))))
   (define new-meta
     (for/fold ([m meta]) ([u (in-list updates)])
       (hash-set m (car u) (cdr u))))
-  (unless (equal? new-meta meta)
+  (unless (equal? new-meta meta*)
     (write-toolchain-meta! id new-meta))
   (sync-toolchain-env-file! id env-vars))
 
