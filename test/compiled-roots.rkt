@@ -7,6 +7,8 @@
 
 (require rackunit
          racket/file
+         racket/port
+         racket/system
          "../libexec/rackup/rktd-io.rkt"
          "../libexec/rackup/state.rkt")
 
@@ -32,20 +34,37 @@
   (check-equal? (compiled-roots-key #f #f #f) #f)
 
   ;; --- compiled-roots-value ----------------------------------------------
-  ;; key plus the `.` fallback.
-  (check-equal? (compiled-roots-value "9.99" 'cs '(same) "dev") "compiled/cs-local-dev:.")
-  ;; a config.rktd that still names the key: no doubled key.
+  ;; linked: the key with a `@(version)` subdir, which racket expands at
+  ;; startup, plus the `.` fallback.
+  (check-equal? (compiled-roots-value "9.99" 'cs '(same) "dev")
+                "compiled/cs-local-dev/@(version):.")
+  ;; a config.rktd that still names the key: the key appears only once.
   (check-equal? (compiled-roots-value "9.99" 'cs '("compiled/cs-local-dev") "dev")
-                "compiled/cs-local-dev:.")
+                "compiled/cs-local-dev/@(version):.")
   ;; installer: version+variant key plus fallback (unchanged behavior).
   (check-equal? (compiled-roots-value "9.1" 'cs '(same) #f) "compiled/9.1-cs:.")
   ;; no derivable key -> #f (no PLTCOMPILEDROOTS emitted).
   (check-equal? (compiled-roots-value #f 'unknown '(same) #f) #f)
 
+  ;; The running racket expands `@(version)` in PLTCOMPILEDROOTS, which is
+  ;; what lets a linked toolchain's value stay fixed across version bumps.
+  (let ([env (environment-variables-copy (current-environment-variables))])
+    (environment-variables-set! env #"PLTCOMPILEDROOTS"
+                                (string->bytes/utf-8
+                                 (compiled-roots-value "9.99" 'cs '(same) "dev")))
+    (define roots
+      (parameterize ([current-environment-variables env])
+        (with-output-to-string
+          (lambda ()
+            (system* (find-system-path 'exec-file) "-l" "racket/base" "-e"
+                     "(write (map (lambda (p) (if (path? p) (path->string p) p)) (current-compiled-file-roots)))")))))
+    (check-equal? roots
+                  (format "(~s \".\")" (string-append "compiled/cs-local-dev/" (version)))))
+
   ;; --- toolchain-env-var-entries -----------------------------------------
   (check-equal? (toolchain-env-var-entries "/addon" "9.99" 'cs '(same) "dev")
                 (list (cons "PLTADDONDIR" "/addon")
-                      (cons "PLTCOMPILEDROOTS" "compiled/cs-local-dev:.")))
+                      (cons "PLTCOMPILEDROOTS" "compiled/cs-local-dev/@(version):.")))
 
   ;; --- unset-toolchain-compiled-file-roots! ------------------------------
   (define (config-path root)

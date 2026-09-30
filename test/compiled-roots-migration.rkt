@@ -3,9 +3,9 @@
 ;; Upgrade-path and rebuild tests for a linked toolchain's keyed compiled
 ;; dirs.  Earlier rackup versions wrote the key as the sole root in the
 ;; tree's config.rktd ("keyed-only"); reshim, link, and rebuild now undo
-;; that.  `rackup rebuild` purges the keyed dirs inside the source tree
-;; whenever the built version changes.  Steady-state unit tests live in
-;; test/compiled-roots.rkt.
+;; that.  Linked toolchains' roots are `<key>/@(version)`, and `rackup
+;; rebuild` prunes the keyed dirs of other versions from the source tree.
+;; Steady-state unit tests live in test/compiled-roots.rkt.
 
 (require rackunit
          racket/file
@@ -88,21 +88,26 @@
   (quietly (lambda () (link-toolchain! name (path->string src) '("--set-default"))))
   src)
 
-;; Keyed dirs holding a fake `.zo`, in the places `raco setup` through the
-;; shim would write them.
+;; Places where `raco setup` through the shim would write keyed `.zo`.
 (define (keyed-dirs src key)
   (list (build-path src "racket" "collects" "racket" key)
         (build-path src "pkgs" "racket-lib" "racket" "private" key)
         (build-path src "pkgs" "base" key)))
 
-(define (populate-keyed-dirs! src key)
+;; Give each keyed dir a version subdir holding a fake `.zo`; with
+;; version #f, write the version-less layout of earlier rackup releases.
+(define (populate-keyed-dirs! src key version)
   (for ([d (in-list (keyed-dirs src key))])
-    (make-directory* (build-path d "compiled"))
-    (write-string-file (build-path d "compiled" "base_rkt.zo") "stale")))
+    (define c (if version (build-path d version "compiled") (build-path d "compiled")))
+    (make-directory* c)
+    (write-string-file (build-path c "base_rkt.zo") "zo")))
 
-(define (keyed-dirs-present src key)
+;; The sorted entries of each keyed dir.
+(define (keyed-contents src key)
   (for/list ([d (in-list (keyed-dirs src key))])
-    (directory-exists? d)))
+    (if (directory-exists? d)
+        (sort (map path->string (directory-list d)) string<?)
+        'missing)))
 
 (define (env-sh id)
   (file->string (rackup-toolchain-env-file id)))
@@ -114,30 +119,35 @@
     (quietly (lambda () (cmd-rebuild (list name))))))
 
 (module+ test
-  ;; --- purge-keyed-compiled-dirs! ------------------------------------------
-  ;; Deletes `<dir>/<key>` anywhere under the root except inside `.git` and
-  ;; `compiled/` dirs; leaves the default `compiled/` and other keys alone.
-  (let ([root (make-temporary-file "rackup-purge~a" 'directory)])
+  ;; --- prune-keyed-compiled-dirs! ------------------------------------------
+  ;; Empties every `<dir>/<key>` except the kept version, anywhere under the
+  ;; root except inside `.git` and `compiled/` dirs; leaves the default
+  ;; `compiled/` and other keys alone.
+  (let ([root (make-temporary-file "rackup-prune~a" 'directory)])
     (define key "compiled/cs-local-dev")
     (define (mk . parts)
       (define d (apply build-path root parts))
       (make-directory* d)
       d)
+    (mk "a" "compiled" "cs-local-dev" "9.1" "compiled")
+    (mk "a" "compiled" "cs-local-dev" "9.2" "compiled")
     (mk "a" "compiled" "cs-local-dev" "compiled")
-    (mk "a" "b" "c" "compiled" "cs-local-dev")
-    (mk ".git" "x" "compiled" "cs-local-dev")
-    (mk "a" "compiled" "cs-local-other")
+    (mk "a" "b" "c" "compiled" "cs-local-dev" "9.1")
+    (mk ".git" "x" "compiled" "cs-local-dev" "9.1")
+    (mk "a" "compiled" "cs-local-other" "9.1")
     (write-string-file (build-path (mk "a" "compiled") "m_rkt.zo") "fresh")
-    (check-equal? (purge-keyed-compiled-dirs! root key) 2)
-    (check-false (directory-exists? (build-path root "a" "compiled" "cs-local-dev")))
-    (check-false (directory-exists? (build-path root "a" "b" "c" "compiled" "cs-local-dev")))
-    (check-true (directory-exists? (build-path root ".git" "x" "compiled" "cs-local-dev"))
+    (check-equal? (prune-keyed-compiled-dirs! root key "9.2") 3)
+    (check-equal? (directory-list (build-path root "a" "compiled" "cs-local-dev"))
+                  (list (string->path "9.2"))
+                  "the kept version survives; old versions and the legacy layout go")
+    (check-equal? (directory-list (build-path root "a" "b" "c" "compiled" "cs-local-dev")) '())
+    (check-true (directory-exists? (build-path root ".git" "x" "compiled" "cs-local-dev" "9.1"))
                 ".git is skipped")
-    (check-true (directory-exists? (build-path root "a" "compiled" "cs-local-other"))
+    (check-true (directory-exists? (build-path root "a" "compiled" "cs-local-other" "9.1"))
                 "another toolchain's key is kept")
     (check-true (file-exists? (build-path root "a" "compiled" "m_rkt.zo"))
                 "the default compiled dir is kept")
-    (check-equal? (purge-keyed-compiled-dirs! root key) 0 "idempotent")
+    (check-equal? (prune-keyed-compiled-dirs! root key "9.2") 0 "idempotent")
     (delete-directory/files root))
 
   ;; --- Upgrade: reshim undoes a keyed-only migration ------------------------
@@ -161,8 +171,8 @@
                    "other config keys survive")
      (check-false (hash-ref (read-toolchain-meta id) 'compiled-roots-scheme #f)
                   "reshim drops the keyed-only flag")
-     (check-true (string-contains? (env-sh id) (string-append key ":."))
-                 "env.sh gets the `.` fallback back")))
+     (check-true (string-contains? (env-sh id) (string-append key "/@(version):."))
+                 "env.sh gets the versioned root and the `.` fallback")))
 
   ;; --- Reshim leaves a user's own compiled-file-roots alone ---------------
   (with-temp-rackup-home
@@ -191,47 +201,38 @@
        (quietly (lambda () (cmd-rebuild '("premake")))))
      (check-false roots-at-make "make ran without the keyed root in config.rktd")))
 
-  ;; --- Rebuild purges keyed dirs when the version changes -------------------
+  ;; --- Rebuild prunes the keyed dirs of other versions ---------------------
   (with-temp-rackup-home
    (lambda (home)
-     (define src (link-fake! home "purge"))
-     (define id "local-purge")
+     (define src (link-fake! home "prune"))
+     (define id "local-prune")
      (define key (linked-key id))
      (define default-zo (build-path src "racket" "collects" "racket" "compiled" "base_rkt.zo"))
-     (populate-keyed-dirs! src key)
+     (make-directory* (build-path src "racket" "collects" "racket" "compiled"))
      (write-string-file default-zo "fresh")
-     ;; No purge recorded yet (a fresh link or an upgraded rackup): the
-     ;; first rebuild purges.
-     (rebuild! "purge")
-     (check-equal? (keyed-dirs-present src key) '(#f #f #f)
-                   "first rebuild purges keyed dirs")
+     ;; The version-less layout of an earlier rackup, plus an older version.
+     (populate-keyed-dirs! src key #f)
+     (populate-keyed-dirs! src key "9.99.0.0")
+     (populate-keyed-dirs! src key "9.99.0.1")
+     (rebuild! "prune")
+     (check-equal? (keyed-contents src key) '(("9.99.0.1") ("9.99.0.1") ("9.99.0.1"))
+                   "rebuild keeps only the current version's dir")
      (check-true (file-exists? default-zo) "default compiled dir untouched")
-     (check-equal? (hash-ref (read-toolchain-meta id) 'compiled-roots-version #f) "9.99.0.1")
-     ;; Same version: keyed dirs are current and stay.
-     (populate-keyed-dirs! src key)
-     (rebuild! "purge")
-     (check-equal? (keyed-dirs-present src key) '(#t #t #t)
-                   "rebuild at the same version keeps keyed dirs")
-     ;; Version bump: purge again.
+     ;; Version bump (as after `git pull`): the old version's dir goes.
      (set-fake-version! src "9.99.0.2")
-     (rebuild! "purge")
-     (check-equal? (keyed-dirs-present src key) '(#f #f #f)
-                   "rebuild after a version bump purges keyed dirs")
-     (check-equal? (hash-ref (read-toolchain-meta id) 'compiled-roots-version #f) "9.99.0.2")
-     (check-true (string-contains? (env-sh id) (string-append key ":."))
-                 "env.sh keeps the key with the `.` fallback")))
+     (populate-keyed-dirs! src key "9.99.0.2")
+     (rebuild! "prune")
+     (check-equal? (keyed-contents src key) '(("9.99.0.2") ("9.99.0.2") ("9.99.0.2")))
+     (check-true (string-contains? (env-sh id) (string-append key "/@(version):."))
+                 "env.sh keeps the versioned root with the `.` fallback")))
 
-  ;; --- A failed `make` still purges after a version bump --------------------
+  ;; --- A failed `make` still prunes after a version bump --------------------
   (with-temp-rackup-home
    (lambda (home)
-     (define src (link-fake! home "failpurge"))
-     (define id "local-failpurge")
-     (define key (linked-key id))
-     (rebuild! "failpurge")
-     (populate-keyed-dirs! src key)
+     (define src (link-fake! home "failprune"))
+     (define key (linked-key "local-failprune"))
+     (populate-keyed-dirs! src key "9.99.0.1")
      (set-fake-version! src "9.99.0.3")
-     (check-exn exn:fail? (lambda () (rebuild! "failpurge" #:make-ok? #f)))
-     (check-equal? (keyed-dirs-present src key) '(#f #f #f)
-                   "failed make after a bump still purges")
-     (check-equal? (hash-ref (read-toolchain-meta id) 'compiled-roots-version #f) "9.99.0.3"
-                   "the purge is recorded even though make failed"))))
+     (check-exn exn:fail? (lambda () (rebuild! "failprune" #:make-ok? #f)))
+     (check-equal? (keyed-contents src key) '(() () ())
+                   "failed make after a bump still prunes the old version"))))

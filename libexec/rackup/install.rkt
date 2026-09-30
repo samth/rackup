@@ -585,15 +585,12 @@
 (define (local-toolchain-id name)
   (string-append "local-" (sanitize-id-part name)))
 
-(define (local-toolchain-meta id name layout real-bin-dir executables env-vars version* variant*
-                             [compiled-roots-version #f])
+(define (local-toolchain-meta id name layout real-bin-dir executables env-vars version* variant*)
   (define platform (host-platform-token))
   (hash 'id
         id
         'kind
         'local
-        'compiled-roots-version
-        compiled-roots-version
         'requested-spec
         name
         'resolved-version
@@ -671,8 +668,7 @@
 (define (finalize-local-toolchain! id name layout
                                    #:set-default? [set-default? #f]
                                    #:installed-at [installed-at #f]
-                                   #:last-rebuilt-at [last-rebuilt-at #f]
-                                   #:compiled-roots-version [compiled-roots-version #f])
+                                   #:last-rebuilt-at [last-rebuilt-at #f])
   (define real-bin-dir (string->path (hash-ref layout 'bin-dir)))
   (define racket-exe (build-path real-bin-dir "racket"))
   (unless (file-executable?/safe racket-exe)
@@ -710,8 +706,7 @@
   (ensure-toolchain-addon-dir! id)
   (define executables (enumerate-toolchain-executables (rackup-toolchain-bin-link id)))
   (define base-meta
-    (local-toolchain-meta id name layout real-bin-dir executables env-vars version* variant*
-                          compiled-roots-version))
+    (local-toolchain-meta id name layout real-bin-dir executables env-vars version* variant*))
   (define meta
     (let* ([m base-meta]
            [m (if installed-at (hash-set m 'installed-at installed-at) m)]

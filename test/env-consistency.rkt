@@ -164,7 +164,7 @@
        (check-false (hash-ref (read-rktd-file cfg-path #f) 'compiled-file-roots #f)
                     "config.rktd no longer names only the key")
        (check-true (string-contains? (file->string (rackup-toolchain-env-file id))
-                                     (string-append key ":."))
+                                     (string-append key "/@(version):."))
                    "env.sh keeps the `.` fallback"))))
 
   ;; --- #3: env.sh gives PLTCOMPILEDROOTS the same precedence as rackup run -
