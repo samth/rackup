@@ -236,7 +236,7 @@
   (when ids-only?
     (for ([id ids]) (displayln id))
     (exit 0))
-  (define default-id (get-default-toolchain idx))
+  (define default-id (get-default-toolchain))
   (define active-id (resolve-active-toolchain-id))
   (define env-id (getenv "RACKUP_TOOLCHAIN"))
   (define stale-env?
@@ -466,15 +466,23 @@
      (define id (resolve-toolchain-or-die spec))
      (define env (environment-variables-copy (current-environment-variables)))
      (restore-saved-racket-env-vars! env)
+     (define marker (string->bytes/utf-8 managed-compiled-roots-marker))
+     ;; Same precedence as env.sh: a user-set PLTCOMPILEDROOTS wins, but one
+     ;; equal to the marker was exported by an enclosing rackup launch, so
+     ;; drop it and let this toolchain's value apply.
+     (let ([pcr (environment-variables-ref env #"PLTCOMPILEDROOTS")])
+       (when (and pcr (equal? pcr (environment-variables-ref env marker)))
+         (environment-variables-set! env #"PLTCOMPILEDROOTS" #f)))
      (environment-variables-set! env #"RACKUP_TOOLCHAIN" (string->bytes/utf-8 id))
      (for ([kv (in-list (toolchain-runtime-env id))])
        (define key (string->bytes/utf-8 (car kv)))
-       ;; For PLTCOMPILEDROOTS, respect a user-set value restored above.
-       (unless (and (equal? (car kv) "PLTCOMPILEDROOTS")
-                    (environment-variables-ref env key))
-         (environment-variables-set! env
-                                     key
-                                     (string->bytes/utf-8 (cdr kv)))))
+       (define val (string->bytes/utf-8 (cdr kv)))
+       (cond
+         [(equal? (car kv) "PLTCOMPILEDROOTS")
+          (unless (environment-variables-ref env key)
+            (environment-variables-set! env key val)
+            (environment-variables-set! env marker val))]
+         [else (environment-variables-set! env key val)]))
      (define old-path (or (getenv "PATH") ""))
      (define shims (path->string (rackup-shims-dir)))
      (define runtime-path

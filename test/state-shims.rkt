@@ -1764,7 +1764,7 @@
      ;; Re-run ensure-index! (simulating what happens after self-upgrade)
      (define idx3 (ensure-index!))
      (check-true (toolchain-exists? id idx3))
-     (check-equal? (get-default-toolchain idx3) id)))
+     (check-equal? (get-default-toolchain) id)))
 
   ;; Upgrade path: self-upgrade preserves state when install.sh reruns
   (with-temp-rackup-home
@@ -2016,8 +2016,8 @@
                 "compiled/9.1-cs:/abs/root:."
                 "mixed roots: absolute + same (no duplicate .)")
   (check-equal? (compiled-roots-value "9.1" 'cs '(same) "dev")
-                "compiled/cs-local-dev:."
-                "linked toolchain: keyed on installation name, not version")
+                "compiled/cs-local-dev/@(version):."
+                "linked toolchain: keyed on installation name; racket adds the version")
   (check-equal? (compiled-roots-value "9.1" 'cs '(same) #f)
                 "compiled/9.1-cs:."
                 "no local-name: no suffix")
@@ -2025,18 +2025,18 @@
                 "compiled/9.1-cs:."
                 "blank local-name: no suffix")
   (check-equal? (compiled-roots-value "9.1" 'cs '("/usr/lib/racket/compiled") "dev")
-                "compiled/cs-local-dev:/usr/lib/racket/compiled:."
+                "compiled/cs-local-dev/@(version):/usr/lib/racket/compiled:."
                 "linked FHS layout: name-keyed dir, then existing roots")
-  ;; The key point: a linked toolchain's compiled dir is version-
-  ;; independent, so rebuilding (which bumps the version) reuses one dir
-  ;; instead of spawning a fresh compiled tree per rebuild.
+  ;; The key point: a linked toolchain's value is version-independent, so
+  ;; a rebuild that bumps the version leaves env.sh unchanged; racket
+  ;; substitutes the running version for `@(version)`.
   (check-equal? (compiled-roots-value "9.1" 'cs '(same) "dev")
                 (compiled-roots-value "9.9.0.7" 'cs '(same) "dev")
                 "linked toolchain compiled key does not change with the version")
   ;; A linked toolchain still gets a stable key even if the version
   ;; couldn't be probed, since the name carries the identity.
   (check-equal? (compiled-roots-value "local" 'cs '(same) "dev")
-                "compiled/cs-local-dev:."
+                "compiled/cs-local-dev/@(version):."
                 "linked toolchain: name-keyed even when version is unknown")
   (check-false (compiled-roots-value "9.1" 'unknown) "variant 'unknown disables")
   (check-false (compiled-roots-value "local" 'cs) "\"local\" version disables (no name)")
@@ -2091,14 +2091,16 @@
      ;; Write the env.sh as the install flow would
      (write-toolchain-env-file! id env-vars)
 
-     ;; env.sh should contain an unconditional export for PLTCOMPILEDROOTS
+     ;; env.sh applies the same precedence as `rackup run`: it sets the
+     ;; toolchain value unless the user set one, and records what it set in
+     ;; the marker so a nested launch can tell rackup's value from the user's.
      (define env-sh-content
        (file->string (rackup-toolchain-env-file id)))
      (check-true (string-contains? env-sh-content "export PLTCOMPILEDROOTS='compiled/9.1-cs:.'")
-                 "env.sh contains unconditional PLTCOMPILEDROOTS export")
-     (check-false (regexp-match? #px"if \\[ -z \"\\$\\{PLTCOMPILEDROOTS:-\\}\" \\];"
-                                 env-sh-content)
-                  "env.sh does NOT use conditional guard")
+                 "env.sh exports the toolchain PLTCOMPILEDROOTS")
+     (check-true (string-contains? env-sh-content
+                                   "export _RACKUP_MANAGED_PLTCOMPILEDROOTS='compiled/9.1-cs:.'")
+                 "env.sh records the value it exported")
 
      ;; Verify rackup run respects user-set PLTCOMPILEDROOTS
      (define old-cr (getenv "PLTCOMPILEDROOTS"))
@@ -2122,7 +2124,25 @@
       (lambda ()
         (if old-cr
             (putenv "PLTCOMPILEDROOTS" old-cr)
-            (putenv "PLTCOMPILEDROOTS" ""))))))
+            (putenv "PLTCOMPILEDROOTS" ""))))
+
+     ;; A PLTCOMPILEDROOTS that an enclosing rackup launch exported (it
+     ;; equals the marker) is not a user override: rackup run replaces it.
+     (define old-marker (getenv "_RACKUP_MANAGED_PLTCOMPILEDROOTS"))
+     (dynamic-wind
+      (lambda ()
+        (putenv "PLTCOMPILEDROOTS" "compiled/other-toolchain:.")
+        (putenv "_RACKUP_MANAGED_PLTCOMPILEDROOTS" "compiled/other-toolchain:."))
+      (lambda ()
+        (expect (begin (apply system* rackup-bin (list "run" id "--" "print-compiled-roots")) (void))
+                "PLTCOMPILEDROOTS=compiled/9.1-cs:." #:match 'contains))
+      (lambda ()
+        (if old-cr
+            (putenv "PLTCOMPILEDROOTS" old-cr)
+            (putenv "PLTCOMPILEDROOTS" ""))
+        (if old-marker
+            (putenv "_RACKUP_MANAGED_PLTCOMPILEDROOTS" old-marker)
+            (putenv "_RACKUP_MANAGED_PLTCOMPILEDROOTS" ""))))))
 
   ;; Integration test: clean-toolchain-compiled-dirs! walks linked package
   ;; directories (reported by the toolchain's racket) and removes
@@ -2497,7 +2517,7 @@
                    "reshim sets PLTADDONDIR to the rackup-managed addon dir")
      (define pcr (assoc "PLTCOMPILEDROOTS" new-env-vars))
      (check-not-false pcr "reshim wrote PLTCOMPILEDROOTS")
-     (check-equal? (cdr pcr) "compiled/cs-local-stale:."
+     (check-equal? (cdr pcr) "compiled/cs-local-stale/@(version):."
                    "reshim PLTCOMPILEDROOTS keys on installation name, not the re-probed version")
 
      ;; env.sh should also reflect the new values.

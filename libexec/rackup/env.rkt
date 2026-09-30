@@ -1,7 +1,15 @@
 #lang racket/base
 
 (provide sanitized-racket-env-vars
-         restore-saved-racket-env-vars!)
+         restore-saved-racket-env-vars!
+         managed-compiled-roots-marker)
+
+;; Records the PLTCOMPILEDROOTS value rackup itself exported (from a
+;; toolchain's env.sh or `rackup run`).  A PLTCOMPILEDROOTS equal to it was
+;; inherited from an enclosing rackup-launched process, not set by the
+;; user, so a nested launch of a different toolchain must replace it rather
+;; than honor it as a user override.
+(define managed-compiled-roots-marker "_RACKUP_MANAGED_PLTCOMPILEDROOTS")
 
 (define sanitized-racket-env-vars
   '(#"PLTCOLLECTS" #"PLTADDONDIR" #"PLTCOMPILEDROOTS"

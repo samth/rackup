@@ -6,6 +6,7 @@
          racket/path
          racket/set
          racket/string
+         "env.rkt"
          "paths.rkt"
          "state.rkt"
          "state-lock.rkt"
@@ -28,7 +29,21 @@
          remove-shim-aliases!
          reprobe-local-toolchain
          write-toolchain-env-file!
-         sync-toolchain-env-file!)
+         sync-toolchain-env-file!
+         refresh-local-toolchain!
+         file-executable?/safe
+         enumerate-toolchain-executables)
+
+(define (file-executable?/safe p)
+  (and (file-exists? p)
+       (try-or #f
+         (member 'execute (file-or-directory-permissions p)))))
+
+(define (enumerate-toolchain-executables real-bin-dir)
+  (sort (for/list ([p (in-list (directory-list real-bin-dir #:build? #t))]
+                   #:when (and (file-exists? p) (file-executable?/safe p)))
+          (path-basename-string p))
+        string<?))
 
 (define bootstrap-shim-names
   '("racket" "raco"))
@@ -49,8 +64,20 @@ DEFAULT_FILE="$HOME_DIR/state/default-toolchain"
 DEFAULT_ID=""
 ENV_FILE=""
 ACTIVE="${RACKUP_TOOLCHAIN:-}"
+# Mirror resolve-active-toolchain-id: a whitespace-only RACKUP_TOOLCHAIN
+# counts as unset.
+if [[ "$ACTIVE" =~ ^[[:space:]]*$ ]]; then
+  ACTIVE=""
+fi
+# Mirror get-default-toolchain: trim surrounding whitespace, and treat an
+# invalid id as no default.
 if [[ -f "$DEFAULT_FILE" ]]; then
-  DEFAULT_ID="$(tr -d '\r\n' < "$DEFAULT_FILE")"
+  DEFAULT_ID="$(< "$DEFAULT_FILE")"
+  DEFAULT_ID="${DEFAULT_ID#"${DEFAULT_ID%%[![:space:]]*}"}"
+  DEFAULT_ID="${DEFAULT_ID%"${DEFAULT_ID##*[![:space:]]}"}"
+  if [[ ! "$DEFAULT_ID" =~ ^[A-Za-z0-9._-]+$ ]]; then
+    DEFAULT_ID=""
+  fi
 fi
 if [[ -z "$ACTIVE" && -n "$DEFAULT_ID" ]]; then
   ACTIVE="$DEFAULT_ID"
@@ -74,9 +101,11 @@ if [[ -f "$ENV_FILE" ]]; then
   # shellcheck disable=SC1090
   . "$ENV_FILE"
 fi
-if [[ -z "${PLTADDONDIR:-}" ]]; then
-  export PLTADDONDIR="$HOME_DIR/addons/$ACTIVE"
-fi
+# Always use the rackup-managed addon dir, as `rackup run`, `rackup which`,
+# reshim, and `rackup upgrade` do.  A PLTADDONDIR inherited from the shell
+# or left in a stale env.sh must not point the shim at different user
+# packages than the rest of rackup sees.
+export PLTADDONDIR="$HOME_DIR/addons/$ACTIVE"
 if [[ ! -x "$TARGET" ]]; then
   ADDON_TARGET=""
   for _candidate in "$PLTADDONDIR"/bin/"$SHIM_NAME" "$PLTADDONDIR"/*/bin/"$SHIM_NAME"; do
@@ -353,6 +382,24 @@ EOF
 (define/state-locked (remove-shim-aliases!)
   (clear-config-flag! "short-aliases"))
 
+;; PLTCOMPILEDROOTS follows the same precedence as `rackup run`: a value the
+;; user set wins, but a value rackup itself exported (recorded in the
+;; marker) is replaced, so a nested launch of another toolchain never
+;; inherits the enclosing toolchain's compiled dir.  Every other variable
+;; is exported unconditionally.
+(define (env-file-line key value)
+  (cond
+    [(equal? key "PLTCOMPILEDROOTS")
+     (define marker managed-compiled-roots-marker)
+     (define quoted (sh-single-quote value))
+     (string-append
+      (format "if [ -z \"${PLTCOMPILEDROOTS:-}\" ] || [ \"$PLTCOMPILEDROOTS\" = \"${~a:-}\" ]; then\n"
+              marker)
+      (format "  export PLTCOMPILEDROOTS=~a\n" quoted)
+      (format "  export ~a=~a\n" marker quoted)
+      "fi\n")]
+    [else (env-var-export-line key value)]))
+
 (define (write-toolchain-env-file! id env-vars)
   (define p (rackup-toolchain-env-file id))
   (define body
@@ -360,7 +407,7 @@ EOF
                    "# rackup managed toolchain environment\n"
                    (apply string-append
                           (for/list ([kv (in-list env-vars)])
-                            (env-var-export-line (car kv) (cdr kv))))))
+                            (env-file-line (car kv) (cdr kv))))))
   (define existing
     (and (file-exists? p)
          (try-or #f
@@ -430,13 +477,7 @@ EOF
   (define local-name
     (and (eq? (hash-ref meta 'kind #f) 'local)
          (hash-ref meta 'requested-spec #f)))
-  ;; Only a toolchain migrated by `rackup rebuild`/`link` (which produce a
-  ;; complete keyed dir) carries 'keyed-only.  A bare reshim never sets
-  ;; it, so this preserves the legacy `:.` value until the user rebuilds.
-  (define keyed-only?
-    (eq? (hash-ref meta 'compiled-roots-scheme #f) 'keyed-only))
-  (values (toolchain-env-var-entries addon-dir version variant existing-roots local-name
-                                     #:keyed-only? keyed-only?)
+  (values (toolchain-env-var-entries addon-dir version variant existing-roots local-name)
           version
           variant))
 
@@ -459,30 +500,82 @@ EOF
     (write-toolchain-meta! id new-meta)
     (write-toolchain-env-file! id new-env-vars)))
 
+;; Bring a linked toolchain's bin overlay in line with its real bin dir:
+;; link executables that appeared since the last link/rebuild (e.g. a
+;; launcher created by `raco setup` or `raco pkg install`) and drop links
+;; whose target vanished.  Existing entries are left alone, so the
+;; scheme/petite wrappers installed at link time keep shadowing any
+;; same-named file.  Returns the overlay's executables, or #f when there is
+;; no overlay directory to sync.  Unlike link-time setup, this does only a
+;; directory listing, so it is cheap enough to run on every reshim.
+(define (sync-local-bin-overlay! id meta)
+  (define real-str (hash-ref meta 'real-bin-dir #f))
+  (define overlay (rackup-toolchain-bin-link id))
+  (cond
+    [(and (string? real-str)
+          (directory-exists? real-str)
+          (directory-exists? overlay)
+          (not (link-exists? overlay)))
+     (for ([p (in-list (directory-list (string->path real-str) #:build? #t))]
+           #:when (file-executable?/safe p))
+       (define dst (build-path overlay (file-name-from-path p)))
+       (unless (or (file-exists? dst) (link-exists? dst))
+         (make-file-or-directory-link p dst)))
+     (for ([dst (in-list (directory-list overlay #:build? #t))]
+           #:when (and (link-exists? dst) (not (file-exists? dst))))
+       (delete-file dst))
+     (enumerate-toolchain-executables overlay)]
+    [else #f]))
+
+;; Earlier rackup versions isolated a linked git checkout's compiled
+;; output by writing its key as the sole root in the tree's config.rktd
+;; and dropping the `.` fallback (meta 'compiled-roots-scheme 'keyed-only).
+;; The in-place build refreshes only the default `compiled/`, so that
+;; left every caller on stale keyed `.zo` after a version bump.  Remove
+;; the config.rktd entry and the meta flag; the toolchain returns to the
+;; `key:.` value.  Returns the meta without the flag.
+(define (undo-keyed-only-migration! meta)
+  (define real-bin-dir (hash-ref meta 'real-bin-dir #f))
+  (define key
+    (compiled-roots-key (hash-ref meta 'resolved-version #f)
+                        (hash-ref meta 'variant #f)
+                        (hash-ref meta 'requested-spec #f)))
+  (when (and (string? real-bin-dir) key)
+    (unset-toolchain-compiled-file-roots! (string->path real-bin-dir) (list key)))
+  (hash-remove meta 'compiled-roots-scheme))
+
+;; Re-derive a linked toolchain's recorded state from its source tree:
+;; version, variant, env vars (and env.sh), and the bin overlay plus
+;; executables list.  Reshim runs this for every
+;; linked toolchain, so the shim, `rackup which`, and `rackup run` see the
+;; same executables and environment that a fresh link would produce.
+;; Replacing env-vars wholesale also cleans up legacy PLTHOME/PLTCOLLECTS
+;; entries from older rackup versions.
+(define (refresh-local-toolchain! id [meta* (read-toolchain-meta id)])
+  (define meta (undo-keyed-only-migration! meta*))
+  (define-values (env-vars new-version new-variant)
+    (compute-local-env-vars meta))
+  (define executables (sync-local-bin-overlay! id meta))
+  (define updates
+    (filter values
+            (list (cons 'env-vars (env-vars->meta env-vars))
+                  (and new-version (cons 'resolved-version new-version))
+                  (and new-variant (cons 'variant new-variant))
+                  (and executables (cons 'executables executables)))))
+  (define new-meta
+    (for/fold ([m meta]) ([u (in-list updates)])
+      (hash-set m (car u) (cdr u))))
+  (unless (equal? new-meta meta*)
+    (write-toolchain-meta! id new-meta))
+  (sync-toolchain-env-file! id env-vars))
+
 (define (regenerate-env-files!)
   (for ([id (in-list (installed-toolchain-ids))])
     (define meta (read-toolchain-meta id))
     (when (hash? meta)
-      (define kind (hash-ref meta 'kind #f))
-      (cond
-        ;; Replacing env-vars wholesale also cleans up legacy
-        ;; PLTHOME/PLTCOLLECTS entries from older rackup versions.
-        [(eq? kind 'local)
-         (define-values (env-vars new-version new-variant)
-           (compute-local-env-vars meta))
-         (define updates
-           (filter values
-                   (list (cons 'env-vars (env-vars->meta env-vars))
-                         (and new-version (cons 'resolved-version new-version))
-                         (and new-variant (cons 'variant new-variant)))))
-         (define new-meta
-           (for/fold ([m meta]) ([u (in-list updates)])
-             (hash-set m (car u) (cdr u))))
-         (unless (equal? new-meta meta)
-           (write-toolchain-meta! id new-meta))
-         (sync-toolchain-env-file! id env-vars)]
-        [else
-         (backfill-installed-env-vars! id meta)]))))
+      (if (eq? (hash-ref meta 'kind #f) 'local)
+          (refresh-local-toolchain! id meta)
+          (backfill-installed-env-vars! id meta)))))
 
 (define/state-locked (reshim!)
   (regenerate-env-files!)

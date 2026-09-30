@@ -1,17 +1,21 @@
 #lang racket/base
 
-(require racket/format
+(require racket/file
+         racket/format
          racket/future
          racket/string
          racket/system
          "error.rkt"
          "install.rkt"
+         "paths.rkt"
          "shims.rkt"
          "state.rkt"
+         "state-lock.rkt"
          "text.rkt")
 
 (provide rebuild-toolchain!
          rebuild-plan
+         prune-keyed-compiled-dirs!
          current-rebuild-system*-proc
          current-rebuild-displayln-proc)
 
@@ -85,6 +89,42 @@
     (unless (apply system*-proc make-exe (cdr argv))
       (rackup-error "make failed in ~a" cwd))))
 
+;; Environment for the rebuild's `make`: the current one plus the
+;; toolchain's rackup-managed addon dir, the same PLTADDONDIR the shim and
+;; `rackup run` use.
+(define (build-environment id)
+  (define env (environment-variables-copy (current-environment-variables)))
+  (environment-variables-set! env #"PLTADDONDIR"
+                              (string->bytes/utf-8 (path->string (rackup-addon-dir id))))
+  env)
+
+;; A linked toolchain's shim writes `.zo` for modules in its own source
+;; tree under `<dir>/<key>/<version>/compiled/` (its PLTCOMPILEDROOTS root
+;; is `<key>/@(version)`).  For every `<dir>/<key>` under `root` (e.g.
+;; `collects/racket/compiled/cs-local-dev`), delete each entry except the
+;; `keep` version's dir: dirs of older versions, and the `compiled/` dir
+;; that rackup's earlier version-less key wrote directly under the key.
+;; Skips `.git`, symlinks, and the inside of `compiled/` dirs.  Returns
+;; the number of entries removed.
+(define (prune-keyed-compiled-dirs! root key keep)
+  (let loop ([dir root])
+    (define target (build-path dir key))
+    (define here
+      (if (directory-exists? target)
+          (for/sum ([name (in-list (directory-list target))]
+                    #:unless (equal? (path->string name) keep))
+            (delete-directory/files (build-path target name))
+            1)
+          0))
+    (+ here
+       (for/sum ([name (in-list (try-or null (directory-list dir)))])
+         (define sub (build-path dir name))
+         (if (and (not (member (path->string name) '(".git" "compiled")))
+                  (directory-exists? sub)
+                  (not (link-exists? sub)))
+             (loop sub)
+             0)))))
+
 (define (resolve-rebuild-target name)
   (cond
     [(or (not name) (string-blank? name))
@@ -130,27 +170,24 @@
   (define argv (make-argv resolved-jobs make-args))
   (define system*-proc (current-rebuild-system*-proc))
   (define displayln-proc (current-rebuild-displayln-proc))
-  ;; Isolate compiled output for git source checkouts (default on).  Write
-  ;; config.rktd BEFORE `make` so the build -- which runs with no
-  ;; PLTCOMPILEDROOTS -- writes a complete keyed dir instead of the shared
-  ;; default `compiled/`, and record 'keyed-only so the shim env drops the
-  ;; `.` fallback.  Skipped on dry runs (no side effects).
-  (define scheme
-    (cond
-      [(or dry-run? (rackup-testing?)
-           (not (git-work-tree? (or source-root cwd) system*-proc)))
-       (hash-ref meta 'compiled-roots-scheme #f)]
-      [else
-       (define key (compiled-roots-key (hash-ref meta 'resolved-version #f)
-                                       (hash-ref meta 'variant #f)
-                                       (hash-ref meta 'requested-spec #f)))
-       (cond
-         [(and key
-               (memq (set-toolchain-compiled-file-roots!
-                      (string->path (hash-ref layout 'bin-dir)) (list key))
-                     '(written unchanged)))
-          'keyed-only]
-         [else (hash-ref meta 'compiled-roots-scheme #f)])]))
+  (define tree-root (or source-root cwd))
+  (define key (compiled-roots-key (hash-ref meta 'resolved-version #f)
+                                  (hash-ref meta 'variant #f)
+                                  (hash-ref meta 'requested-spec #f)))
+  ;; Drop the keyed dirs of versions other than the one just built, so
+  ;; each version bump does not leave a full copy of the tree's `.zo`
+  ;; behind.  Runs even when `make` fails, since a failed build may
+  ;; already have bumped the version; it keeps whatever version the
+  ;; binary now reports.
+  (define (prune-old-keyed-dirs!)
+    (define-values (version _variant _addon)
+      (reprobe-local-toolchain (hash-ref layout 'bin-dir)))
+    (when (and version key)
+      (define n (prune-keyed-compiled-dirs! tree-root key version))
+      (when (positive? n)
+        (displayln-proc
+         (format "Removed ~a old compiled dir(s) under ~a in ~a (keeping ~a)"
+                 n key tree-root version)))))
   (cond
     [(and pull? dry-run?)
      (displayln-proc (format "+ git -C ~a pull --ff-only" (or source-root cwd)))]
@@ -159,13 +196,28 @@
   (cond
     [dry-run?
      (displayln-proc (format "+ cd ~a && ~a" cwd (string-join argv " ")))]
-    [else (run-make! cwd argv system*-proc displayln-proc)])
+    [else
+     ;; Undo an earlier keyed-only migration before `make`, so the
+     ;; build's later steps (which read the tree's config.rktd) do not
+     ;; load stale keyed `.zo`.
+     (when key
+       (unset-toolchain-compiled-file-roots! (string->path (hash-ref layout 'bin-dir))
+                                             (list key)))
+     (with-handlers ([exn:fail? (lambda (e)
+                                  (prune-old-keyed-dirs!)
+                                  (raise e))])
+       ;; bin/rackup clears PLTADDONDIR, so without this the build's
+       ;; `raco setup` would use the native addon dir and miss
+       ;; user-scope packages that the shim and `rackup run` see under
+       ;; the managed dir, and could drop their launchers.
+       (parameterize ([current-environment-variables (build-environment id)])
+         (run-make! cwd argv system*-proc displayln-proc)))
+     (prune-old-keyed-dirs!)])
   (cond
     [(or dry-run? (not update-meta?)) id]
     [else
      (finalize-local-toolchain! id (hash-ref meta 'requested-spec id) layout
                                 #:installed-at (hash-ref meta 'installed-at #f)
-                                #:last-rebuilt-at (current-iso8601)
-                                #:compiled-roots-scheme scheme)
+                                #:last-rebuilt-at (current-iso8601))
      (displayln-proc (format "Rebuilt ~a" id))
      id]))
