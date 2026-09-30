@@ -134,7 +134,7 @@ _rackup() {
       _arguments '--shell[Shell type]:shell:(bash zsh)'
       ;;
     uninstall)
-      _arguments '--dangerously-delete-without-prompting[Skip confirmation prompt]'
+      _arguments '--dangerously-delete-without-prompting[Skip confirmation prompt]:rackup home:_files -/'
       ;;
     self-upgrade)
       _arguments \

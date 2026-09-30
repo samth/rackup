@@ -120,10 +120,11 @@ Check what is installed / active before acting:
 - `rackup install` is idempotent: re-running with an already-installed spec is
   a no-op (add `--force` to reinstall), so it is safe to run unconditionally.
 - Quiet a noisy install with `rackup install <spec> --quiet`.
-- The only destructive command that prompts is `rackup uninstall`; it refuses
-  to run without a terminal unless you pass
-  `--dangerously-delete-without-prompting`. Do not run it in automation unless
-  that is the explicit goal.
+- The only destructive command that prompts is `rackup uninstall`. It asks
+  for a per-run code on the controlling terminal and refuses without one,
+  unless you pass `--dangerously-delete-without-prompting <rackup-home>` with
+  the exact RACKUP_HOME path. Never run it, even with `--help`, unless
+  uninstalling rackup is the explicit goal.
 
 ## Exit codes
 

@@ -952,14 +952,14 @@ if [[ "$HOST_RACKET" != "absent" ]]; then
   [[ -f "$HOME/.zshrc" ]] || fail "expected ~/.zshrc before uninstall"
   grep -q "rackup initialize" "$HOME/.bashrc" || fail "expected rackup init block in ~/.bashrc before uninstall"
   grep -q "rackup initialize" "$HOME/.zshrc" || fail "expected rackup init block in ~/.zshrc before uninstall"
-  if home_uninstall_out="$(env RACKUP_HOME="$HOME" RACKUP_ALLOW_SYSTEM_RACKET=1 "$RACKUP_BIN" uninstall --dangerously-delete-without-prompting 2>&1)"; then
+  if home_uninstall_out="$(env RACKUP_HOME="$HOME" RACKUP_ALLOW_SYSTEM_RACKET=1 "$RACKUP_BIN" uninstall --dangerously-delete-without-prompting "$HOME" 2>&1)"; then
     printf '%s\n' "$home_uninstall_out" >&2
     fail "rackup uninstall should refuse HOME as RACKUP_HOME"
   fi
   assert_contains "unsafe rackup home target equal to your home directory" \
     "$home_uninstall_out" \
     "uninstall should refuse HOME as RACKUP_HOME"
-  if root_uninstall_out="$(env RACKUP_HOME=/ RACKUP_ALLOW_SYSTEM_RACKET=1 "$RACKUP_BIN" uninstall --dangerously-delete-without-prompting 2>&1)"; then
+  if root_uninstall_out="$(env RACKUP_HOME=/ RACKUP_ALLOW_SYSTEM_RACKET=1 "$RACKUP_BIN" uninstall --dangerously-delete-without-prompting / 2>&1)"; then
     printf '%s\n' "$root_uninstall_out" >&2
     fail "rackup uninstall should refuse / as RACKUP_HOME"
   fi
@@ -970,7 +970,17 @@ if [[ "$HOST_RACKET" != "absent" ]]; then
   old_rackup_bin="$RACKUP_BIN"
   old_racket_shim="$RACKUP_HOME/shims/racket"
   old_raco_shim="$RACKUP_HOME/shims/raco"
-  if ! uninstall_out="$(run_rackup uninstall --dangerously-delete-without-prompting 2>&1)"; then
+  if help_out="$(run_rackup uninstall --help 2>&1)"; then
+    [[ -d "$RACKUP_HOME" ]] || fail "rackup uninstall --help must not delete RACKUP_HOME"
+  else
+    printf '%s\n' "$help_out" >&2
+    fail "rackup uninstall --help failed"
+  fi
+  if run_rackup uninstall </dev/null >/dev/null 2>&1; then
+    fail "rackup uninstall without a terminal should refuse"
+  fi
+  [[ -d "$RACKUP_HOME" ]] || fail "a refused rackup uninstall must not delete RACKUP_HOME"
+  if ! uninstall_out="$(run_rackup uninstall --dangerously-delete-without-prompting "$RACKUP_HOME" 2>&1)"; then
     printf '%s\n' "$uninstall_out" >&2
     fail "rackup uninstall --dangerously-delete-without-prompting failed"
   fi

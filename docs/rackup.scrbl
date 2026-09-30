@@ -607,11 +607,15 @@ instead.
 Remove all rackup-managed data and shell init blocks.  This is
 destructive and cannot be undone.
 
-@shell-block{rackup uninstall [--dangerously-delete-without-prompting]}
+@shell-block{rackup uninstall [--dangerously-delete-without-prompting <rackup-home>]}
+
+Without the flag, @exec{rackup uninstall} prints a one-time code such as
+@tt{DELETE-4821} on the controlling terminal and proceeds only if you type
+it there; it refuses when no terminal is available.
 
 @opt-table[
-  @list[@exec{--dangerously-delete-without-prompting}
-        "Skip the interactive DELETE confirmation prompt."]
+  @list[@exec{--dangerously-delete-without-prompting <rackup-home>}
+        "Skip the prompt. <rackup-home> must name RACKUP_HOME exactly."]
 ]
 
 @subsection[#:style sub-style]{What gets deleted}
