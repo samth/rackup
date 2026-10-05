@@ -507,7 +507,11 @@ to the active toolchain's real executable.  Common shims include
 @section[#:tag "init" #:style 'unnumbered]{@tt{rackup init}}
 
 Install or update shell integration in @tt{~/.bashrc} or
-@tt{~/.zshrc}.  Writes a managed block that sources
+@tt{~/.zshrc}.  For bash it also writes the login-shell startup file,
+since a login bash (every new window in macOS Terminal) never reads
+@tt{~/.bashrc}: the first of @tt{~/.bash_profile}, @tt{~/.bash_login},
+and @tt{~/.profile} that exists, or a new @tt{~/.bash_profile} on
+macOS.  Writes a managed block that sources
 @tt{~/.rackup/shell/rackup.<shell>}.  The managed block adds the shims
 directory to @tt{PATH} and defines the @tt{rackup} shell function that
 wraps @tt{rackup switch} so it takes effect in the current shell.
@@ -626,8 +630,8 @@ it there; it refuses when no terminal is available.
   @item{All installed toolchains and linked-toolchain metadata/overlays.}
   @item{Shims, caches, downloaded installers, and per-toolchain addon
         dirs/packages.}
-  @item{Rackup-managed init blocks from @tt{~/.bashrc} and
-        @tt{~/.zshrc}.}
+  @item{Rackup-managed init blocks from @tt{~/.bashrc}, @tt{~/.zshrc},
+        @tt{~/.bash_profile}, @tt{~/.bash_login}, and @tt{~/.profile}.}
 ]
 
 Linked local source trees are @emph{not} deleted — only rackup's links

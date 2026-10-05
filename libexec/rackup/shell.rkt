@@ -21,7 +21,9 @@
          init-shell!
          refresh-shell-integration!
          strip-managed-block
-         remove-shell-init-blocks!)
+         remove-shell-init-blocks!
+         current-macos?
+         current-home-dir)
 
 (define start-marker "# >>> rackup initialize >>>")
 (define end-marker "# <<< rackup initialize <<<")
@@ -104,8 +106,38 @@
 (define (guess-shell)
   (if (regexp-match? #px"/zsh$" (or (getenv "SHELL") "")) "zsh" "bash"))
 
+;; The directory holding the user's shell startup files.  A parameter so
+;; tests can point it at a scratch directory: find-system-path reads HOME
+;; once at startup, so changing HOME at run time does not redirect it.
+(define current-home-dir (make-parameter #f))
+(define (home-dir) (or (current-home-dir) (find-system-path 'home-dir)))
+
 (define (rc-path shell-name)
-  (build-path (find-system-path 'home-dir) (format ".~arc" shell-name)))
+  (build-path (home-dir) (format ".~arc" shell-name)))
+
+;; A login bash -- every new window in macOS Terminal -- reads the first of
+;; these that exists and never reads ~/.bashrc unless that file sources it.
+(define bash-login-names '(".bash_profile" ".bash_login" ".profile"))
+
+(define current-macos? (make-parameter (eq? (system-type 'os) 'macosx)))
+
+;; The login file `rackup init --shell bash` also writes: the first one
+;; bash would read, or a new ~/.bash_profile on macOS.  Elsewhere, with no
+;; login file, return #f: terminals there start non-login shells that read
+;; ~/.bashrc, and creating ~/.bash_profile would hide an existing
+;; ~/.profile from bash.
+(define (bash-login-path)
+  (define home (home-dir))
+  (or (for/first ([n (in-list bash-login-names)]
+                  #:when (file-exists? (build-path home n)))
+        (build-path home n))
+      (and (current-macos?) (build-path home ".bash_profile"))))
+
+;; Every file `rackup init` may have written a block into.
+(define (all-rc-paths)
+  (define home (home-dir))
+  (append (list (rc-path "bash") (rc-path "zsh"))
+          (for/list ([n (in-list bash-login-names)]) (build-path home n))))
 
 ;; The full managed `# >>> rackup ... # <<< rackup\n?` block as a regex,
 ;; including any trailing newline so removal doesn't leave a blank line.
@@ -131,8 +163,7 @@
 
 (define (remove-shell-init-blocks!)
   (for/fold ([removed '()] #:result (reverse removed))
-            ([shell* (in-list '("bash" "zsh"))])
-    (define rc (rc-path shell*))
+            ([rc (in-list (all-rc-paths))])
     (cond
       [(not (file-exists? rc)) removed]
       [else
@@ -164,10 +195,17 @@
   (ensure-shim-dispatcher!)
   (ensure-core-rackup-shim!)
   (write-shell-helper-files!)
-  (define rc (rc-path shell*))
-  (define existing (read-string-file rc ""))
-  (write-string-file rc (replace-managed-block existing (managed-rc-block shell*)))
-  rc)
+  ;; Returns the files written: the shell's rc file and, for bash, the
+  ;; login file (see bash-login-path).
+  (define rcs
+    (cons (rc-path shell*)
+          (if (equal? shell* "bash")
+              (let ([login (bash-login-path)]) (if login (list login) null))
+              null)))
+  (for ([rc (in-list rcs)])
+    (define existing (read-string-file rc ""))
+    (write-string-file rc (replace-managed-block existing (managed-rc-block shell*))))
+  rcs)
 
 (module+ for-testing
   (provide shell-helper-script)
