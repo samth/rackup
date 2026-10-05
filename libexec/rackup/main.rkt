@@ -378,10 +378,16 @@
         (exit 1))))
 
 (define (warn-no-shell-integration! cmd-name)
+  ;; The shell function evals `rackup switch`'s output, so stdout is a pipe
+  ;; when it is loaded; a terminal means this shell has not loaded it.
   (when (terminal-port? (current-output-port))
-    (eprintf "rackup: shell integration is not set up.\n")
-    (eprintf "Run `rackup init` first, then restart your shell.\n")
-    (eprintf "After that, `rackup ~a` will work correctly.\n" cmd-name)
+    (eprintf "rackup: `rackup ~a` changes this shell's toolchain, which needs rackup's\n" cmd-name)
+    (eprintf "shell integration, and this shell has not loaded it.\n")
+    (eprintf "  - If you have not run it yet: `rackup init`, then open a new shell.\n")
+    (eprintf "  - To load it into this shell now: `. ~~/.bashrc` (bash) or `. ~~/.zshrc` (zsh).\n")
+    (eprintf "Without shell integration:\n")
+    (eprintf "  - `rackup default set <toolchain>` sets the toolchain for every shell.\n")
+    (eprintf "  - `rackup run <toolchain> -- <command>` runs one command under a toolchain.\n")
     (exit 1)))
 
 (define (cmd-shell rest)
@@ -394,6 +400,8 @@
                   [("--deactivate") "Deactivate shell toolchain" (set! deactivate? #t)]
                   #:args args
                   args))
+  (unless (or deactivate? (= (length args) 1))
+    (rackup-error "usage: rackup shell <toolchain> | rackup shell --deactivate"))
   (warn-no-shell-integration! "shell")
   (cond
     [deactivate? (display (emit-shell-deactivation))]
@@ -416,6 +424,8 @@
                   [("--unset") "Deactivate shell toolchain" (set! unset? #t)]
                   #:args args
                   args))
+  (unless (or unset? (= (length args) 1))
+    (rackup-error "usage: rackup switch <toolchain> | rackup switch --unset"))
   (warn-no-shell-integration! "switch")
   (cond
     [unset? (display (emit-shell-deactivation))]
@@ -442,9 +452,10 @@
                 [("--shell") sh "Shell type (bash or zsh)" (set! shell-name sh)]
                 #:args ()
                 (void))
-  (define rc (init-shell! shell-name))
+  (define rcs (init-shell! shell-name))
   (with-state-lock (reshim!))
-  (printf "Initialized shell integration in ~a\n" (path->string rc)))
+  (printf "Initialized shell integration in ~a\n"
+          (string-join (map path->string rcs) " and ")))
 
 (define (split-on-double-dash xs)
   (define-values (head tail)
