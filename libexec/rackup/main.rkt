@@ -100,8 +100,8 @@
               "Switch the active toolchain in this shell without changing default.")
   (usage-line "shell <toolchain> | shell --deactivate"
               "Low-level: emit shell code to activate/deactivate a toolchain.")
-  (usage-line "run <toolchain> -- <command> [args...]"
-              "Run a command using a specific toolchain without changing defaults.")
+  (usage-line "run [<toolchain>] [--] <command> [args...]"
+              "Run a command under a toolchain (default: the active one) without changing defaults.")
   (usage-line "prompt [--long|--short|--raw|--source]"
               "Print fast prompt info for PS1 (default: compact label).")
   (usage-line "upgrade [version] [--force]" "Upgrade channel-based toolchains to latest version.")
@@ -451,47 +451,102 @@
     (splitf-at xs (lambda (x) (not (equal? x "--")))))
   (values head (if (pair? tail) (cdr tail) null)))
 
+(define run-usage "rackup run [<toolchain>] [--] <command> [args...]")
+
+(define (print-run-help)
+  (displayln (string-append "usage: " run-usage))
+  (displayln
+   (string-append
+    "  Run <command> with a toolchain's executables and environment, without\n"
+    "  changing the default or active toolchain.  <toolchain> is a toolchain id\n"
+    "  or alias (e.g. 9.2, stable, snapshot, or a linked name); when omitted, the\n"
+    "  active toolchain is used (RACKUP_TOOLCHAIN, else the default).\n"
+    "\n"
+    "  Without `--`, the first argument selects the toolchain only if it names an\n"
+    "  installed one; otherwise the whole argument list is the command.  Use `--`\n"
+    "  to make the split explicit:\n"
+    "\n"
+    "    rackup run racket -e '(displayln (version))'   ; active toolchain\n"
+    "    rackup run 9.2 raco test .                     ; toolchain 9.2\n"
+    "    rackup run stable -- raco pkg install gregor\n"
+    "    rackup run -- racket --version                 ; active toolchain\n"
+    "\n"
+    "  The exit status is the command's exit status.")))
+
+;; Split `rackup run`'s arguments into a toolchain spec (or #f, meaning the
+;; active toolchain) and the command line to run.
+(define (parse-run-args rest)
+  (define (usage-error msg)
+    (rackup-error "~a\nusage: ~a" msg run-usage))
+  (define-values (head tail) (splitf-at rest (lambda (x) (not (equal? x "--")))))
+  (cond
+    [(pair? tail)
+     ;; Explicit `--`: at most one toolchain before it, the command after.
+     (define cmd (cdr tail))
+     (when (null? cmd)
+       (usage-error "rackup run: missing command after `--`"))
+     (match head
+       ['() (values #f cmd)]
+       [(list spec) (values spec cmd)]
+       [_ (usage-error
+           (format "rackup run: expected at most one toolchain before `--`, got: ~a"
+                   (string-join head " ")))])]
+    [(null? rest) (usage-error "rackup run: missing command")]
+    [else
+     ;; No `--`: the first argument is a toolchain only if it names an
+     ;; installed one (a local lookup; no network, no install prompt).
+     (define spec (car rest))
+     (cond
+       [(try-or #f (find-local-toolchain spec))
+        (when (null? (cdr rest))
+          (usage-error (format "rackup run: missing command for toolchain ~a" spec)))
+        (values spec (cdr rest))]
+       [else (values #f rest)])]))
+
 (define (cmd-run rest)
   (ensure-index!)
-  (define all-args
-    (command-line #:program "rackup run"
-                  #:argv rest
-                  #:args args
-                  args))
-  (define-values (head tail) (split-on-double-dash all-args))
-  (match head
-    [(list spec)
-     (unless (pair? tail)
-       (rackup-error "usage: rackup run <toolchain> -- <command> [args...]"))
-     (define id (resolve-toolchain-or-die spec))
-     (define env (environment-variables-copy (current-environment-variables)))
-     (restore-saved-racket-env-vars! env)
-     (environment-variables-set! env #"RACKUP_TOOLCHAIN" (string->bytes/utf-8 id))
-     (for ([kv (in-list (toolchain-runtime-env id))])
-       (define key (string->bytes/utf-8 (car kv)))
-       ;; For PLTCOMPILEDROOTS, respect a user-set value restored above.
-       (unless (and (equal? (car kv) "PLTCOMPILEDROOTS")
-                    (environment-variables-ref env key))
-         (environment-variables-set! env
-                                     key
-                                     (string->bytes/utf-8 (cdr kv)))))
-     (define old-path (or (getenv "PATH") ""))
-     (define shims (path->string (rackup-shims-dir)))
-     (define runtime-path
-       (if (regexp-match? (pregexp (format "(^|:)~a(:|$)" (regexp-quote shims))) old-path)
-           old-path
-           (string-append shims ":" old-path)))
-     (environment-variables-set! env #"PATH" (string->bytes/utf-8 runtime-path))
-     (define cmd (car tail))
-     (define cmd-args (cdr tail))
-     (exit
-      (parameterize ([current-environment-variables env])
-        (define exe
-          (or (resolve-executable-path cmd id)
-              (find-executable-path cmd)
-              cmd))
-        (if (apply system* exe cmd-args) 0 1)))]
-    [_ (rackup-error "usage: rackup run <toolchain> -- <command> [args...]")]))
+  (when (and (pair? rest) (member (car rest) '("-h" "--help")))
+    (print-run-help)
+    (exit 0))
+  (define-values (spec command) (parse-run-args rest))
+  (define id
+    (if spec
+        (resolve-toolchain-or-die spec)
+        (or (resolve-active-toolchain-id)
+            (rackup-error
+             (string-append
+              "rackup run: no toolchain given and no active or default toolchain;\n"
+              "pass one (rackup run <toolchain> -- <command>) or set a default with\n"
+              "`rackup default set <toolchain>`")))))
+  (define env (environment-variables-copy (current-environment-variables)))
+  (restore-saved-racket-env-vars! env)
+  (environment-variables-set! env #"RACKUP_TOOLCHAIN" (string->bytes/utf-8 id))
+  (for ([kv (in-list (toolchain-runtime-env id))])
+    (define key (string->bytes/utf-8 (car kv)))
+    (define val (string->bytes/utf-8 (cdr kv)))
+    ;; Don't override a user-set PLTCOMPILEDROOTS (restored above from
+    ;; _RACKUP_ORIG_PLTCOMPILEDROOTS).  All other toolchain vars
+    ;; (PLTADDONDIR, etc.) are always set.
+    (unless (and (equal? (car kv) "PLTCOMPILEDROOTS")
+                 (environment-variables-ref env key))
+      (environment-variables-set! env key val)))
+  (define old-path (or (getenv "PATH") ""))
+  (define shims (path->string (rackup-shims-dir)))
+  (define runtime-path
+    (if (regexp-match? (pregexp (format "(^|:)~a(:|$)" (regexp-quote shims))) old-path)
+        old-path
+        (string-append shims ":" old-path)))
+  (environment-variables-set! env #"PATH" (string->bytes/utf-8 runtime-path))
+  (define cmd (car command))
+  (define cmd-args (cdr command))
+  (exit
+   (parameterize ([current-environment-variables env])
+     (define exe
+       (or (resolve-executable-path cmd id)
+           (find-executable-path cmd)
+           cmd))
+     ;; Pass the command's exit status through.
+     (apply system*/exit-code exe cmd-args))))
 
 (define (cmd-upgrade rest)
   (ensure-index!)

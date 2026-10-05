@@ -1967,6 +1967,74 @@
      (check-equal? (installed-toolchain-ids) (list new-id))
      (check-equal? (get-default-toolchain) new-id)))
 
+  ;; `rackup run`: optional toolchain, command exit status, and help.
+  (with-temp-rackup-home
+   (lambda (tmp)
+     (ensure-index!)
+     (setup-hidden-runtime! tmp)
+     (define id "release-9.0-cs-x86_64-linux-full")
+     (define real-bin (build-path (rackup-toolchain-install-dir id) "bin"))
+     (make-directory* real-bin)
+     (write-fake-exe! (build-path real-bin "racket") "#!/usr/bin/env bash\necho test\n")
+     (write-fake-exe! (build-path real-bin "which-toolchain")
+                      "#!/usr/bin/env bash\nprintf 'tc=%s args=%s\\n' \"$RACKUP_TOOLCHAIN\" \"$*\"\n")
+     (write-fake-exe! (build-path real-bin "exit3") "#!/usr/bin/env bash\nexit 3\n")
+     (make-file-or-directory-link real-bin (rackup-toolchain-bin-link id))
+     (define (run-rackup . args)
+       (define out (open-output-string))
+       (define err (open-output-string))
+       (define env (environment-variables-copy (current-environment-variables)))
+       (environment-variables-set! env #"RACKUP_TOOLCHAIN" #f)
+       (define status
+         (parameterize ([current-output-port out]
+                        [current-error-port err]
+                        [current-environment-variables env])
+           (apply system*/exit-code rackup-bin args)))
+       (list status (get-output-string out) (get-output-string err)))
+     (define tc-line (format "tc=~a args=-x y\n" id))
+
+     ;; Nothing installed, so no active or default toolchain: a clear error.
+     (define no-default (run-rackup "run" "which-toolchain"))
+     (check-not-equal? (car no-default) 0)
+     (check-true (string-contains? (caddr no-default) "no active or default toolchain"))
+
+     ;; Registering the first toolchain also makes it the default.
+     (with-state-lock
+       (register-toolchain! id
+                            (test-toolchain-meta id #:spec "9.0" #:version "9.0"
+                                                 'executables
+                                                 '("racket" "which-toolchain" "exit3"))))
+
+     ;; An explicit toolchain, with and without `--`.
+     (check-equal? (take (run-rackup "run" id "--" "which-toolchain" "-x" "y") 2)
+                   (list 0 tc-line))
+     (check-equal? (take (run-rackup "run" "9.0" "which-toolchain" "-x" "y") 2)
+                   (list 0 tc-line)
+                   "without `--`, an installed alias selects the toolchain")
+
+     ;; No toolchain: the active (default) one runs the command.
+     (check-equal? (take (run-rackup "run" "which-toolchain" "-x" "y") 2)
+                   (list 0 tc-line))
+     (check-equal? (take (run-rackup "run" "--" "which-toolchain" "-x" "y") 2)
+                   (list 0 tc-line)
+                   "a leading `--` is not swallowed")
+
+     ;; The command's exit status passes through.
+     (check-equal? (car (run-rackup "run" id "--" "exit3")) 3)
+     (check-equal? (car (run-rackup "run" "exit3")) 3)
+
+     ;; Usage errors.
+     (check-not-equal? (car (run-rackup "run")) 0)
+     (check-not-equal? (car (run-rackup "run" id "--")) 0)
+     (check-true (string-contains? (caddr (run-rackup "run" "a" "b" "--" "exit3"))
+                                   "at most one toolchain"))
+
+     ;; Help describes the toolchain argument.
+     (define help (run-rackup "run" "--help"))
+     (check-equal? (car help) 0)
+     (check-true (string-contains? (cadr help) "rackup run [<toolchain>] [--] <command>"))
+     (check-true (string-contains? (cadr help) "active toolchain"))))
+
   ;; Integration test: env vars pass through to rackup run subprocesses
   (with-temp-rackup-home
    (lambda (tmp)
