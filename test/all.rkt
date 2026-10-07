@@ -21,6 +21,7 @@
          (submod "switch-install.rkt" test)
          (submod "text.rkt" test)
          (submod "uninstall.rkt" test)
+         (submod "shell-init.rkt" test)
          (submod "upgrade.rkt" test)
          (submod "version.rkt" test)
          (submod "versioning.rkt" test))
