@@ -281,7 +281,27 @@
             (if (null? names)
                 ""
                 (format "\n  aka ~a" (string-join (sort names string<?) ", "))))
-          (printf "~a~a ~a~a\n" tag-str id meta-str names-str)))))
+          (printf "~a~a ~a~a~a\n" tag-str id meta-str names-str (linked-path-line m))))))
+
+;; For a linked toolchain, a line naming the directory it was linked to,
+;; plus where that resolves when the path goes through a symlink.
+(define (linked-path-line m)
+  (define src (and (eq? (hash-ref m 'kind #f) 'local) (hash-ref m 'source-path #f)))
+  (cond
+    [(not (string? src)) ""]
+    [else
+     (define real
+       (try-or #f
+         (and (directory-exists? src)
+              (path->string (normalize-path (string->path src))))))
+     (string-append
+      (format "\n  linked to ~a" src)
+      (cond
+        [(not real) (if (directory-exists? src) "" " (missing)")]
+        [(equal? (path->directory-path (string->path real))
+                 (path->directory-path (simplify-path (string->path src))))
+         ""]
+        [else (format " (resolves to ~a)" real)]))]))
 
 (define (default-id->line)
   (define id (get-default-toolchain))
