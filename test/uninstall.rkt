@@ -217,8 +217,20 @@
   (define racket-dir
     (let-values ([(dir _name _dir?) (split-path (find-system-path 'exec-file))])
       (if (path? dir) dir (current-directory))))
-  (define (run-wrapper home . args)
+  ;; Each run gets a scratch HOME: a confirmed uninstall strips the rackup
+  ;; block from $HOME/.bashrc and $HOME/.zshrc, which must never be the
+  ;; real ones.
+  (define rc-block
+    "# >>> rackup initialize >>>\n. rackup.bash\n# <<< rackup initialize <<<\n")
+  (define (fresh-user-home)
+    (define user-home (make-temporary-file "rackup-uninstall-user-~a" 'directory tmp-root))
+    (write-string-file (build-path user-home ".bashrc") (string-append "keep me\n" rc-block))
+    user-home)
+  (define (bashrc-has-block? user-home)
+    (string-contains? (file->string (build-path user-home ".bashrc")) "rackup initialize"))
+  (define (run-wrapper home user-home . args)
     (define env (environment-variables-copy (current-environment-variables)))
+    (environment-variables-set! env #"HOME" (string->bytes/utf-8 (path->string user-home)))
     (environment-variables-set! env #"RACKUP_HOME" (string->bytes/utf-8 (path->string home)))
     (environment-variables-set! env #"RACKUP_ALLOW_SYSTEM_RACKET" #"1")
     (environment-variables-set!
@@ -238,13 +250,22 @@
   (when (find-executable-path "sh")
     (for ([args (in-list '(("--help") ("-h") () ("--bogus")))])
       (define home (fresh-home))
-      (define status (apply run-wrapper home args))
+      (define user-home (fresh-user-home))
+      (define status (apply run-wrapper home user-home args))
       (check-true (file-exists? (build-path home "marker"))
                   (format "`rackup uninstall ~a` must not delete RACKUP_HOME (exit ~a)"
                           (string-join args " ") status))
-      (delete-directory/files home #:must-exist? #f))
-    (let ([home (fresh-home)])
-      (check-equal? (run-wrapper home "--dangerously-delete-without-prompting"
+      (check-true (bashrc-has-block? user-home)
+                  (format "`rackup uninstall ~a` must not touch ~~/.bashrc" (string-join args " ")))
+      (delete-directory/files home #:must-exist? #f)
+      (delete-directory/files user-home #:must-exist? #f))
+    (let ([home (fresh-home)]
+          [user-home (fresh-user-home)])
+      (check-equal? (run-wrapper home user-home "--dangerously-delete-without-prompting"
                                  (path->string home))
                     0)
-      (check-false (directory-exists? home) "a confirmed uninstall deletes RACKUP_HOME"))))
+      (check-false (directory-exists? home) "a confirmed uninstall deletes RACKUP_HOME")
+      (check-false (bashrc-has-block? user-home)
+                   "a confirmed uninstall removes the block from the scratch ~/.bashrc")
+      (check-true (string-contains? (file->string (build-path user-home ".bashrc")) "keep me"))
+      (delete-directory/files user-home #:must-exist? #f))))
