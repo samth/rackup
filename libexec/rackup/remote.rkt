@@ -43,8 +43,20 @@
 (define snapshot-sites
   (hash 'utah "https://users.cs.utah.edu/plt" 'northwestern "https://plt.cs.northwestern.edu"))
 
+;; Like http-sendrecv, but honors the proxy environment variables that net/url
+;; reads (https_proxy, http_proxy, all_proxy, no_proxy) by tunneling with CONNECT.
+(define (http-sendrecv/proxy host target #:ssl? ssl? #:port port #:content-decode decodes)
+  (match (proxy-server-for (if ssl? "https" "http") host)
+    [(list _ proxy-host proxy-port proxy-auth)
+     (define-values (ctx in out abandon)
+       (http-conn-CONNECT-tunnel proxy-host proxy-port host port
+                                 #:ssl? ssl? #:proxy-auth proxy-auth))
+     (http-sendrecv host target #:ssl? (list ctx in out abandon) #:port port
+                    #:content-decode decodes)]
+    [_ (http-sendrecv host target #:ssl? ssl? #:port port #:content-decode decodes)]))
+
 (define current-http-sendrecv-proc
-  (make-parameter http-sendrecv))
+  (make-parameter http-sendrecv/proxy))
 
 (define (status-code status-line)
   (define h
