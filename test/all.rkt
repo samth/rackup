@@ -18,6 +18,7 @@
          (submod "rktd-io.rkt" test)
          (submod "security.rkt" test)
          (submod "shell-completion.rkt" test)
+         (submod "stale-zo.rkt" test)
          (submod "state-shims.rkt" test)
          (submod "switch-install.rkt" test)
          (submod "text.rkt" test)
