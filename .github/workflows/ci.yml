@@ -120,7 +120,7 @@ jobs:
             toolchain_flags: "--distribution minimal"
             install_flags: ""
           - name: aarch64-macosx
-            runs_on: macos-14
+            runs_on: macos-15
             docker_platform: ""
             expect_mode: exe
             toolchain_spec: "stable"
