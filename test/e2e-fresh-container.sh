@@ -645,7 +645,8 @@ assert_eq "" "$linked_collects" "linked shim should NOT export PLTCOLLECTS"
 linked_addon="$(shim_racket -e '(display (or (getenv "PLTADDONDIR") ""))')"
 assert_nonempty "$linked_addon" "linked shim should export PLTADDONDIR"
 linked_addon_path="$(shim_racket -e '(display (find-system-path (quote addon-dir)))')"
-assert_eq "$linked_addon_path" "$linked_addon" "linked shim PLTADDONDIR should match the linked installation addon dir"
+# find-system-path returns a directory path (trailing slash); PLTADDONDIR may not have one.
+assert_eq "${linked_addon_path%/}" "${linked_addon%/}" "linked shim PLTADDONDIR should match the linked installation addon dir"
 echo "linked shim environment verified"
 # Verify rackup run also does not set PLTHOME
 link_run_plthome="$(run_rackup run localsrc -- racket -e '(display (or (getenv "PLTHOME") ""))')"
