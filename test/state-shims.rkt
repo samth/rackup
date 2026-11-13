@@ -536,7 +536,14 @@
      (define src-str (path->string src-root))
      (define list-linked (capture-output (lambda () (run-main '("list")))))
      (check-true (string-contains? list-linked (format "linked to ~a" src-str)))
-     (check-false (string-contains? list-linked "resolves to"))
+     ;; No "resolves to" unless the path goes through a symlink.  On macOS the
+     ;; temp dir itself does (/tmp -> /private/tmp), so expect the real path.
+     (define src-real (path->string (normalize-path src-root)))
+     (if (equal? (path->directory-path (string->path src-real))
+                 (path->directory-path (simplify-path src-root)))
+         (check-false (string-contains? list-linked "resolves to"))
+         (check-true (string-contains? list-linked
+                                       (format "linked to ~a (resolves to ~a)" src-str src-real))))
      (define src-link
        (let-values ([(parent _name _dir?) (split-path src-root)])
          (build-path parent "src-via-link")))
