@@ -250,8 +250,16 @@
 (define (path-complete-string p)
   (path->string* (path->complete-path p)))
 
+;; The parent directory of p, or #f at the root.  Uses split-path, not
+;; path-only: path-only returns a directory path such as ".../racket/"
+;; unchanged, so the parent of a computed plthome came back as plthome
+;; itself and a linked `<checkout>/racket` lost its source root.
+;; simplify-path first drops `.` and `..` elements (e.g. ".../plt/./racket").
 (define (maybe-parent p)
-  (and p (path-only p)))
+  (and p
+       (let-values ([(base _name _dir?)
+                     (split-path (simplify-path (if (path? p) p (string->path p)) #f))])
+         (and (path? base) base))))
 
 (define (path-contains? p rx)
   (regexp-match? rx (path->string* p)))
