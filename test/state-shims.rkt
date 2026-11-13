@@ -531,6 +531,32 @@
      (check-equal? (find-local-toolchain "devsrc") linked-id)
      (check-equal? (find-local-toolchain linked-id) linked-id)
 
+     ;; `rackup list` shows where a linked toolchain points, and where a
+     ;; symlinked path resolves.
+     (define src-str (path->string src-root))
+     (define list-linked (capture-output (lambda () (run-main '("list")))))
+     (check-true (string-contains? list-linked (format "linked to ~a" src-str)))
+     ;; No "resolves to" unless the path goes through a symlink.  On macOS the
+     ;; temp dir itself does (/tmp -> /private/tmp), so expect the real path.
+     (define src-real (path->string (normalize-path src-root)))
+     (if (equal? (path->directory-path (string->path src-real))
+                 (path->directory-path (simplify-path src-root)))
+         (check-false (string-contains? list-linked "resolves to"))
+         (check-true (string-contains? list-linked
+                                       (format "linked to ~a (resolves to ~a)" src-str src-real))))
+     (define src-link
+       (let-values ([(parent _name _dir?) (split-path src-root)])
+         (build-path parent "src-via-link")))
+     (make-file-or-directory-link src-root src-link)
+     (link-toolchain! "viasym" (path->string src-link) null)
+     (define list-sym (capture-output (lambda () (run-main '("list")))))
+     (check-true (string-contains? list-sym
+                                   (format "linked to ~a (resolves to ~a)"
+                                           (path->string src-link)
+                                           (path->string (normalize-path src-root)))))
+     (remove-toolchain! "local-viasym")
+     (delete-file src-link)
+
      (define linked-meta (read-toolchain-meta linked-id))
      (check-equal? (hash-ref linked-meta 'kind) 'local)
      (check-equal? (hash-ref linked-meta 'distribution) 'in-place)
