@@ -185,7 +185,7 @@ The implementation runs the toolchain's own `racket -e` with a small program tha
 
 ## Shell integration
 
-`rackup init` writes a managed block into `~/.bashrc` or `~/.zshrc` delimited by marker comments (`# >>> rackup initialize >>>`). The managed block:
+`rackup init` writes a managed block into `~/.bashrc` or `~/.zshrc` delimited by marker comments (`# >>> rackup initialize >>>`). For bash it writes the same block into the login-shell startup file too, because a login bash -- every new window in macOS Terminal -- reads the first of `~/.bash_profile`, `~/.bash_login`, and `~/.profile` that exists and never `~/.bashrc`. With none of those present it creates `~/.bash_profile` on macOS only; elsewhere terminals start non-login shells, and a new `~/.bash_profile` would hide an existing `~/.profile` from bash. Loading the block twice is harmless. Uninstall strips the block from all five files. `shell.rkt` takes the home directory from `current-home-dir` when set, so tests never touch the real files (`find-system-path` reads `HOME` only at startup). The managed block:
 
 1. Prepends `~/.rackup/shims` to `PATH`.
 2. Defines a `rackup()` shell function that intercepts `rackup switch` and `rackup shell` commands, evals the output (shell code that sets `RACKUP_TOOLCHAIN`), and delegates everything else to the real `rackup` binary.
