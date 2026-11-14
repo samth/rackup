@@ -90,12 +90,12 @@
       (rackup-error "make failed in ~a" cwd))))
 
 ;; Environment for the rebuild's `make`: the current one plus the
-;; toolchain's rackup-managed addon dir, the same PLTADDONDIR the shim and
-;; `rackup run` use.
+;; toolchain's addon dir, the same PLTADDONDIR the shim and `rackup run`
+;; use (for a linked toolchain, the checkout's own addon dir).
 (define (build-environment id)
   (define env (environment-variables-copy (current-environment-variables)))
   (environment-variables-set! env #"PLTADDONDIR"
-                              (string->bytes/utf-8 (path->string (rackup-addon-dir id))))
+                              (string->bytes/utf-8 (path->string (toolchain-addon-dir id))))
   env)
 
 ;; A linked toolchain's shim writes `.zo` for modules in its own source

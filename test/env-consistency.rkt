@@ -32,7 +32,10 @@
                  "\"${PLTADDONDIR:-}\" \"${PLTCOMPILEDROOTS:-}\"\n"))
 
 ;; A fake in-place source tree whose `racket` answers rackup's probe.
-(define (make-fake-source-tree! root)
+;; With `probe-addon?`, the probe reports `<root>/native-addon/` as the
+;; binary's native addon dir; without it the probe fails, as it does for a
+;; checkout whose racket cannot run yet.
+(define (make-fake-source-tree! root #:probe-addon? [probe-addon? #t])
   (define plthome (build-path root "racket"))
   (define bin (build-path plthome "bin"))
   (make-directory* bin)
@@ -42,12 +45,14 @@
   (write-script! (build-path bin "racket")
                  (string-append
                   "#!/usr/bin/env bash\n"
-                  "if [[ \"$#\" -ge 2 && \"$1\" == \"-e\" ]]; then\n"
-                  "  if [[ \"$2\" == *\"(version)\"*\"system-type\"*\"find-system-path\"* ]]; then\n"
-                  "    printf '9.99-env\\nchez-scheme\\n/tmp/x'\n"
-                  "    exit 0\n"
-                  "  fi\n"
-                  "fi\n"
+                  (if probe-addon?
+                      (string-append
+                       "if [[ \"$#\" -ge 2 && \"$1\" == \"-f\" ]]; then\n"
+                       "  printf '(\"9.99-env\" chez-scheme \"%s\")' "
+                       "\"$(cd \"$(dirname \"$0\")/../..\" && pwd)/native-addon/\"\n"
+                       "  exit 0\n"
+                       "fi\n")
+                      "")
                   "exit 1\n"))
   (write-script! (build-path bin "raco") "#!/usr/bin/env bash\nexit 0\n")
   (write-script! (build-path bin "print-env") print-env-body))
@@ -90,10 +95,10 @@
                  [current-error-port (open-output-nowhere)])
     (thunk)))
 
-(define (link-fake! home name)
+(define (link-fake! home name #:probe-addon? [probe-addon? #t])
   (define src (build-path home (string-append "src-" name)))
   (make-directory* src)
-  (make-fake-source-tree! src)
+  (make-fake-source-tree! src #:probe-addon? probe-addon?)
   (quietly (lambda () (link-toolchain! name (path->string src) '("--set-default"))))
   src)
 
@@ -125,22 +130,33 @@
 (module+ test
   (define make-exe (find-executable-path "make"))
 
-  ;; --- #1: rebuild's `make` uses the managed addon dir ---------------------
+  ;; --- #1: rebuild's `make` uses the same addon dir as the shim ---------
   ;; bin/rackup clears PLTADDONDIR, so the build's `raco setup` used to fall
-  ;; back to the native addon dir and miss packages the shim sees.
+  ;; back to whatever the build's racket defaulted to, which need not be the
+  ;; dir the shim and `rackup run` use.  A linked toolchain uses its probed
+  ;; native addon dir; when the probe fails, the managed one.
+  (define (rebuild-sees-addon home name #:probe-addon? probe-addon?)
+    (link-fake! home name #:probe-addon? probe-addon?)
+    (define seen 'make-not-run)
+    (parameterize ([current-rebuild-system*-proc
+                    (lambda (exe . _args)
+                      (when (equal? exe make-exe)
+                        (set! seen (getenv "PLTADDONDIR")))
+                      #t)])
+      (quietly (lambda () (cmd-rebuild (list name)))))
+    seen)
   (when make-exe
     (with-temp-rackup-home
      (lambda (home)
-       (link-fake! home "addon1")
-       (define seen 'make-not-run)
-       (parameterize ([current-rebuild-system*-proc
-                       (lambda (exe . _args)
-                         (when (equal? exe make-exe)
-                           (set! seen (getenv "PLTADDONDIR")))
-                         #t)])
-         (quietly (lambda () (cmd-rebuild '("addon1")))))
-       (check-equal? seen (path->string (rackup-addon-dir "local-addon1"))
-                     "rebuild's make sees the managed addon dir"))))
+       (define seen (rebuild-sees-addon home "addon1" #:probe-addon? #t))
+       (check-equal? seen
+                     (path->string (build-path home "src-addon1" "native-addon/"))
+                     "rebuild's make sees the linked toolchain's native addon dir")
+       (check-equal? seen (path->string (toolchain-addon-dir "local-addon1"))
+                     "the same dir rackup run uses")
+       (define seen2 (rebuild-sees-addon home "addon2" #:probe-addon? #f))
+       (check-equal? seen2 (path->string (rackup-addon-dir "local-addon2"))
+                     "with no probed addon dir, the managed one"))))
 
   ;; --- #2: a failed make leaves meta, env.sh and config.rktd consistent -
   ;; An older rackup could leave config.rktd keyed-only while meta and env.sh
@@ -200,6 +216,23 @@
                   (second r)
                   (format "PLTADDONDIR=~a\n" (path->string (rackup-addon-dir installer-id))))
                  "shim uses the managed addon dir")))
+
+  ;; --- #4b: a linked toolchain's shim uses its native addon dir -----------
+  ;; env.sh records the probed native addon dir; the dispatcher must keep
+  ;; it (not replace it with the managed dir) and ignore the shell's value,
+  ;; so the shim and `rackup run` see the same user packages.
+  (with-temp-rackup-home
+   (lambda (home)
+     (define src (link-fake! home "nativeaddon"))
+     (define id "local-nativeaddon")
+     (define native (path->string (build-path src "native-addon/")))
+     (define run-addon (cdr (assoc "PLTADDONDIR" (toolchain-runtime-env id))))
+     (check-equal? run-addon native "rackup run uses the native addon dir")
+     (for ([extra (list '() (list (cons #"PLTADDONDIR" #"/tmp/elsewhere")))])
+       (define r (run (shim "print-env") #:env extra))
+       (check-equal? (first r) 0)
+       (check-true (string-contains? (second r) (format "PLTADDONDIR=~a\n" native))
+                   (format "shim uses the native addon dir (inherited: ~s)" extra)))))
 
   ;; --- #5: reshim keeps a linked toolchain's bin overlay in sync ----------
   (with-temp-rackup-home

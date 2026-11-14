@@ -97,15 +97,19 @@ BIN_DIR="$HOME_DIR/toolchains/$ACTIVE/bin"
 BIN_REAL="$(cd -P "$BIN_DIR" 2>/dev/null && pwd)" || BIN_REAL="$BIN_DIR"
 TARGET="$BIN_REAL/$SHIM_NAME"
 ENV_FILE="$HOME_DIR/toolchains/$ACTIVE/env.sh"
+# The addon dir comes from the toolchain, never from the shell: env.sh sets
+# a linked toolchain's own addon dir, and every other toolchain uses the
+# rackup-managed one, as `rackup run`, `rackup which`, and reshim do.  An
+# inherited PLTADDONDIR must not point the shim at different user packages
+# than the rest of rackup sees.
+unset PLTADDONDIR
 if [[ -f "$ENV_FILE" ]]; then
   # shellcheck disable=SC1090
   . "$ENV_FILE"
 fi
-# Always use the rackup-managed addon dir, as `rackup run`, `rackup which`,
-# reshim, and `rackup upgrade` do.  A PLTADDONDIR inherited from the shell
-# or left in a stale env.sh must not point the shim at different user
-# packages than the rest of rackup sees.
-export PLTADDONDIR="$HOME_DIR/addons/$ACTIVE"
+if [[ -z "${PLTADDONDIR:-}" ]]; then
+  export PLTADDONDIR="$HOME_DIR/addons/$ACTIVE"
+fi
 if [[ ! -x "$TARGET" ]]; then
   ADDON_TARGET=""
   for _candidate in "$PLTADDONDIR"/bin/"$SHIM_NAME" "$PLTADDONDIR"/*/bin/"$SHIM_NAME"; do
@@ -319,7 +323,7 @@ EOF
   (define p (rackup-toolchain-exe-path id exe))
   (if (file-exists? p)
       p
-      (find-addon-bin-exe (rackup-addon-dir id) exe)))
+      (find-addon-bin-exe (toolchain-addon-dir id) exe)))
 
 (define (rackup-managed-shim? p)
   (and (link-exists? p)
@@ -344,7 +348,7 @@ EOF
     (and (file-exists? candidate) candidate)))
 
 (define (addon-bin-executables id)
-  (define addon-dir (rackup-addon-dir id))
+  (define addon-dir (toolchain-addon-dir id))
   (define (bin-dir-executables bin-dir)
     (if (directory-exists? bin-dir)
         (for/list ([p (in-list (directory-list bin-dir #:build? #t))]
