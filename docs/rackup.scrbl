@@ -260,19 +260,24 @@ eval "$(rackup shell 8.18)"
 
 @section[#:tag "run" #:style 'unnumbered]{@tt{rackup run}}
 
-Run a command under a specific toolchain without changing defaults or
-the shell environment.  Sets @tt{PLTHOME}, @tt{PLTADDONDIR},
-@tt{PATH}, and @tt{RACKUP_TOOLCHAIN} for the subprocess only.
+Run a command under a toolchain without changing defaults or the shell
+environment.  Sets @tt{PLTHOME}, @tt{PLTADDONDIR}, @tt{PATH}, and
+@tt{RACKUP_TOOLCHAIN} for the subprocess only, and exits with the
+command's exit status.
 
-@shell-block{rackup run <toolchain> -- <command> [args...]}
+@shell-block{rackup run [<toolchain>] [--] <command> [args...]}
 
-The @exec{--} separator is required between the toolchain spec and the
-command to run.
+When @tt{<toolchain>} is omitted, the active toolchain runs the command
+(@tt{RACKUP_TOOLCHAIN}, else the default).  Without @exec{--}, the first
+argument selects the toolchain only if it names an installed toolchain;
+otherwise the whole argument list is the command.  Use @exec{--} to make
+the split explicit, as scripts should.
 
 @subsection[#:tag "run-examples" #:style sub-style]{Examples}
 
 @shell-block|{
-rackup run 8.18 -- racket -e '(displayln (version))'
+rackup run racket -e '(displayln (version))'   # active toolchain
+rackup run 8.18 raco test .
 rackup run stable -- raco pkg install gregor
 rackup run snapshot -- raco test .
 }|
