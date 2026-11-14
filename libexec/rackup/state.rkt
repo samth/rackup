@@ -122,11 +122,26 @@
   (for/list ([kv (in-list env-vars)])
     (list (car kv) (cdr kv))))
 
-;; Environment for running a toolchain's own executables (raco/racket):
-;; the toolchain's recorded env vars plus its rackup-managed addon dir.
+;; Environment for running a toolchain's own executables (raco/racket),
+;; which must match what the shim dispatcher sets from env.sh so that
+;; `rackup run`, the shim, and rebuild's `make` all see the same user
+;; packages.  A linked toolchain keeps the addon dir recorded at link or
+;; reshim time -- the checkout's own (native) addon dir, where packages
+;; installed by running the checkout's racket directly live.  Installer
+;; toolchains, and a linked one whose probe found no addon dir, use the
+;; rackup-managed per-toolchain dir.
 (define (toolchain-runtime-env id)
-  (append (toolchain-env-vars id)
-          (list (cons "PLTADDONDIR" (path->string (rackup-addon-dir id))))))
+  (define meta (read-toolchain-meta id))
+  (define env-vars (meta->env-vars meta))
+  (define recorded-addon
+    (and (hash? meta)
+         (eq? (hash-ref meta 'kind #f) 'local)
+         (let ([p (assoc "PLTADDONDIR" env-vars)])
+           (and p (not (string=? (cdr p) "")) (cdr p)))))
+  (if recorded-addon
+      env-vars
+      (append (filter (lambda (kv) (not (equal? (car kv) "PLTADDONDIR"))) env-vars)
+              (list (cons "PLTADDONDIR" (path->string (rackup-addon-dir id)))))))
 
 ;; Read the compiled-file-roots from a toolchain's config.rktd.
 ;; Returns a list like (same) or ("/usr/lib/racket/compiled"), or

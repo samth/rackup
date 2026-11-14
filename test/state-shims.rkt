@@ -621,6 +621,14 @@
                                                 (path->string addon-dir))))
                   shim-out)
                  "shim dispatcher sets PLTADDONDIR")
+     ;; `rackup run` (and rebuild, migrate) use toolchain-runtime-env; for a
+     ;; linked toolchain it must name the same native addon dir as the shim,
+     ;; so packages installed by the checkout's own racket stay visible.
+     (let ([runtime-addons (for/list ([kv (in-list (toolchain-runtime-env linked-id))]
+                                      #:when (equal? (car kv) "PLTADDONDIR"))
+                             (cdr kv))])
+       (check-equal? runtime-addons (list (path->string addon-dir))
+                     "rackup run's PLTADDONDIR matches the shim's for a linked toolchain"))
 
      (define scheme-out
        (capture-output
