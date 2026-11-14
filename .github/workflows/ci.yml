@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  merge_group:
   workflow_dispatch:
 
 jobs:
@@ -764,3 +765,38 @@ jobs:
           sh scripts/install.sh -y --from-local . --prefix "$RACKUP_HOME"
           "$RACKUP_HOME/bin/rackup" install stable --set-default
           "$RACKUP_HOME/shims/racket" -e '(displayln "bootstrap ok")'
+
+  # Single required status check for branch protection and the merge queue.
+  # Fails if any other job failed or was cancelled; skipped jobs are fine.
+  ci-success:
+    name: CI Success
+    if: always()
+    needs:
+      - pages-build
+      - install-sh-e2e
+      - build-exe
+      - unit-tests
+      - docker-e2e-linux-distros
+      - docker-e2e-qemu-platform-probe
+      - docker-e2e-direct
+      - docker-e2e-legacy-6_0
+      - docker-e2e-prerelease
+      - native-i386-vm-103p1
+      - docker-e2e-bootstrap
+      - docker-e2e-upgrade-path
+      - docker-e2e-snapshot-utah
+      - docker-e2e-snapshot-northwestern
+      - docker-e2e-source-build-link
+      - macos-e2e
+      - macos-e2e-bootstrap
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check that every job passed
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          echo "$NEEDS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          if echo "$NEEDS" | jq -e '[.[].result] | any(. == "failure" or . == "cancelled")' >/dev/null; then
+            echo "Some CI jobs failed or were cancelled."
+            exit 1
+          fi
