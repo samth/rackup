@@ -26,6 +26,7 @@
          write-toolchain-meta!
          toolchain-env-vars
          toolchain-runtime-env
+         toolchain-addon-dir
          meta->env-vars
          env-vars->meta
          toolchain-env-var-entries
@@ -142,6 +143,11 @@
       env-vars
       (append (filter (lambda (kv) (not (equal? (car kv) "PLTADDONDIR"))) env-vars)
               (list (cons "PLTADDONDIR" (path->string (rackup-addon-dir id)))))))
+
+;; The addon dir a toolchain's racket uses when run through rackup (the
+;; PLTADDONDIR of toolchain-runtime-env), as a path.
+(define (toolchain-addon-dir id)
+  (string->path (cdr (assoc "PLTADDONDIR" (toolchain-runtime-env id)))))
 
 ;; Read the compiled-file-roots from a toolchain's config.rktd.
 ;; Returns a list like (same) or ("/usr/lib/racket/compiled"), or

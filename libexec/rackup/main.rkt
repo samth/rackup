@@ -622,7 +622,7 @@
   (define source-addon
     (cond
       [from-addon-arg (string->path from-addon-arg)]
-      [from-toolchain-arg (rackup-addon-dir (resolve-toolchain-or-die from-toolchain-arg))]
+      [from-toolchain-arg (toolchain-addon-dir (resolve-toolchain-or-die from-toolchain-arg))]
       [else (detect-native-addon-dir target-id)]))
   (define code
     (run-migrate! #:target-id target-id
