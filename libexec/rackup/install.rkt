@@ -36,6 +36,11 @@
          commit-state-change!
          detect-local-source-layout
          finalize-local-toolchain!
+         sync-linked-toolchain!
+         purge-linked-keyed-dirs!
+         current-toolchain-package-dirs-proc
+         list-pkg-dirs-program
+         prune-keyed-compiled-dirs!
          local-toolchain-id
          delete-toolchain-dir!
          resolve-toolchain-prefix)
@@ -719,7 +724,100 @@
   (commit-state-change!
    (register-toolchain! id meta)
    (when set-default? (set-default-toolchain! id)))
+  (touch-sync-stamp! id)
   meta)
+
+(define (touch-sync-stamp! id)
+  (define p (rackup-toolchain-sync-stamp id))
+  (when (directory-exists? (rackup-toolchain-dir id))
+    ;; Recreate rather than set the time: the shim compares sub-second
+    ;; mtimes, and file-or-directory-modify-seconds would round down.
+    (with-output-to-file p #:exists 'replace void)))
+
+;; A linked toolchain's shim writes `.zo` under `<dir>/<key>/<version>/compiled/`
+;; (its PLTCOMPILEDROOTS root is `<key>/@(version)`).  For every `<dir>/<key>`
+;; under `root` (e.g. `collects/racket/compiled/cs-local-dev`), delete each
+;; entry except the `keep` version's dir, or every entry when `keep` is #f.
+;; That covers dirs of other versions and the `compiled/` dir that rackup's
+;; earlier version-less key wrote directly under the key.  Skips `.git`,
+;; symlinks, and the inside of `compiled/` dirs.  Returns the number of
+;; entries removed.
+(define (prune-keyed-compiled-dirs! root key keep)
+  (let loop ([dir root])
+    (define target (build-path dir key))
+    (define here
+      (if (and (directory-exists? target) (not (link-exists? target)))
+          (for/sum ([name (in-list (try-or null (directory-list target)))]
+                    #:unless (and keep (equal? (path->string name) keep)))
+            (try-or 0
+              (delete-directory/files (build-path target name))
+              1))
+          0))
+    (+ here
+       (for/sum ([name (in-list (try-or null (directory-list dir)))])
+         (define sub (build-path dir name))
+         (if (and (not (member (path->string name) '(".git" "compiled")))
+                  (directory-exists? sub)
+                  (not (link-exists? sub)))
+             (loop sub)
+             0)))))
+
+;; Drop every keyed `.zo` a linked toolchain's shim wrote for code that the
+;; tree's own build compiles: the source tree, and every installed package
+;; (installation and user scope, including clones and links outside the
+;; tree).  The in-place build refreshes the default `compiled/` dirs of all
+;; of that code, but knows nothing about the keyed dirs, which the shim
+;; searches first.  A keyed `.zo` left from before the build would shadow
+;; the build's newer one whenever its own source is unchanged, even though
+;; it was compiled against older dependencies.  Keyed `.zo` of files that
+;; no package owns (scripts, projects) are left alone: no build step
+;; recompiles those.  Returns the number of entries removed.
+(define (purge-linked-keyed-dirs! id meta layout)
+  (define key (compiled-roots-key (hash-ref meta 'resolved-version #f)
+                                  (hash-ref meta 'variant #f)
+                                  (hash-ref meta 'requested-spec #f)))
+  (define tree-root
+    (let ([r (or (hash-ref layout 'source-root #f) (hash-ref layout 'plthome #f))])
+      (and r (simplify-path (path->directory-path (if (path? r) r (string->path r)))))))
+  (define (inside-tree? d)
+    (and tree-root
+         (let ([ds (path->string (simplify-path (path->directory-path d)))]
+               [ts (path->string tree-root)])
+           (string-prefix? ds ts))))
+  (cond
+    [(not key) 0]
+    [else
+     (+ (if (and tree-root (directory-exists? tree-root))
+            (prune-keyed-compiled-dirs! tree-root key #f)
+            0)
+        (for/sum ([d (in-list ((current-toolchain-package-dirs-proc) id '(installation user)))])
+          (define dp (string->path d))
+          (if (and (directory-exists? dp) (not (inside-tree? dp)))
+              (prune-keyed-compiled-dirs! dp key #f)
+              0)))]))
+
+;; Bring a linked toolchain in line with a source tree that was rebuilt
+;; outside rackup (plain `make`): purge shadowing keyed `.zo`, re-probe the
+;; binary, and refresh env.sh, the bin overlay, meta, and shims.  The shim
+;; dispatcher runs this when the tree's etc/config.rktd is newer than the
+;; toolchain's sync stamp.
+(define (sync-linked-toolchain! id)
+  (define meta (read-toolchain-meta id))
+  (cond
+    [(not (and (hash? meta) (eq? (hash-ref meta 'kind #f) 'local))) (void)]
+    [else
+     (define source-path (hash-ref meta 'source-path #f))
+     (when (and source-path (directory-exists? source-path))
+       (define layout (detect-local-source-layout source-path))
+       (define n (purge-linked-keyed-dirs! id meta layout))
+       (when (file-executable?/safe (build-path (string->path (hash-ref layout 'bin-dir)) "racket"))
+         (finalize-local-toolchain! id (hash-ref meta 'requested-spec id) layout
+                                    #:installed-at (hash-ref meta 'installed-at #f)
+                                    #:last-rebuilt-at (hash-ref meta 'last-rebuilt-at #f)))
+       (touch-sync-stamp! id)
+       (eprintf "rackup: ~a was rebuilt outside rackup; synced~a\n"
+                id
+                (if (positive? n) (format " (removed ~a stale compiled dir(s))" n) "")))]))
 
 (define (report-default-change! before after id explicit?)
   (when (and after (not (equal? before after)))
@@ -917,36 +1015,44 @@
    expr-text))
 
 ;; A small Racket program that prints the absolute source directory of
-;; every user-scope package, one per line.  Covers both catalog
-;; installs and `raco pkg install --link` installs.
-(define list-pkg-dirs-program
+;; every package in the given scopes, one per line.  Covers catalog
+;; installs, clones, and `raco pkg install --link` installs.
+(define (list-pkg-dirs-program scopes)
+  ;; No `with-pkg-lock`: `pkg-directory` consults other scopes, and doing
+  ;; that while holding one scope's lock fails with "lock mismatch".
   (string-join
-   '("(begin"
-     " (require pkg/lib racket/path)"
-     " (parameterize ([current-pkg-scope 'user])"
-     "  (with-pkg-lock/read-only"
-     "   (define cache (make-hash))"
-     "   (for ([name (in-list (sort (hash-keys (installed-pkg-table)) string<?))])"
-     "    (define dir (pkg-directory name #:cache cache))"
-     "    (when dir"
-     "     (displayln"
-     "      (path->string"
-     "       (simplify-path (path->complete-path dir)))))))))")
+   (list "(begin"
+         " (require pkg/lib racket/path)"
+         " (define cache (make-hash))"
+         (format " (for ([scope (in-list '~s)])" scopes)
+         "  (for ([name (in-list (sort (installed-pkg-names #:scope scope) string<?))])"
+         "   (define dir (parameterize ([current-pkg-scope scope])"
+         "                (pkg-directory name #:cache cache)))"
+         "   (when dir"
+         "    (displayln"
+         "     (path->string"
+         "      (simplify-path (path->complete-path dir))))))))")
    " "))
 
-;; Query the toolchain for absolute source directories of all
-;; user-scope packages (catalog and linked).  Returns a list of strings,
-;; or #f if the toolchain's racket cannot be invoked.
-(define (toolchain-user-package-dirs id)
+;; Query the toolchain for absolute source directories of all packages
+;; in `scopes` (catalog, cloned, and linked).  Returns a list of strings,
+;; empty if the toolchain's racket cannot be invoked.
+(define (toolchain-package-dirs id scopes)
   (define out
     (try-or #f
-      (capture-racket-eval-output id list-pkg-dirs-program)))
+      (capture-racket-eval-output id (list-pkg-dirs-program scopes))))
   (cond
     [(or (not out) (string-blank? out)) null]
     [else
      (for/list ([line (in-list (string-split out "\n"))]
                 #:when (not (string-blank? line)))
        (string-trim line))]))
+
+;; Seam for tests, whose fake toolchains cannot run `pkg/lib`.
+(define current-toolchain-package-dirs-proc (make-parameter toolchain-package-dirs))
+
+(define (toolchain-user-package-dirs id)
+  (toolchain-package-dirs id '(user)))
 
 ;; Recursively find directories named `target` (a string) under `root`
 ;; and call `proc` on each one.  Does not descend into the matched

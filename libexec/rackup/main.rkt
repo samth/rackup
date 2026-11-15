@@ -1336,6 +1336,9 @@
     [(list "help") (usage)]
     [(list "help" cmd) (dispatch (list cmd "--help"))]
     [(list "help" _ ...) (rackup-error "usage: rackup help [command]")]
+    ;; Internal: run by the shim dispatcher when a linked source tree was
+    ;; rebuilt outside rackup (see sync-linked-toolchain!).
+    [(list "sync-linked" id) (sync-linked-toolchain! id)]
     [(cons cmd rest)
      (define handler (hash-ref dispatch-table cmd #f))
      (cond

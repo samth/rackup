@@ -251,8 +251,9 @@
 ;;    "compiled/cs-local-dev/@(version)", which racket expands at
 ;;    startup (CS since 7.3, and BC) to the running binary's version.  A
 ;;    bare `make` that bumps the version therefore moves the toolchain to
-;;    a fresh dir, never to stale `.zo`, with no reshim.  `rackup rebuild`
-;;    deletes the dirs of other versions (see prune-keyed-compiled-dirs!).
+;;    a fresh dir, never to stale `.zo`, with no reshim.  A build also
+;;    removes the keyed dirs of the code it recompiles (see
+;;    purge-linked-keyed-dirs!).
 ;;  - Installer toolchains have a stable version, so they keep the
 ;;    version+variant key (e.g. "compiled/9.1-cs").  That also lets
 ;;    .zo-compatible variants (full/minimal at the same version) share a

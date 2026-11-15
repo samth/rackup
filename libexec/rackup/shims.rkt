@@ -97,6 +97,17 @@ BIN_DIR="$HOME_DIR/toolchains/$ACTIVE/bin"
 BIN_REAL="$(cd -P "$BIN_DIR" 2>/dev/null && pwd)" || BIN_REAL="$BIN_DIR"
 TARGET="$BIN_REAL/$SHIM_NAME"
 ENV_FILE="$HOME_DIR/toolchains/$ACTIVE/env.sh"
+# A linked source tree rebuilt outside rackup (every in-place `make`
+# rewrites etc/config.rktd) can leave this toolchain's keyed .zo older than
+# the build's own output, and the keyed dirs are searched first.  Let rackup
+# drop them and refresh the toolchain's metadata before running anything.
+# Only linked toolchains have the tree-config link, which points at that
+# file.
+if [[ -z "${_RACKUP_SYNCING:-}" &&
+  "$HOME_DIR/toolchains/$ACTIVE/tree-config" -nt "$HOME_DIR/toolchains/$ACTIVE/synced" &&
+  -x "$HOME_DIR/bin/rackup" ]]; then
+  _RACKUP_SYNCING=1 "$HOME_DIR/bin/rackup" sync-linked "$ACTIVE" >&2 || true
+fi
 # The addon dir comes from the toolchain, never from the shell: env.sh sets
 # a linked toolchain's own addon dir, and every other toolchain uses the
 # rackup-managed one, as `rackup run`, `rackup which`, and reshim do.  An
@@ -562,7 +573,20 @@ EOF
       (hash-set m (car u) (cdr u))))
   (unless (equal? new-meta meta*)
     (write-toolchain-meta! id new-meta))
+  (sync-tree-config-link! id meta)
   (sync-toolchain-env-file! id env-vars))
+
+;; Point `toolchains/<id>/tree-config` at the linked tree's
+;; etc/config.rktd, which every in-place `make` rewrites.  The shim
+;; dispatcher compares it with the toolchain's sync stamp to notice a
+;; build that rackup did not run (see sync-linked-toolchain!).
+(define (sync-tree-config-link! id meta)
+  (define plthome (hash-ref meta 'plthome #f))
+  (define link (rackup-toolchain-tree-config-link id))
+  (when (and (string? plthome) (directory-exists? (rackup-toolchain-dir id)))
+    (define target (build-path plthome "etc" "config.rktd"))
+    (unless (and (link-exists? link) (equal? (resolve-path link) target))
+      (replace-path! link target #:mode 'link))))
 
 (define (regenerate-env-files!)
   (for ([id (in-list (installed-toolchain-ids))])

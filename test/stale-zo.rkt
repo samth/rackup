@@ -282,6 +282,61 @@
   ;; Fresh link.
   (check-linked-checkout "fresh link" void)
 
+  ;; --- A keyed `.zo` of the running version must not outlive a rebuild ------
+  ;; The shim searches its keyed root first.  A keyed main_rkt.zo written
+  ;; before the tree was rebuilt is still newer than main.rkt, so Racket
+  ;; loads it even though it was compiled against the old dep.rkt, whose
+  ;; value it inlined.  The build refreshed only the default `compiled/`.
+  ;; Found with real builds (docs/plans/2026-11-14-linked-toolchain-real-build-matrix.md):
+  ;; the shim printed the old value while the direct binary printed the new.
+  (with-temp-rackup-home
+   (lambda (home)
+     (define src (build-path home "plt"))
+     (make-fake-checkout! src)
+     (quietly (lambda () (link-toolchain! "dev" (path->string src) '("--set-default"))))
+     (define id "local-dev")
+     (define lib (build-path src "lib"))
+     (define dep (build-path lib "dep.rkt"))
+     (define main (build-path lib "main.rkt"))
+     (define (write-dep! n)
+       (write-string-file dep (format "(module dep '#%kernel (#%provide k) (define-values (k) ~a))" n)))
+     (define (write-main! extra)
+       (write-string-file
+        main
+        (format "(module main '#%kernel (#%require \"dep.rkt\") (#%provide v) (define-values (v) k)~a)" extra)))
+     (define (raco-make! env)
+       (define-values (ok? out) (run-racket env "-N" "raco" "-l-" "raco" "make" (path->string main)))
+       (unless ok? (error 'raco-make! "raco make failed:\n~a" out)))
+     (define shim-env (list (cons "PLTCOMPILEDROOTS" (linked-roots id))))
+     (define (value env)
+       (define-values (ok? out)
+         (run-racket env "-e" (format "(display (dynamic-require (string->path ~s) 'v))" (path->string main))))
+       (and ok? (string-trim out)))
+     ;; The build compiles both modules into the default root.
+     (write-dep! 1)
+     (write-main! "")
+     (raco-make! '())
+     ;; The user edits main.rkt and compiles it through the shim: a keyed .zo.
+     (sleep 1.1)
+     (write-main! " (define-values (edited) 1)")
+     (raco-make! shim-env)
+     (define keyed-main (build-path lib (linked-key id) (version) "compiled" "main_rkt.zo"))
+     (check-true (file-exists? keyed-main) "the shim wrote a keyed main_rkt.zo")
+     ;; dep.rkt changes (as after `git pull`) and the tree is rebuilt.
+     (sleep 1.1)
+     (write-dep! 2)
+     (raco-make! '())
+     (check-equal? (value '()) "2" "the direct binary sees the rebuilt code")
+     ;; The trap: if this starts printing 2, Racket no longer loads the
+     ;; shadowing keyed .zo and the purge below guards nothing.
+     (check-equal? (value shim-env) "1" "fixture: the keyed .zo shadows the rebuilt one")
+     ;; `rackup rebuild` (make stubbed out) drops the keyed dirs it supersedes.
+     (parameterize ([current-rebuild-system*-proc (lambda (exe . args) #t)]
+                    [current-toolchain-package-dirs-proc (lambda (id scopes) null)])
+       (quietly (lambda () (cmd-rebuild '("dev")))))
+     (check-false (file-exists? keyed-main) "rebuild removed the keyed .zo")
+     (check-equal? (value shim-env) "2" "after rebuild the shim sees the rebuilt code")))
+
   ;; Upgrade from a rackup that wrote keyed-only roots into config.rktd
   ;; (#98): the next reshim must remove them.
   (check-linked-checkout
@@ -298,4 +353,21 @@
    "after rackup rebuild"
    (lambda (src key id)
      (parameterize ([current-rebuild-system*-proc (lambda (exe . args) #t)])
-       (quietly (lambda () (cmd-rebuild '("dev"))))))))
+       (quietly (lambda () (cmd-rebuild '("dev")))))))
+
+  ;; --- The package-directory query runs on a real racket -------------------
+  ;; rackup asks the toolchain's racket where every installed package
+  ;; lives.  The query must work with both scopes at once: holding one
+  ;; scope's package lock while `pkg-directory` consults another fails
+  ;; with "lock mismatch", which once made the purge skip every package.
+  (let ()
+    (define out (open-output-string))
+    (define err (open-output-string))
+    (define ok?
+      (parameterize ([current-output-port out] [current-error-port err])
+        (system* racket-exe "-e" (list-pkg-dirs-program '(installation user)))))
+    (check-true ok? (get-output-string err))
+    (define dirs (string-split (get-output-string out) "\n"))
+    (check-true (pair? dirs) "at least one installed package")
+    (for ([d (in-list dirs)])
+      (check-true (directory-exists? d) d))))

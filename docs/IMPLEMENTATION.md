@@ -166,7 +166,18 @@ Loading a `.zo` compiled for another version is a hard `version mismatch` error,
 
 The `@(version)` subdir removes the problem at its source. After any bump — through `rackup rebuild` or a bare `make` — the new binary reads `compiled/cs-local-dev/<new-version>/`, which holds no stale files, and falls back to `.`, the default dir that the build refreshed. No reshim is needed, since env.sh does not change.
 
-Each version leaves its keyed dirs behind, so `rackup rebuild` prunes them. After `make` — and also when `make` fails, since a failed build may already have bumped the version — it probes the built version, and `prune-keyed-compiled-dirs!` (in `rebuild.rkt`) empties every `<dir>/<key>` under the source root except the `<version>` subdir for that version. This also removes the version-less layout of earlier rackup versions. It skips `.git`, symlinks, and the inside of `compiled/` dirs.
+### Keyed dirs that a build supersedes
+
+The versioned root does not cover a change within one version. The in-place build recompiles the tree and every installed package (both scopes, including clones and links outside the tree) into the default `compiled/` dirs, but it knows nothing about the keyed dirs, which the shim searches first. Plain `racket` checks a `.zo` only against its own source file, so a keyed `.zo` written through the shim before the build keeps shadowing the build's newer one whenever its own source is unchanged, even though it was compiled against older dependencies. Real builds showed this: after `dep.rkt` changed and `make` ran, the tree's own binary computed the new value and the shim the old one.
+
+So a build removes every keyed dir of the code it covers. `purge-linked-keyed-dirs!` (in `install.rkt`) empties every `<dir>/<key>` (all versions, and the version-less layout of earlier rackup versions) under the source root and under each installed package's directory, which it gets by running `list-pkg-dirs-program` on the toolchain's racket (`current-toolchain-package-dirs-proc` is the seam for tests). The walk skips `.git`, symlinks, and the inside of `compiled/` dirs. Keyed `.zo` of files that no package owns (scripts, projects) are kept: no build step recompiles those, and the versioned root already protects them across versions.
+
+Two callers run the purge:
+
+- `rackup rebuild`, after `make`, and also when `make` fails, since a failed build has usually replaced part of the default dirs already.
+- `sync-linked-toolchain!`, for a build that rackup did not run. Every in-place `make` rewrites the tree's `etc/config.rktd`. Each linked toolchain has a `tree-config` symlink to that file (kept by `refresh-local-toolchain!`, since the bin dir is an overlay and does not lead back to the tree) and a `synced` stamp file that link, rebuild, and sync refresh. The shim dispatcher compares the two with one `-nt` test and, when the config is newer, runs the hidden `rackup sync-linked <id>` command before the tool. That purges, re-probes the binary, and refreshes meta, env.sh, the overlay, and shims, so `rackup list` also shows the new version. `_RACKUP_SYNCING` keeps the sync's own subprocesses from recursing, and a failed or missing rackup never blocks the tool. A toolchain linked by an older rackup has no stamp and syncs once on first use.
+
+Known limits, all present in stock Racket whenever two compiled roots hold the same module: compiling with the tree's own `raco make` or `raco setup` (not `make`) after compiling the same package through the shim leaves the keyed `.zo` in place until the next build or the next `raco make`/`raco setup` through the shim (the compilation manager does check dependencies); and a shim command that runs while `make` is still going can sync before the build finishes.
 
 `rebuild` also runs `make` with `PLTADDONDIR` set to `toolchain-addon-dir`, the value the shim and `rackup run` use (the checkout's native addon dir when the probe found one).
 

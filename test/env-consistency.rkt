@@ -255,6 +255,73 @@
      (check-false (member "newtool" (hash-ref (read-toolchain-meta id) 'executables)))
      (check-false (link-exists? (build-path (rackup-shims-dir) "newtool")) "and unshimmed")))
 
+  ;; --- #6: the shim asks rackup to sync after an outside build -----------
+  ;; Every in-place `make` rewrites the tree's etc/config.rktd.  When that
+  ;; file is newer than the toolchain's sync stamp, the dispatcher runs
+  ;; `rackup sync-linked <id>` once before the tool; never for installer
+  ;; toolchains, and never from inside a sync.
+  (with-temp-rackup-home
+   (lambda (home)
+     (define src (link-fake! home "outside"))
+     (define id "local-outside")
+     (define stamp (rackup-toolchain-sync-stamp id))
+     (define cfg (build-path src "racket" "etc" "config.rktd"))
+     (define calls (build-path home "sync-calls"))
+     (make-directory* (build-path src "racket" "etc"))
+     (write-string-file cfg "#hash()")
+     (make-directory* (build-path home "bin"))
+     ;; Stand-in for rackup: record the call and refresh the stamp.
+     (write-script! (build-path home "bin" "rackup")
+                    (string-append "#!/usr/bin/env bash\n"
+                                   "echo \"$* syncing=${_RACKUP_SYNCING:-}\" >> \"" (path->string calls) "\"\n"
+                                   "echo sync-message >&2\n"
+                                   "touch \"" (path->string stamp) "\"\n"))
+     (define (sync-calls) (if (file-exists? calls) (file->lines calls) '()))
+     (define now (current-seconds))
+     (define (ages! #:cfg c #:stamp s)
+       (file-or-directory-modify-seconds cfg (- now c))
+       (when s (file-or-directory-modify-seconds stamp (- now s))))
+     (check-true (file-exists? stamp) "link writes the stamp")
+     (ages! #:cfg 200 #:stamp 100)
+     (check-equal? (first (run (shim "print-env"))) 0)
+     (check-equal? (sync-calls) '() "config older than the stamp: no sync")
+     (ages! #:cfg 100 #:stamp 200)
+     (define r (run (shim "print-env")))
+     (check-equal? (first r) 0)
+     (check-true (string-prefix? (second r) "PLTADDONDIR=") "sync output stays off stdout")
+     (check-true (string-contains? (third r) "sync-message"))
+     (check-equal? (sync-calls) (list (format "sync-linked ~a syncing=1" id))
+                   "config newer than the stamp: one sync")
+     (run (shim "print-env"))
+     (check-equal? (length (sync-calls)) 1 "the refreshed stamp stops further syncs")
+     (ages! #:cfg 100 #:stamp 200)
+     (run (shim "print-env") #:env (list (cons #"_RACKUP_SYNCING" #"1")))
+     (check-equal? (length (sync-calls)) 1 "no sync from inside a sync")
+     ;; A toolchain linked before the stamp existed syncs once.
+     (delete-file stamp)
+     (run (shim "print-env"))
+     (check-equal? (length (sync-calls)) 2 "a missing stamp counts as out of date")
+     ;; A failing or missing rackup must not stop the tool.
+     (ages! #:cfg 100 #:stamp 200)
+     (write-script! (build-path home "bin" "rackup") "#!/usr/bin/env bash\nexit 3\n")
+     (check-equal? (first (run (shim "print-env"))) 0 "a failed sync does not block the tool")
+     (delete-file (build-path home "bin" "rackup"))
+     (check-equal? (first (run (shim "print-env"))) 0 "nor does a missing rackup")))
+
+  (with-temp-rackup-home
+   (lambda (home)
+     (setup-installer-toolchain!)
+     (define calls (build-path home "sync-calls"))
+     (define etc (build-path (rackup-toolchain-install-dir installer-id) "etc"))
+     (make-directory* etc)
+     (write-string-file (build-path etc "config.rktd") "#hash()")
+     (make-directory* (build-path home "bin"))
+     (write-script! (build-path home "bin" "rackup")
+                    (string-append "#!/usr/bin/env bash\necho called >> \""
+                                   (path->string calls) "\"\n"))
+     (check-equal? (first (run (shim "print-env"))) 0)
+     (check-false (file-exists? calls) "installer toolchains never sync")))
+
   ;; --- #7: the shim and rackup agree on the active toolchain --------------
   (with-temp-rackup-home
    (lambda (home)

@@ -43,6 +43,8 @@
          rackup-toolchain-bin-link
          rackup-toolchain-exe-path
          rackup-toolchain-env-file
+         rackup-toolchain-sync-stamp
+         rackup-toolchain-tree-config-link
          rackup-addon-dir
          ensure-rackup-layout!)
 
@@ -134,7 +136,15 @@
   [rackup-toolchain-install-dir  "install"]
   [rackup-toolchain-meta-file    "meta.rktd"]
   [rackup-toolchain-bin-link     "bin"]
-  [rackup-toolchain-env-file     "env.sh"])
+  [rackup-toolchain-env-file     "env.sh"]
+  ;; Touched whenever rackup has brought a linked toolchain's state in
+  ;; line with its source tree (link, rebuild, sync).  The shim compares
+  ;; it with the tree's etc/config.rktd, which every in-place `make`
+  ;; rewrites.
+  [rackup-toolchain-sync-stamp   "synced"]
+  ;; A linked toolchain's symlink to that file; the bin dir is an overlay,
+  ;; so the shim cannot find the tree from it.
+  [rackup-toolchain-tree-config-link "tree-config"])
 
 (define (rackup-toolchain-exe-path id exe) (build-path (rackup-toolchain-bin-link id) exe))
 (define (rackup-addon-dir id)              (build-path (rackup-addons-dir) id))

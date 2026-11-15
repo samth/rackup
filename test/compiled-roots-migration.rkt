@@ -201,7 +201,7 @@
        (quietly (lambda () (cmd-rebuild '("premake")))))
      (check-false roots-at-make "make ran without the keyed root in config.rktd")))
 
-  ;; --- Rebuild prunes the keyed dirs of other versions ---------------------
+  ;; --- Rebuild removes the keyed dirs the build supersedes -----------------
   (with-temp-rackup-home
    (lambda (home)
      (define src (link-fake! home "prune"))
@@ -215,14 +215,17 @@
      (populate-keyed-dirs! src key "9.99.0.0")
      (populate-keyed-dirs! src key "9.99.0.1")
      (rebuild! "prune")
-     (check-equal? (keyed-contents src key) '(("9.99.0.1") ("9.99.0.1") ("9.99.0.1"))
-                   "rebuild keeps only the current version's dir")
+     ;; `make` refreshes the default dirs of everything in the tree, so a
+     ;; keyed `.zo` of any version, the current one included, could only
+     ;; shadow newer output.
+     (check-equal? (keyed-contents src key) '(() () ())
+                   "rebuild removes every keyed dir in the tree, the current version's too")
      (check-true (file-exists? default-zo) "default compiled dir untouched")
      ;; Version bump (as after `git pull`): the old version's dir goes.
      (set-fake-version! src "9.99.0.2")
      (populate-keyed-dirs! src key "9.99.0.2")
      (rebuild! "prune")
-     (check-equal? (keyed-contents src key) '(("9.99.0.2") ("9.99.0.2") ("9.99.0.2")))
+     (check-equal? (keyed-contents src key) '(() () ()))
      (check-true (string-contains? (env-sh id) (string-append key "/@(version):."))
                  "env.sh keeps the versioned root with the `.` fallback")))
 
@@ -235,4 +238,61 @@
      (set-fake-version! src "9.99.0.3")
      (check-exn exn:fail? (lambda () (rebuild! "failprune" #:make-ok? #f)))
      (check-equal? (keyed-contents src key) '(() () ())
-                   "failed make after a bump still prunes the old version"))))
+                   "failed make after a bump still prunes the old version")))
+
+  ;; --- Rebuild also purges installed packages outside the tree --------------
+  ;; `make` recompiles every installed package (clones and links in either
+  ;; scope live outside the tree), so their keyed dirs go too.  A directory
+  ;; no package owns keeps its keyed `.zo`: no build step recompiles it.
+  (with-temp-rackup-home
+   (lambda (home)
+     (define src (link-fake! home "pkgs"))
+     (define id "local-pkgs")
+     (define key (linked-key id))
+     (define (keyed-zo! dir version)
+       (define c (build-path dir key version "compiled"))
+       (make-directory* c)
+       (write-string-file (build-path c "main_rkt.zo") "zo")
+       (build-path dir key))
+     (define pkg (build-path home "clones" "some-pkg"))
+     (define scripts (build-path home "scripts"))
+     (define pkg-keyed (keyed-zo! (build-path pkg "sub") "9.99.0.1"))
+     (define scripts-keyed (keyed-zo! scripts "9.99.0.1"))
+     (define asked #f)
+     (parameterize ([current-toolchain-package-dirs-proc
+                     (lambda (tc scopes)
+                       (set! asked (list tc scopes))
+                       (list (path->string pkg) "/nonexistent/pkg-dir"))])
+       (rebuild! "pkgs"))
+     (check-equal? asked (list id '(installation user)) "both package scopes are queried")
+     (check-equal? (directory-list pkg-keyed) '() "an installed package's keyed dir is emptied")
+     (check-equal? (map path->string (directory-list scripts-keyed)) '("9.99.0.1")
+                   "a directory that no package owns is left alone")))
+
+  ;; --- sync after a build that rackup did not run ---------------------------
+  ;; Plain `make` in the checkout: the shim asks for a sync when the tree's
+  ;; etc/config.rktd is newer than the toolchain's stamp.
+  (with-temp-rackup-home
+   (lambda (home)
+     (define src (link-fake! home "sync"))
+     (define id "local-sync")
+     (define key (linked-key id))
+     (define stamp (rackup-toolchain-sync-stamp id))
+     (check-true (file-exists? stamp) "link writes the sync stamp")
+     (populate-keyed-dirs! src key "9.99.0.1")
+     (set-fake-version! src "9.99.0.2")
+     (file-or-directory-modify-seconds stamp 1000)
+     (define err (open-output-string))
+     (parameterize ([current-toolchain-package-dirs-proc (lambda (tc scopes) null)]
+                    [current-output-port (open-output-string)]
+                    [current-error-port err])
+       (sync-linked-toolchain! id))
+     (check-equal? (keyed-contents src key) '(() () ()) "keyed dirs of the tree are purged")
+     (check-equal? (hash-ref (read-toolchain-meta id) 'resolved-version #f) "9.99.0.2"
+                   "meta is re-probed")
+     (check-true (> (file-or-directory-modify-seconds stamp) 1000) "the stamp is refreshed")
+     (check-true (string-contains? (get-output-string err) "local-sync was rebuilt outside rackup")
+                 "the user is told, on stderr")
+     (check-true (string-contains? (env-sh id) (string-append key "/@(version):.")))
+     ;; Not a linked toolchain, or unknown: nothing to do, no error.
+     (check-not-exn (lambda () (sync-linked-toolchain! "local-nope"))))))

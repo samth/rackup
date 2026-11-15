@@ -15,7 +15,6 @@
 
 (provide rebuild-toolchain!
          rebuild-plan
-         prune-keyed-compiled-dirs!
          current-rebuild-system*-proc
          current-rebuild-displayln-proc)
 
@@ -98,33 +97,6 @@
                               (string->bytes/utf-8 (path->string (toolchain-addon-dir id))))
   env)
 
-;; A linked toolchain's shim writes `.zo` for modules in its own source
-;; tree under `<dir>/<key>/<version>/compiled/` (its PLTCOMPILEDROOTS root
-;; is `<key>/@(version)`).  For every `<dir>/<key>` under `root` (e.g.
-;; `collects/racket/compiled/cs-local-dev`), delete each entry except the
-;; `keep` version's dir: dirs of older versions, and the `compiled/` dir
-;; that rackup's earlier version-less key wrote directly under the key.
-;; Skips `.git`, symlinks, and the inside of `compiled/` dirs.  Returns
-;; the number of entries removed.
-(define (prune-keyed-compiled-dirs! root key keep)
-  (let loop ([dir root])
-    (define target (build-path dir key))
-    (define here
-      (if (directory-exists? target)
-          (for/sum ([name (in-list (directory-list target))]
-                    #:unless (equal? (path->string name) keep))
-            (delete-directory/files (build-path target name))
-            1)
-          0))
-    (+ here
-       (for/sum ([name (in-list (try-or null (directory-list dir)))])
-         (define sub (build-path dir name))
-         (if (and (not (member (path->string name) '(".git" "compiled")))
-                  (directory-exists? sub)
-                  (not (link-exists? sub)))
-             (loop sub)
-             0)))))
-
 (define (resolve-rebuild-target name)
   (cond
     [(or (not name) (string-blank? name))
@@ -170,24 +142,19 @@
   (define argv (make-argv resolved-jobs make-args))
   (define system*-proc (current-rebuild-system*-proc))
   (define displayln-proc (current-rebuild-displayln-proc))
-  (define tree-root (or source-root cwd))
   (define key (compiled-roots-key (hash-ref meta 'resolved-version #f)
                                   (hash-ref meta 'variant #f)
                                   (hash-ref meta 'requested-spec #f)))
-  ;; Drop the keyed dirs of versions other than the one just built, so
-  ;; each version bump does not leave a full copy of the tree's `.zo`
-  ;; behind.  Runs even when `make` fails, since a failed build may
-  ;; already have bumped the version; it keeps whatever version the
-  ;; binary now reports.
-  (define (prune-old-keyed-dirs!)
-    (define-values (version _variant _addon)
-      (reprobe-local-toolchain (hash-ref layout 'bin-dir)))
-    (when (and version key)
-      (define n (prune-keyed-compiled-dirs! tree-root key version))
-      (when (positive? n)
-        (displayln-proc
-         (format "Removed ~a old compiled dir(s) under ~a in ~a (keeping ~a)"
-                 n key tree-root version)))))
+  ;; `make` refreshes the default `compiled/` dirs of the tree and of every
+  ;; installed package; drop the keyed `.zo` the shim wrote for that code
+  ;; (all versions), so none shadows the build's newer output.  Runs even
+  ;; when `make` fails, since a failed build has usually replaced part of
+  ;; the default dirs already.
+  (define (purge-keyed-dirs!)
+    (define n (purge-linked-keyed-dirs! id meta layout))
+    (when (positive? n)
+      (displayln-proc
+       (format "Removed ~a keyed compiled dir(s) of ~a that the build supersedes" n id))))
   (cond
     [(and pull? dry-run?)
      (displayln-proc (format "+ git -C ~a pull --ff-only" (or source-root cwd)))]
@@ -204,7 +171,7 @@
        (unset-toolchain-compiled-file-roots! (string->path (hash-ref layout 'bin-dir))
                                              (list key)))
      (with-handlers ([exn:fail? (lambda (e)
-                                  (prune-old-keyed-dirs!)
+                                  (purge-keyed-dirs!)
                                   (raise e))])
        ;; bin/rackup clears PLTADDONDIR, so without this the build's
        ;; `raco setup` would use the native addon dir and miss
@@ -212,7 +179,7 @@
        ;; the managed dir, and could drop their launchers.
        (parameterize ([current-environment-variables (build-environment id)])
          (run-make! cwd argv system*-proc displayln-proc)))
-     (prune-old-keyed-dirs!)])
+     (purge-keyed-dirs!)])
   (cond
     [(or dry-run? (not update-meta?)) id]
     [else
