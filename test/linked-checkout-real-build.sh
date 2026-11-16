@@ -218,6 +218,10 @@ EOF
   set_k "$name" "$k"
 }
 set_k() {
+  # compiler/cm trusts a .zo whose timestamp is not older than its source,
+  # with one-second resolution.  An edit in the same second as the last
+  # compile would look up to date, so let the clock move on first.
+  sleep 1
   printf '#lang racket/base\n(provide k)\n(define k %s)\n' "$2" >"$PKGS_SRC/$1/dep.rkt"
 }
 # Every actor prints `want` for (dynamic-require '<pkg>/main 'v).
