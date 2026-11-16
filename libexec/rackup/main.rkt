@@ -947,6 +947,8 @@
                   "If <name> is omitted, the active or default toolchain is used."
                   "Anything after `--` is passed verbatim to make, e.g.:"
                   "  rackup rebuild dev -- CPUS=8 PKGS=\"main-distribution\""
+                  "Without a terminal, add PKG_UPDATE_OPTIONS=\"--multi-clone convert\""
+                  "if raco pkg cancels at a \"Convert ... to clones\" question."
                   #:once-each
                   [("--pull") "Run `git pull --ff-only` in the source tree first"
                               (set! pull? #t)]
