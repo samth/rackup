@@ -1,13 +1,16 @@
 #lang racket/base
 
-(require racket/format
+(require racket/file
+         racket/format
          racket/future
          racket/string
          racket/system
          "error.rkt"
          "install.rkt"
+         "paths.rkt"
          "shims.rkt"
          "state.rkt"
+         "state-lock.rkt"
          "text.rkt")
 
 (provide rebuild-toolchain!
@@ -85,6 +88,15 @@
     (unless (apply system*-proc make-exe (cdr argv))
       (rackup-error "make failed in ~a" cwd))))
 
+;; Environment for the rebuild's `make`: the current one plus the
+;; toolchain's addon dir, the same PLTADDONDIR the shim and `rackup run`
+;; use (for a linked toolchain, the checkout's own addon dir).
+(define (build-environment id)
+  (define env (environment-variables-copy (current-environment-variables)))
+  (environment-variables-set! env #"PLTADDONDIR"
+                              (string->bytes/utf-8 (path->string (toolchain-addon-dir id))))
+  env)
+
 (define (resolve-rebuild-target name)
   (cond
     [(or (not name) (string-blank? name))
@@ -130,27 +142,9 @@
   (define argv (make-argv resolved-jobs make-args))
   (define system*-proc (current-rebuild-system*-proc))
   (define displayln-proc (current-rebuild-displayln-proc))
-  ;; Isolate compiled output for git source checkouts (default on).  Write
-  ;; config.rktd BEFORE `make` so the build -- which runs with no
-  ;; PLTCOMPILEDROOTS -- writes a complete keyed dir instead of the shared
-  ;; default `compiled/`, and record 'keyed-only so the shim env drops the
-  ;; `.` fallback.  Skipped on dry runs (no side effects).
-  (define scheme
-    (cond
-      [(or dry-run? (rackup-testing?)
-           (not (git-work-tree? (or source-root cwd) system*-proc)))
-       (hash-ref meta 'compiled-roots-scheme #f)]
-      [else
-       (define key (compiled-roots-key (hash-ref meta 'resolved-version #f)
-                                       (hash-ref meta 'variant #f)
-                                       (hash-ref meta 'requested-spec #f)))
-       (cond
-         [(and key
-               (memq (set-toolchain-compiled-file-roots!
-                      (string->path (hash-ref layout 'bin-dir)) (list key))
-                     '(written unchanged)))
-          'keyed-only]
-         [else (hash-ref meta 'compiled-roots-scheme #f)])]))
+  (define key (compiled-roots-key (hash-ref meta 'resolved-version #f)
+                                  (hash-ref meta 'variant #f)
+                                  (hash-ref meta 'requested-spec #f)))
   (cond
     [(and pull? dry-run?)
      (displayln-proc (format "+ git -C ~a pull --ff-only" (or source-root cwd)))]
@@ -159,13 +153,23 @@
   (cond
     [dry-run?
      (displayln-proc (format "+ cd ~a && ~a" cwd (string-join argv " ")))]
-    [else (run-make! cwd argv system*-proc displayln-proc)])
+    [else
+     ;; Undo an earlier keyed-only migration before `make`, so the
+     ;; build's later steps (which read the tree's config.rktd) do not
+     ;; load stale keyed `.zo`.
+     (when key
+       (unset-toolchain-compiled-file-roots! (string->path (hash-ref layout 'bin-dir))
+                                             (list key)))
+     ;; Build with the toolchain's own environment, so the build's
+     ;; `raco setup` sees the same user-scope packages as the shim and
+     ;; `rackup run`.
+     (parameterize ([current-environment-variables (build-environment id)])
+       (run-make! cwd argv system*-proc displayln-proc))])
   (cond
     [(or dry-run? (not update-meta?)) id]
     [else
      (finalize-local-toolchain! id (hash-ref meta 'requested-spec id) layout
                                 #:installed-at (hash-ref meta 'installed-at #f)
-                                #:last-rebuilt-at (current-iso8601)
-                                #:compiled-roots-scheme scheme)
+                                #:last-rebuilt-at (current-iso8601))
      (displayln-proc (format "Rebuilt ~a" id))
      id]))

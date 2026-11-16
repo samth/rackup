@@ -180,7 +180,7 @@
      (path->string source-addon)
      (path->string source-pkgs-file)
      (if (null? avail) "(none)" (string-join avail ", "))))
-  (define target-addon (rackup-addon-dir target-id))
+  (define target-addon (toolchain-addon-dir target-id))
   (define staged-version-dir (build-path target-addon from-version))
   ;; If the source already lives under the target addon dir (e.g.
   ;; --from-addon points at it), `raco pkg migrate` can read it directly.
