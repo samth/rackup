@@ -335,6 +335,15 @@ If @tt{<name>} is omitted, the active toolchain (from
 @tt{RACKUP_TOOLCHAIN} or the default) is used.  Anything after
 @tt{--} is appended verbatim to the @tt{make} argv.
 
+When a repository you have cloned gains a new package, the build's
+@tt{raco pkg update --all} asks whether to convert the other packages
+from that repository to clones too.  In a terminal you answer it as
+usual.  Without a terminal (CI, scripts, agents) the question reads
+end-of-file and cancels the build, just as plain @tt{make} would.  To
+answer it up front, pass the option through to @tt{make}, e.g.
+@tt{rackup rebuild dev -- PKG_UPDATE_OPTIONS="--multi-clone convert"}
+(or @tt{fail} to stop instead).
+
 @subsection[#:tag "rebuild-flags" #:style sub-style]{Flags}
 
 @opt-table[

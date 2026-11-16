@@ -59,6 +59,17 @@
           (if user-set-cpus? '() (list (format "CPUS=~a" jobs)))
           user-make-args))
 
+;; argv as a shell-pasteable string, for the `+ cd ... && make ...` echo.
+(define (argv->display argv)
+  (string-join
+   (for/list ([a (in-list argv)])
+     (cond
+       [(not (regexp-match? #rx"[ \t\"']" a)) a]
+       [(regexp-match #rx"^([A-Za-z_][A-Za-z0-9_]*=)(.*)$" a)
+        => (lambda (m) (string-append (cadr m) "\"" (caddr m) "\""))]
+       [else (string-append "\"" a "\"")]))
+   " "))
+
 (define (git-work-tree? path system*-proc)
   (define git (find-executable-path "git"))
   (cond
@@ -83,7 +94,7 @@
   (define make-exe (find-executable-path "make"))
   (unless make-exe
     (rackup-error "rackup rebuild requires `make` on PATH"))
-  (displayln-proc (format "+ cd ~a && ~a" cwd (string-join argv " ")))
+  (displayln-proc (format "+ cd ~a && ~a" cwd (argv->display argv)))
   (parameterize ([current-directory cwd])
     (and (apply system*-proc make-exe (cdr argv)) #t)))
 
@@ -155,7 +166,7 @@
      (run-git-pull! (or source-root cwd) system*-proc displayln-proc)])
   (cond
     [dry-run?
-     (displayln-proc (format "+ cd ~a && ~a" cwd (string-join argv " ")))]
+     (displayln-proc (format "+ cd ~a && ~a" cwd (argv->display argv)))]
     [else
      ;; Undo an earlier keyed-only migration before `make`, so the
      ;; build's later steps (which read the tree's config.rktd) do not

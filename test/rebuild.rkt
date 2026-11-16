@@ -130,6 +130,15 @@
      (check-true (regexp-match? #rx"make -j3 CPUS=3" out))
      (check-true (regexp-match? #rx"PKGS=racket-lib" out))
      (check-true (regexp-match? (regexp (path->string src)) out))
+     ;; rackup leaves raco pkg's clone-conversion question to make.
+     (check-false (regexp-match? #rx"PKG_UPDATE_OPTIONS" out))
+
+     ;; Arguments with spaces are echoed shell-quoted.
+     (define out-pkg
+       (with-output-to-string
+        (lambda ()
+          (cmd-rebuild '("rebuild-test" "--dry-run" "--" "PKG_UPDATE_OPTIONS=--multi-clone convert")))))
+     (check-true (regexp-match? #rx"PKG_UPDATE_OPTIONS=\"--multi-clone convert\"" out-pkg))
 
      (define out2
        (with-output-to-string
