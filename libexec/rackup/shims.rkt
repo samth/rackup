@@ -568,7 +568,60 @@ EOF
       (hash-set m (car u) (cdr u))))
   (unless (equal? new-meta meta*)
     (write-toolchain-meta! id new-meta))
-  (sync-toolchain-env-file! id env-vars))
+  (sync-toolchain-env-file! id env-vars)
+  (warn-stranded-managed-packages! id meta env-vars))
+
+;; The PLTADDONDIR in an env-var alist (name . value), or #f.
+(define (env-vars-addon-dir env-vars)
+  (define p (assoc "PLTADDONDIR" env-vars))
+  (and p (cdr p)))
+
+;; User-scope packages of a linked toolchain that sit in its rackup-managed
+;; addon dir (~/.rackup/addons/<id>).  Earlier rackup versions used that dir
+;; for a linked toolchain in `rackup run` and `rackup rebuild` (the shim
+;; already used the checkout's own addon dir), so packages installed through
+;; them are no longer visible.  Returns a sorted list of package names.
+(define (stranded-managed-packages id env-vars)
+  (define native (env-vars-addon-dir env-vars))
+  (define managed (rackup-addon-dir id))
+  (cond
+    [(or (not native)
+         (not (directory-exists? managed))
+         (equal? (simple-form-path (string->path native)) (simple-form-path managed)))
+     null]
+    [else
+     (sort
+      (remove-duplicates
+       (for*/list ([sub (in-list (try-or null (directory-list managed)))]
+                   [db (in-value (try-or #f (read-rktd-file
+                                             (build-path managed sub "pkgs" "pkgs.rktd")
+                                             #f)))]
+                   #:when (hash? db)
+                   [name (in-hash-keys db)])
+         (format "~a" name)))
+      string<?)]))
+
+(define (warn-stranded-managed-packages! id meta env-vars)
+  (define names (stranded-managed-packages id env-vars))
+  (unless (null? names)
+    (define managed (path->string (rackup-addon-dir id)))
+    (eprintf
+     (string-append
+      "rackup: warning: linked toolchain ~a now uses the checkout's own addon dir\n"
+      "  (~a), but these user packages are still in ~a,\n"
+      "  where earlier rackup versions put packages installed through `rackup run`:\n"
+      "    ~a\n"
+      "  Reinstall the ones you need (pass a directory instead of the name for a\n"
+      "  package that was installed from one), for example:\n"
+      "    rackup run ~a -- raco pkg install -u --auto ~a\n"
+      "  then remove ~a to silence this warning.\n")
+     (hash-ref meta 'requested-spec id)
+     (env-vars-addon-dir env-vars)
+     managed
+     (string-join names " ")
+     (hash-ref meta 'requested-spec id)
+     (string-join names " ")
+     managed)))
 
 (define (regenerate-env-files!)
   (for ([id (in-list (installed-toolchain-ids))])

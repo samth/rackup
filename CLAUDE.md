@@ -53,6 +53,19 @@ test/docker-test-fresh-install.sh \
 
 Run `test/docker-test-fresh-install.sh --help` for all options.
 
+### Linked checkout E2E (real in-place build)
+
+Builds Racket in place from a git checkout and checks that a linked
+toolchain, the checkout's own `make`, and its own binary share plain
+`compiled/` (no double compiles, no stale `.zo`), including a version bump
+and the upgrade from an older rackup. Matches the "Linked checkout E2E" CI
+job; the build takes several minutes.
+
+```bash
+git worktree add --detach /tmp/old-rackup d907bc525de41acb901bd62c9ed3d097a07eeea1
+test/linked-checkout-real-build.sh --work /tmp/linked --old-rackup /tmp/old-rackup
+```
+
 ## Plans
 
 Archive all plan documents in `docs/plans/` with dated filenames (e.g., `2026-03-13-feature-name.md`). This includes plans created during brainstorming, implementation plans, research documents, and review documents.

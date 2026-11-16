@@ -255,6 +255,34 @@
                    "user-choice"
                    "a user-set value is kept")))
 
+  ;; --- #4d: reshim reports packages stranded in the managed addon dir -------
+  ;; Earlier rackup versions put packages installed through `rackup run` for
+  ;; a linked toolchain under ~/.rackup/addons/<id>; now that every path uses
+  ;; the checkout's own addon dir, reshim names them and how to reinstall.
+  (with-temp-rackup-home
+   (lambda (home)
+     (link-fake! home "stranded")
+     (define id "local-stranded")
+     (define (reshim-stderr)
+       (define err (open-output-string))
+       (parameterize ([current-output-port (open-output-string)]
+                      [current-error-port err])
+         (with-state-lock (reshim!)))
+       (get-output-string err))
+     (check-false (string-contains? (reshim-stderr) "user packages are still in")
+                  "no warning without stranded packages")
+     (define db (build-path (rackup-addon-dir id) "development" "pkgs" "pkgs.rktd"))
+     (make-directory* (build-path (rackup-addon-dir id) "development" "pkgs"))
+     (write-rktd-file db (hash "threading-lib" #f "gregor" #f))
+     (define warned (reshim-stderr))
+     (check-true (string-contains? warned "user packages are still in") warned)
+     (check-true (string-contains? warned "gregor threading-lib") warned)
+     (check-true (string-contains? warned "rackup run stranded -- raco pkg install -u --auto")
+                 warned)
+     (delete-directory/files (rackup-addon-dir id))
+     (check-false (string-contains? (reshim-stderr) "user packages are still in")
+                  "removing the managed dir silences the warning")))
+
   ;; --- #5: reshim keeps a linked toolchain's bin overlay in sync ----------
   (with-temp-rackup-home
    (lambda (home)

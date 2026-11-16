@@ -54,6 +54,12 @@ rackup link dev ~/src/racket             # link a local Racket build
 rackup link dev ~/src/racket --set-default
 ```
 
+A linked checkout uses its own `compiled/` directories and its own user-scope
+packages, exactly as when you run its `bin/racket` and `raco` directly, so
+`make` in the checkout and the shims always agree. See
+[Upgrading linked checkouts](#upgrading-linked-checkouts) if you linked one
+with an earlier rackup.
+
 ### Other commands
 
 ```bash
@@ -113,6 +119,55 @@ rackup reshim --remove-mac-apps
 
 This is off by default and macOS-only; `rackup uninstall` removes the wrappers
 along with everything else.
+
+## Upgrading linked checkouts
+
+Earlier rackup versions gave a linked source checkout (`rackup link`) its own
+compiled directory, such as `compiled/cs-local-dev`, and `rackup run` and
+`rackup rebuild` used a separate addon dir, `~/.rackup/addons/local-<name>`.
+rackup now uses the checkout's plain `compiled/` directories and its own addon
+dir everywhere. `rackup self-upgrade` does the switch for you: it removes the
+`compiled-file-roots` entry that rackup wrote into the checkout's
+`racket/etc/config.rktd`, and it deletes nothing.
+
+After upgrading:
+
+- **Run `make` (or `rackup rebuild <name>`) once in each linked checkout.**
+  Packages that were compiled only through rackup have their `.zo` files in
+  the old keyed directories, which nothing reads any more. Until they are
+  compiled again they load from source (slowly), or fail with
+  `version mismatch` if an older `.zo` sits in plain `compiled/`. The build
+  only compiles what is missing.
+- **Run `raco make` on your own projects** if they fail with
+  `version mismatch` or start slowly. The same applies after any version
+  bump in the checkout, as it would without rackup.
+- **Check for stranded packages.** If you installed packages with
+  `rackup run <name> -- raco pkg install`, they went into
+  `~/.rackup/addons/local-<name>`, which rackup no longer uses for a linked
+  checkout. `rackup self-upgrade` (and every later `rackup reshim`) prints a
+  warning that lists them:
+
+  ```
+  rackup: warning: linked toolchain dev now uses the checkout's own addon dir
+    (...), but these user packages are still in ~/.rackup/addons/local-dev,
+  ```
+
+  You can also check directly: this lists them, and prints nothing when you
+  are not affected.
+
+  ```bash
+  ls ~/.rackup/addons/local-*/*/pkgs/pkgs.rktd 2>/dev/null
+  ```
+
+  To fix it, reinstall the packages you need with
+  `rackup run <name> -- raco pkg install -u <pkg>` (pass the directory for a
+  package you installed from one), then delete `~/.rackup/addons/local-<name>`.
+- **Optionally reclaim disk space.** The old keyed directories are unused.
+  This lists them; delete them once you are sure:
+
+  ```bash
+  find ~/src/racket -type d -path '*/compiled/cs-local-*' -prune
+  ```
 
 ## Migrating from racket-dev-goodies
 
