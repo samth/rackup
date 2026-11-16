@@ -147,4 +147,29 @@
      (check-true (hash? meta))
      (check-equal? (hash-ref meta 'kind) 'local)
      (check-true (string? (hash-ref meta 'last-rebuilt-at #f)))
-     (check-true (string? (hash-ref meta 'installed-at #f))))))
+     (check-true (string? (hash-ref meta 'installed-at #f)))
+
+     ;; make fails after the core build succeeded: the metadata still
+     ;; tracks the binary the shims now run, and rebuild reports failure.
+     (define racket-bin (build-path src "racket" "bin" "racket"))
+     (write-script! racket-bin
+                    (string-append
+                     "#!/usr/bin/env bash\n"
+                     "printf '(\"9.99-newer\" chez-scheme \"/tmp/x\")'\n"))
+     (check-exn #rx"make failed.*refreshed.*9\\.99-newer"
+                (lambda ()
+                  (parameterize ([current-rebuild-system*-proc (lambda args #f)])
+                    (cmd-rebuild '("rebuild-test")))))
+     (check-equal? (hash-ref (read-toolchain-meta "local-rebuild-test") 'resolved-version #f)
+                   "9.99-newer")
+
+     ;; make fails and the binary no longer probes: metadata is untouched.
+     (write-script! racket-bin "#!/usr/bin/env bash\nexit 1\n")
+     (define before (read-toolchain-meta "local-rebuild-test"))
+     (check-exn (lambda (e)
+                  (and (regexp-match? #rx"make failed" (exn-message e))
+                       (not (regexp-match? #rx"refreshed" (exn-message e)))))
+                (lambda ()
+                  (parameterize ([current-rebuild-system*-proc (lambda args #f)])
+                    (cmd-rebuild '("rebuild-test")))))
+     (check-equal? (read-toolchain-meta "local-rebuild-test") before))))
