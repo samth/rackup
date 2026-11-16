@@ -542,6 +542,26 @@ jobs:
             --source-build-jobs "$(nproc)" \
             --exercise-rebuild
 
+  linked-checkout-real-build:
+    name: Linked checkout E2E (real in-place build)
+    needs: [unit-tests]
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+      - name: Check out the rackup to upgrade from
+        shell: bash
+        # The last release before linked checkouts used plain compiled/.
+        run: git worktree add --detach "$RUNNER_TEMP/old-rackup" d907bc525de41acb901bd62c9ed3d097a07eeea1
+      - name: Build Racket in place
+        shell: bash
+        run: test/linked-checkout-real-build.sh --work "$RUNNER_TEMP/linked" --build-only
+      - name: Linked checkout E2E
+        shell: bash
+        run: test/linked-checkout-real-build.sh --work "$RUNNER_TEMP/linked" --old-rackup "$RUNNER_TEMP/old-rackup"
+
   macos-e2e:
     name: "macOS E2E (${{ matrix.runner }})"
     needs: [unit-tests]
@@ -787,6 +807,7 @@ jobs:
       - docker-e2e-snapshot-utah
       - docker-e2e-snapshot-northwestern
       - docker-e2e-source-build-link
+      - linked-checkout-real-build
       - macos-e2e
       - macos-e2e-bootstrap
     runs-on: ubuntu-latest
