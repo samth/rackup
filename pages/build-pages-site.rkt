@@ -150,6 +150,17 @@
        [(directory-exists? entry) (copy-directory/files entry dest)]
        [else (copy-file entry dest #t)]))
 
+   ;; On touch devices Gumby loads jquery.mobile from its default path
+   ;; (js/libs/) before initializing, but plt-web does not copy that file.
+   ;; Without it Gumby never initializes and the mobile menu toggle is
+   ;; dead (#109), so ship it from plt-web's own resources.
+   (define jqm-dir (build-path out-dir "js" "libs"))
+   (make-directory* jqm-dir)
+   (copy-file (collection-file-path "jquery.mobile.custom.min.js"
+                                    "plt-web" "resources" "js" "libs")
+              (build-path jqm-dir "jquery.mobile.custom.min.js")
+              #t)
+
    ;; Generate docs page from Scribble source (scribble/manual → HTML)
    (run (find-executable-path "scribble")
         "--html" "--dest" out-dir "--dest-name" "docs"
