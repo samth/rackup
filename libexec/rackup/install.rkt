@@ -163,17 +163,6 @@
                       (format "--create-dir --in-place --dest ~a" (path->string* dest)))))
   (delete-log!))
 
-(define (file-executable?/safe p)
-  (and (file-exists? p)
-       (try-or #f
-         (member 'execute (file-or-directory-permissions p)))))
-
-(define (enumerate-toolchain-executables real-bin-dir)
-  (sort (for/list ([p (in-list (directory-list real-bin-dir #:build? #t))]
-                   #:when (and (file-exists? p) (file-executable?/safe p)))
-          (path-basename-string p))
-        string<?))
-
 (define (make-bin-link! id real-bin-dir)
   (define link (rackup-toolchain-bin-link id))
   (replace-path! link real-bin-dir #:mode 'link)
@@ -437,8 +426,7 @@
               'pkgs-dir
               (and (directory-exists? pkgs) (path-complete-string pkgs)))])]))
 
-(define (local-layout-env-vars layout [addon-dir #f] [version #f] [variant #f] [local-name #f]
-                               #:keyed-only? [keyed-only? #f])
+(define (local-layout-env-vars layout [addon-dir #f] [version #f] [variant #f] [local-name #f])
   ;; If the probe gave us an addon-dir, use it.  Otherwise leave
   ;; PLTADDONDIR unset and let the shim dispatcher fall back to its
   ;; default (which is per-toolchain under ~/.rackup/addons/).  We
@@ -451,8 +439,7 @@
     (if bin-dir-str
         (read-toolchain-compiled-file-roots (string->path bin-dir-str))
         '(same)))
-  (toolchain-env-var-entries addon-dir version variant existing-roots local-name
-                             #:keyed-only? keyed-only?))
+  (toolchain-env-var-entries addon-dir version variant existing-roots local-name))
 
 ;; Old PLT Scheme installations (version <= 4.x) have a shell wrapper at
 ;; plt/bin/mzscheme that uses $PLTHOME to locate the real binary under
@@ -609,15 +596,12 @@
 (define (local-toolchain-id name)
   (string-append "local-" (sanitize-id-part name)))
 
-(define (local-toolchain-meta id name layout real-bin-dir executables env-vars version* variant*
-                             [compiled-roots-scheme #f])
+(define (local-toolchain-meta id name layout real-bin-dir executables env-vars version* variant*)
   (define platform (host-platform-token))
   (hash 'id
         id
         'kind
         'local
-        'compiled-roots-scheme
-        compiled-roots-scheme
         'requested-spec
         name
         'resolved-version
@@ -683,30 +667,10 @@
                                   (delete-toolchain-dir! tc-dir)
                                   (raise e))])
        (make-directory* tc-dir)
-       (define new-meta
-         (finalize-local-toolchain! id name layout
-                                    #:set-default? (hash-ref parsed-opts 'set-default? #f)
-                                    #:compiled-roots-scheme
-                                    (and (source-git-work-tree? local-path) 'keyed-only)))
+       (finalize-local-toolchain! id name layout
+                                  #:set-default? (hash-ref parsed-opts 'set-default? #f))
        (displayln (format "Linked ~a => ~a" id (hash-ref layout 'input-path)))
-       (when (eq? (hash-ref new-meta 'compiled-roots-scheme #f) 'keyed-only)
-         (displayln
-          (format "  isolated compiled output enabled; run `rackup rebuild ~a` to populate it" name)))
        id)]))
-
-;; True if `path` is inside a git work tree.  Compiled-output isolation
-;; defaults on for git source checkouts, since those are where the version
-;; drifts (branch switches, `git pull`) that make a shared `compiled/`
-;; dir dangerous.
-(define (source-git-work-tree? path)
-  (define git (find-executable-path "git"))
-  (and git
-       (parameterize ([current-output-port (open-output-string)]
-                      [current-error-port (open-output-string)])
-         (try-or #f
-           (system* git "-C"
-                    (if (path? path) (path->string path) (format "~a" path))
-                    "rev-parse" "--is-inside-work-tree")))))
 
 ;; Shared post-build finalize: probe version/variant, recompute env vars,
 ;; rewrite the bin overlay and env.sh, register/update meta, commit and
@@ -715,8 +679,7 @@
 (define (finalize-local-toolchain! id name layout
                                    #:set-default? [set-default? #f]
                                    #:installed-at [installed-at #f]
-                                   #:last-rebuilt-at [last-rebuilt-at #f]
-                                   #:compiled-roots-scheme [requested-scheme #f])
+                                   #:last-rebuilt-at [last-rebuilt-at #f])
   (define real-bin-dir (string->path (hash-ref layout 'bin-dir)))
   (define racket-exe (build-path real-bin-dir "racket"))
   (unless (file-executable?/safe racket-exe)
@@ -734,45 +697,20 @@
       "  Run `rackup link --force ~a ~a` after fixing the binary\n"
       "  (e.g., once `raco setup` finishes) to record the correct value.")
      (path->string* real-bin-dir) name (hash-ref layout 'input-path)))
-  ;; Isolate compiled output (keyed-only, no `.` fallback) when requested,
-  ;; but only if we can form a stable key and record it in config.rktd.
-  ;; config.rktd is what non-shim callers (bare `make`, direct `raco`) and
-  ;; `rackup rebuild`'s own `make` honor, so it must agree with the env.
-  (define effective-scheme
-    (cond
-      ;; Never mutate a (possibly shared) source tree's config.rktd during
-      ;; rackup's own test suite; tests exercise keyed-only via temp trees.
-      [(rackup-testing?) #f]
-      [(not (eq? requested-scheme 'keyed-only)) requested-scheme]
-      [else
-       (define key (compiled-roots-key version* variant* name))
-       (cond
-         [(not key)
-          (install-warn
-           (string-append
-            "cannot isolate compiled output for ~a: unknown version/variant;\n"
-            "  keeping the shared compiled dir")
-           id)
-          #f]
-         [(eq? (set-toolchain-compiled-file-roots! real-bin-dir (list key)) 'refused)
-          (install-warn
-           (string-append
-            "~a/etc/config.rktd already sets a custom compiled-file-roots;\n"
-            "  keeping the shared compiled dir for ~a")
-           (hash-ref layout 'plthome) id)
-          #f]
-         [else 'keyed-only])]))
+  ;; Undo an earlier keyed-only migration (see undo-keyed-only-migration!)
+  ;; so bare `make` and direct `raco` fall back to the default `compiled/`.
+  (let ([key (compiled-roots-key version* variant* name)])
+    (when key
+      (unset-toolchain-compiled-file-roots! real-bin-dir (list key))))
   (define env-vars
-    (local-layout-env-vars layout addon-dir* version* variant* name
-                           #:keyed-only? (eq? effective-scheme 'keyed-only)))
+    (local-layout-env-vars layout addon-dir* version* variant* name))
   (make-bin-overlay! id real-bin-dir extra-exes)
   (maybe-wrap-local-chez-extra-executables! id extra-exes layout)
   (sync-toolchain-env-file! id env-vars)
   (ensure-toolchain-addon-dir! id)
   (define executables (enumerate-toolchain-executables (rackup-toolchain-bin-link id)))
   (define base-meta
-    (local-toolchain-meta id name layout real-bin-dir executables env-vars version* variant*
-                          effective-scheme))
+    (local-toolchain-meta id name layout real-bin-dir executables env-vars version* variant*))
   (define meta
     (let* ([m base-meta]
            [m (if installed-at (hash-set m 'installed-at installed-at) m)]
@@ -1038,22 +976,20 @@
   (define local-name
     (and (eq? (hash-ref meta 'kind #f) 'local)
          (hash-ref meta 'requested-spec #f)))
-  (define key-value
-    (compiled-roots-value (hash-ref meta 'resolved-version #f)
-                          (hash-ref meta 'variant #f)
-                          '(same)
-                          local-name))
+  ;; For a linked toolchain this is the key earlier rackup versions used;
+  ;; it no longer writes there, so the dirs are only leftovers.
+  (define full-key
+    (compiled-roots-key (hash-ref meta 'resolved-version #f)
+                        (hash-ref meta 'variant #f)
+                        local-name))
   (cond
-    [(not key-value)
+    [(not full-key)
      (install-warn
       "Cannot clean compiled dirs for ~a: no usable version+variant in metadata"
       id)]
     [else
-     ;; key-value is "compiled/<key>:." -- extract just <key>.
-     (define key
-       (let* ([before-colon (car (string-split key-value ":"))]
-              [after-slash (cadr (string-split before-colon "/"))])
-         after-slash))
+     ;; full-key is "compiled/<key>" -- extract just <key>.
+     (define key (cadr (string-split full-key "/")))
      (install-info "Scanning user packages for compiled/~a directories..." key)
      (define dirs (toolchain-user-package-dirs id))
      (cond
@@ -1264,7 +1200,7 @@
   (ensure-index!)
   (define idx (load-index))
   (define ids (installed-toolchain-ids idx))
-  (define default-id (get-default-toolchain idx))
+  (define default-id (get-default-toolchain))
   (define runtime-status (hidden-runtime-status))
   (define runtime-mode (hash-ref runtime-status 'mode #f))
   (define runtime-meta (hash-ref runtime-status 'meta #f))

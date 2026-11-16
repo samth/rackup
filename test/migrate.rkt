@@ -229,9 +229,14 @@
                    (string-append
                     "#!/usr/bin/env bash\n"
                     "set -euo pipefail\n"
+                    "addon=\"${PLTADDONDIR:-$(cd \"$(dirname \"$0\")/../..\" && pwd)/native-addon/}\"\n"
+                    "if [[ \"$#\" -ge 2 && \"$1\" == \"-f\" ]]; then\n"
+                    "  printf '(\"9.99-migrate\" chez-scheme \"%s\")' \"$addon\"\n"
+                    "  exit 0\n"
+                    "fi\n"
                     "if [[ \"$#\" -ge 2 && \"$1\" == \"-e\" ]]; then\n"
                     "  if [[ \"$2\" == *\"(version)\"*\"system-type\"*\"find-system-path\"* ]]; then\n"
-                    "    printf '9.99-migrate\\nchez-scheme\\n%s' \"${PLTADDONDIR:-/tmp/x}\"\n"
+                    "    printf '9.99-migrate\\nchez-scheme\\n%s' \"$addon\"\n"
                     "    exit 0\n"
                     "  fi\n"
                     "fi\n"
@@ -254,6 +259,24 @@
        (parameterize ([current-output-port (open-output-string)])
          (cmd-migrate (list "9.1" "--from-addon" (path->string native) "--dry-run"))))
      (check-equal? (unbox captured) '("pkg" "migrate" "--dry-run" "9.1"))
+
+     ;; A linked target keeps its own (native) addon dir, the one the shim
+     ;; and `rackup run` use, so migrate stages into and installs there.
+     (define linked-addon (build-path src "native-addon"))
+     (define addon-seen (box #f))
+     (define staged-seen (box #f))
+     (parameterize ([current-migrate-system*-proc
+                     (lambda (exe . args)
+                       (set-box! addon-seen (getenv "PLTADDONDIR"))
+                       (set-box! staged-seen
+                                 (file-exists? (build-path linked-addon "9.1" "pkgs" "pkgs.rktd")))
+                       #t)])
+       (parameterize ([current-output-port (open-output-string)])
+         (cmd-migrate (list "9.1" "--from-addon" (path->string native) "--dry-run"))))
+     (check-equal? (unbox addon-seen) (path->string (path->directory-path linked-addon)))
+     (check-true (unbox staged-seen) "staged under the linked toolchain's addon dir")
+     (check-false (directory-exists? (build-path linked-addon "9.1"))
+                  "staged copy removed afterwards")
 
      ;; Positional <from-version> may appear before flags (reorder-args),
      ;; and trailing args after -- pass through to raco.

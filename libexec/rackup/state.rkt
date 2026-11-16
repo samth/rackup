@@ -26,13 +26,15 @@
          write-toolchain-meta!
          toolchain-env-vars
          toolchain-runtime-env
+         toolchain-addon-dir
          meta->env-vars
          env-vars->meta
          toolchain-env-var-entries
          compiled-roots-value
          compiled-roots-key
+         serialize-compiled-root
          read-toolchain-compiled-file-roots
-         set-toolchain-compiled-file-roots!
+         unset-toolchain-compiled-file-roots!
          register-toolchain!
          unregister-toolchain!
          find-local-toolchain
@@ -69,7 +71,16 @@
     (save-index! (empty-index)))
   (unless (file-exists? (rackup-config-file))
     (write-string-file (rackup-config-file) ""))
-  (load-index))
+  (define idx (load-index))
+  ;; The default-toolchain file is the only source of truth, because the
+  ;; bash shim dispatcher reads nothing else.  Migrate a default recorded
+  ;; only in the index by older rackup versions.
+  (define legacy-default (hash-ref idx 'default-toolchain #f))
+  (when (and (not (file-exists? (rackup-default-file)))
+             (string? legacy-default)
+             (valid-toolchain-id? legacy-default))
+    (write-string-file (rackup-default-file) legacy-default))
+  idx)
 
 (define (installed-toolchains [idx (load-index)])
   (hash-ref idx 'installed-toolchains (hash)))
@@ -80,8 +91,10 @@
 (define (toolchain-exists? id [idx (load-index)])
   (hash-has-key? (installed-toolchains idx) id))
 
-(define (get-default-toolchain [idx (load-index)])
-  (define raw (or (read-string-file (rackup-default-file) #f) (hash-ref idx 'default-toolchain #f)))
+;; Read only the default-toolchain file, exactly as the shim dispatcher
+;; does, so `rackup` and the shims always agree on the default.
+(define (get-default-toolchain)
+  (define raw (read-string-file (rackup-default-file) #f))
   (and raw (valid-toolchain-id? raw) raw))
 
 (define/state-locked (set-default-toolchain! id)
@@ -122,11 +135,31 @@
   (for/list ([kv (in-list env-vars)])
     (list (car kv) (cdr kv))))
 
-;; Environment for running a toolchain's own executables (raco/racket):
-;; the toolchain's recorded env vars plus its rackup-managed addon dir.
+;; Environment for running a toolchain's own executables (raco/racket),
+;; which must match what the shim dispatcher sets from env.sh so that
+;; `rackup run`, the shim, and rebuild's `make` all see the same user
+;; packages.  A linked toolchain keeps the addon dir recorded at link or
+;; reshim time -- the checkout's own (native) addon dir, where packages
+;; installed by running the checkout's racket directly live.  Installer
+;; toolchains, and a linked one whose probe found no addon dir, use the
+;; rackup-managed per-toolchain dir.
 (define (toolchain-runtime-env id)
-  (append (toolchain-env-vars id)
-          (list (cons "PLTADDONDIR" (path->string (rackup-addon-dir id))))))
+  (define meta (read-toolchain-meta id))
+  (define env-vars (meta->env-vars meta))
+  (define recorded-addon
+    (and (hash? meta)
+         (eq? (hash-ref meta 'kind #f) 'local)
+         (let ([p (assoc "PLTADDONDIR" env-vars)])
+           (and p (not (string=? (cdr p) "")) (cdr p)))))
+  (if recorded-addon
+      env-vars
+      (append (filter (lambda (kv) (not (equal? (car kv) "PLTADDONDIR"))) env-vars)
+              (list (cons "PLTADDONDIR" (path->string (rackup-addon-dir id)))))))
+
+;; The addon dir a toolchain's racket uses when run through rackup (the
+;; PLTADDONDIR of toolchain-runtime-env), as a path.
+(define (toolchain-addon-dir id)
+  (string->path (cdr (assoc "PLTADDONDIR" (toolchain-runtime-env id)))))
 
 ;; Read the compiled-file-roots from a toolchain's config.rktd.
 ;; Returns a list like (same) or ("/usr/lib/racket/compiled"), or
@@ -171,31 +204,21 @@
            [(file-exists? alt) alt]
            [else primary]))))
 
-;; Record 'compiled-file-roots in a linked toolchain's config.rktd so
-;; that non-shim invocations (bare `make`, direct `raco`/`racket`)
-;; resolve the same isolated compiled dir the shim uses -- and, crucially,
-;; so that `rackup rebuild`'s `make` (which runs with no PLTCOMPILEDROOTS)
-;; writes a complete keyed dir instead of the default `compiled/`.
-;; Preserves every other config key.  Refuses to overwrite a user's
-;; pre-existing non-default value.  Returns 'written, 'unchanged, or
-;; 'refused.
-(define (set-toolchain-compiled-file-roots! real-bin-dir roots)
+;; Undo the keyed-only migration of earlier rackup versions, which wrote a
+;; linked toolchain's key as the sole 'compiled-file-roots in its tree's
+;; config.rktd.  The in-place build's own `raco setup` ignores that file
+;; (it runs with `-G build/config`), so after a version bump the keyed dir
+;; went stale while config.rktd kept every later caller pointed at it.
+;; Removes the entry only when it equals `roots`, preserving every other
+;; key and any user-set value.  Returns #t when it rewrote the file.
+(define (unset-toolchain-compiled-file-roots! real-bin-dir roots)
   (define path (toolchain-config-rktd-path real-bin-dir))
+  (define config (and path (file-exists? path) (read-rktd-file path #f)))
   (cond
-    [(not path) 'refused]
-    [else
-     (define config
-       (let ([v (and (file-exists? path) (read-rktd-file path #f))])
-         (if (hash? v) v (hash))))
-     (define current (hash-ref config 'compiled-file-roots #f))
-     (cond
-       [(equal? current roots) 'unchanged]
-       [(and current (not (equal? current '(same)))) 'refused]
-       [else
-        (let-values ([(dir _ __) (split-path path)])
-          (make-directory* dir))
-        (write-rktd-file path (hash-set config 'compiled-file-roots roots))
-        'written])]))
+    [(and (hash? config) (equal? (hash-ref config 'compiled-file-roots #f) roots))
+     (write-rktd-file path (hash-remove config 'compiled-file-roots))
+     #t]
+    [else #f]))
 
 ;; Serialize a compiled-file-roots entry (as found in config.rktd or
 ;; returned by find-compiled-file-roots) into a string suitable for a
@@ -221,26 +244,29 @@
 ;; toolchain (e.g., "dev" for `rackup link dev`).
 ;;
 ;; Keying:
-;;  - A linked source toolchain's version drifts on every `make`, so
-;;    keying its dir on the version would spawn a fresh compiled tree
-;;    per rebuild -- and go stale whenever the source is rebuilt outside
-;;    `rackup rebuild`.  Key those on the installation name instead
-;;    (e.g. "compiled/cs-local-dev"), which is stable across rebuilds
-;;    and already unique per installation.
-;;  - Installer toolchains have a stable version, so they keep the
-;;    version+variant key (e.g. "compiled/9.1-cs").  That also lets
-;;    .zo-compatible variants (full/minimal at the same version) share a
-;;    directory.
+;;  - Installer toolchains key on their stable version+variant (e.g.
+;;    "compiled/9.1-cs").  That also lets .zo-compatible variants
+;;    (full/minimal at the same version) share a directory.
+;;  - Linked source toolchains get no value at all: they read and write
+;;    the default `compiled/` dirs, exactly as the checkout's own `make`,
+;;    its own binary, and direct `raco` do.  Racket's in-place build only
+;;    ever refreshes the default `compiled/`, so any extra root for a
+;;    linked tree either holds a second copy of the tree's `.zo` (double
+;;    compilation) or shadows the build's fresh `.zo` with stale ones.
+;;    Earlier rackup versions keyed linked toolchains on their name
+;;    ("compiled/cs-local-dev", later with "/@(version)"); rackup now only
+;;    removes the config.rktd entry those versions wrote, and leaves any
+;;    keyed dirs on disk for `rackup remove --clean-compiled`.
 ;;
-;; Returns a string like "compiled/9.1-cs:." or "compiled/cs-local-dev:."
-;; (for linked toolchains), or #f when there is not enough information to
+;; compiled-roots-value returns a string like "compiled/9.1-cs:.", or #f
+;; for a linked toolchain or when there is not enough information to
 ;; form a stable key.
-;; The per-installation compiled-dir key -- the "compiled/<...>" prefix
-;; where a toolchain writes its own `.zo` files -- or #f when the
-;; version/variant are too incomplete to form a stable key.  Linked
-;; source toolchains key on the installation name (stable across the
-;; version drift that every `make` causes); installer toolchains key on
-;; version+variant (stable, and shareable by `.zo`-compatible variants).
+;;
+;; compiled-roots-key returns the per-installation compiled-dir key -- the
+;; "compiled/<...>" prefix under which a toolchain writes its own `.zo`
+;; files -- or #f when the version/variant are too incomplete to form a
+;; stable key.  For a linked toolchain it is the key earlier rackup
+;; versions used, so their leftovers can be found.
 (define (compiled-roots-key version variant [local-name #f])
   (define variant-str
     (cond
@@ -262,16 +288,11 @@
     [(and version-str variant-str) (format "compiled/~a-~a" version-str variant-str)]
     [else #f]))
 
-(define (compiled-roots-value version variant [existing-roots '(same)] [local-name #f]
-                              #:keyed-only? [keyed-only? #f])
-  (define key (compiled-roots-key version variant local-name))
+(define (compiled-roots-value version variant [existing-roots '(same)] [local-name #f])
+  (define key (compiled-roots-key version variant))
   (cond
+    [(and (string? local-name) (not (string-blank? local-name))) #f]
     [(not key) #f]
-    ;; Keyed-only: a single root, no fallback.  Used for linked source
-    ;; toolchains that own an isolated, complete compiled dir, so a
-    ;; wrong-version `.zo` in the default `compiled/` can never be reached
-    ;; via `.` (which is a hard version-mismatch load error).
-    [keyed-only? key]
     [else
      ;; Include 'same (serialized as ".") so that user code's compiled/
      ;; directories are found, even on FHS installs where the existing
@@ -279,21 +300,22 @@
      (define roots-with-same
        (let ([roots (if (null? existing-roots) '(same) existing-roots)])
          (if (memq 'same roots) roots (append roots '(same)))))
-     (define fallbacks (map serialize-compiled-root roots-with-same))
+     (define fallbacks
+       (filter (lambda (s) (not (equal? s key)))
+               (map serialize-compiled-root roots-with-same)))
      (string-join (cons key fallbacks) ":")]))
 
 ;; Build the env-var alist recorded for a toolchain: PLTADDONDIR (when
 ;; a usable addon dir is known) and PLTCOMPILEDROOTS (when the
 ;; version+variant yield a stable key).  Entries are omitted when
 ;; unavailable.
-(define (toolchain-env-var-entries addon-dir version variant existing-roots local-name
-                                   #:keyed-only? [keyed-only? #f])
+(define (toolchain-env-var-entries addon-dir version variant existing-roots local-name)
   (append
    (if (and (string? addon-dir) (not (string-blank? addon-dir)))
        (list (cons "PLTADDONDIR" addon-dir))
        null)
    (cond
-     [(compiled-roots-value version variant existing-roots local-name #:keyed-only? keyed-only?)
+     [(compiled-roots-value version variant existing-roots local-name)
       =>
       (lambda (v) (list (cons "PLTCOMPILEDROOTS" v)))]
      [else null])))
@@ -329,7 +351,7 @@
   (define new-installed (hash-remove (installed-toolchains idx) id))
   (define new-idx (hash-set idx 'installed-toolchains new-installed))
   (save-index! new-idx)
-  (when (equal? (get-default-toolchain idx) id)
+  (when (equal? (get-default-toolchain) id)
     (clear-default-toolchain!)
     (when (pair? (hash-keys new-installed))
       (set-default-toolchain! (car (sort (hash-keys new-installed) string<?))))))
@@ -424,7 +446,7 @@
 
 (define (find-local-toolchain name [idx (load-index)])
   (cond
-    [(or (not name) (string-blank? name)) (get-default-toolchain idx)]
+    [(or (not name) (string-blank? name)) (get-default-toolchain)]
     [else
      (define ids (installed-toolchain-ids idx))
      (define all-meta
