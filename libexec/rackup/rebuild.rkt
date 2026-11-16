@@ -85,8 +85,7 @@
     (rackup-error "rackup rebuild requires `make` on PATH"))
   (displayln-proc (format "+ cd ~a && ~a" cwd (string-join argv " ")))
   (parameterize ([current-directory cwd])
-    (unless (apply system*-proc make-exe (cdr argv))
-      (rackup-error "make failed in ~a" cwd))))
+    (and (apply system*-proc make-exe (cdr argv)) #t)))
 
 ;; Environment for the rebuild's `make`: the current one plus the
 ;; toolchain's addon dir, the same PLTADDONDIR the shim and `rackup run`
@@ -145,6 +144,10 @@
   (define key (compiled-roots-key (hash-ref meta 'resolved-version #f)
                                   (hash-ref meta 'variant #f)
                                   (hash-ref meta 'requested-spec #f)))
+  (define (finalize!)
+    (finalize-local-toolchain! id (hash-ref meta 'requested-spec id) layout
+                               #:installed-at (hash-ref meta 'installed-at #f)
+                               #:last-rebuilt-at (current-iso8601)))
   (cond
     [(and pull? dry-run?)
      (displayln-proc (format "+ git -C ~a pull --ff-only" (or source-root cwd)))]
@@ -163,13 +166,29 @@
      ;; Build with the toolchain's own environment, so the build's
      ;; `raco setup` sees the same user-scope packages as the shim and
      ;; `rackup run`.
-     (parameterize ([current-environment-variables (build-environment id)])
-       (run-make! cwd argv system*-proc displayln-proc))])
+     (define make-ok?
+       (parameterize ([current-environment-variables (build-environment id)])
+         (run-make! cwd argv system*-proc displayln-proc)))
+     (unless make-ok?
+       ;; A late step (often `raco setup` on one package) can fail after
+       ;; the core build succeeded.  The shims already run the new binary,
+       ;; so if it still probes, record it before reporting the failure.
+       (define-values (probed-version _variant _addon)
+         (reprobe-local-toolchain (hash-ref layout 'bin-dir #f)))
+       (cond
+         [(and update-meta? probed-version)
+          (finalize!)
+          (rackup-error
+           (string-append
+            "make failed in ~a\n"
+            "  ~a's metadata was still refreshed for the racket it now runs (version ~a).\n"
+            "  Fix the failure and rerun `rackup rebuild` to finish the build.")
+           cwd id probed-version)]
+         [else
+          (rackup-error "make failed in ~a" cwd)]))])
   (cond
     [(or dry-run? (not update-meta?)) id]
     [else
-     (finalize-local-toolchain! id (hash-ref meta 'requested-spec id) layout
-                                #:installed-at (hash-ref meta 'installed-at #f)
-                                #:last-rebuilt-at (current-iso8601))
+     (finalize!)
      (displayln-proc (format "Rebuilt ~a" id))
      id]))
