@@ -813,7 +813,7 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Build shim
-        run: gcc -O2 -s -municode -o "$env:RUNNER_TEMP\rackup-shim.exe" libexec/rackup/windows/rackup-shim.c
+        run: gcc -Os -s -nostdlib -fno-builtin -e shim_entry -o "$env:RUNNER_TEMP\rackup-shim.exe" libexec/rackup/windows/rackup-shim.c -lkernel32
       - name: Install rackup with install.ps1
         run: |
           ./scripts/install.ps1 -SourceDir . -ShimExe "$env:RUNNER_TEMP\rackup-shim.exe" -RackupHome "$env:RUNNER_TEMP\rk" -NoModifyPath

@@ -66,7 +66,8 @@ Developer Mode or admin.
   `runtime/versions/<id>/bin` use it, and readers go through
   `follow-dir-pointer` (`rackup-toolchain-bin-dir`).
 - **Shims** (`libexec/rackup/windows/rackup-shim.c`, `shims.rkt`): one
-  native dispatcher, about 400 lines of C. Every shim (`racket.exe`,
+  native dispatcher, about 450 lines of C that call only kernel32 (no C
+  runtime), so the binary is 12 KB. Every shim (`racket.exe`,
   `raco.exe`, `drracket.exe`, ...) is a copy; the shim picks the tool
   from its own file name, resolves `RACKUP_TOOLCHAIN` or the default,
   applies the toolchain's `env.txt` (NAME=VALUE; same `PLTADDONDIR` and
@@ -76,9 +77,12 @@ Developer Mode or admin.
   kill-on-close job object. The copy named `rackup.exe` runs rackup
   itself with the hidden runtime, saving and clearing the Racket env vars
   like `bin/rackup`, and on a confirmed uninstall deletes `RACKUP_HOME`
-  from a detached `cmd` after it exits. Copies, not hardlinks, because
-  Racket has no hardlink primitive; a reshim skips shims that already
-  match, so a running shim does not block it.
+  from a detached `cmd` after it exits. A reshim skips shims that
+  already match; a stale shim that is running (`rackup.exe` always is
+  during a reshim) cannot be deleted or overwritten, so it is renamed to
+  `.rackup-stale-*` and removed by a later reshim. Shims from any rackup
+  version are recognized by a string in the binary, so a shim for a
+  removed tool is cleaned up even after the dispatcher changed.
 - **Default home**: `%LOCALAPPDATA%\rackup` on Windows.
 - **Bootstrap** (`scripts/install.ps1`): downloads `rackup-src.tar.gz`
   and `rackup-shim-x86_64-win32.exe` from the Pages site (checksums
@@ -94,6 +98,37 @@ Developer Mode or admin.
   installs from the checkout with `install.ps1`, installs Minimal and
   full stable, runs `racket`/`raco` through the shims, installs a user
   package, checks exit codes, removes a toolchain and uninstalls.
+
+## Shim design: one binary or stub + DLL
+
+Two ways to keep the per-tool shims small were prototyped (2026-11-17)
+and run through the same checks under Wine (no toolchain configured,
+runtime install, toolchain install, arguments with spaces, quotes and
+trailing backslashes, `PLTADDONDIR`/`PLTCOMPILEDROOTS`, exit codes, a
+missing tool, stderr to a file, uninstall):
+
+| | per-tool shim | shared file | 25 shims |
+|---|---|---|---|
+| A: one no-CRT shim, copied | 12 KB | none | ~300 KB |
+| B: no-CRT stub, loads `libexec\rackup-shim.dll` | 4.6 KB | 12.8 KB DLL | ~130 KB |
+| (first prototype, with the mingw C runtime) | 49 KB | none | ~1.2 MB |
+
+Both passed every check, and startup was the same (10 runs of
+`racket -n -e ''` through the shim: about 0.2 s over running Racket
+directly, for both, under Wine).
+
+**Chosen: A.** Most of the original 49 KB was the C runtime, so
+dropping it gets nearly all of the size win without a second binary.
+B's advantage is that shim fixes ship by replacing one DLL, but a reshim
+already rewrites any shim whose bytes differ (renaming a running one
+aside), so A gets the same effect. B adds a second artifact to build,
+publish and checksum, a stub/DLL interface to keep compatible, and a
+DLL that is locked while any tool runs, which needs the same rename
+dance anyway. The B stub source is kept outside the repo for reference.
+
+Hardlinks (`CreateHardLinkW` through the FFI) would shrink A further,
+but they need a copy fallback off NTFS and make every shim share one
+locked file; at 12 KB a copy, not worth it now.
 
 ## How it was tested
 

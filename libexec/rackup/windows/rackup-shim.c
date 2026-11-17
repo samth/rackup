@@ -1,34 +1,111 @@
 /* rackup shim dispatcher for Windows.
 
-   Every shim in %RACKUP_HOME%\shims (racket.exe, raco.exe, ...) is a
-   copy of this program.  It picks the tool from its own file name,
-   resolves the active toolchain the same way the Unix dispatcher script
-   (shims.rkt) does, sets up the toolchain environment, and runs the real
-   executable, passing the exit status through.  The copy named
-   rackup.exe instead starts rackup itself.
+   Each shim in %RACKUP_HOME%\shims (racket.exe, raco.exe, ...) picks the
+   tool from its own file name, resolves the active toolchain the same
+   way the Unix dispatcher script (shims.rkt) does, sets up the toolchain
+   environment, and runs the real executable, passing the exit status
+   through.  The shim named rackup.exe instead starts rackup itself.
 
    Windows has no exec(), so the shim stays alive as the parent: it
    ignores Ctrl+C (the child in the same console still receives it) and
    puts the child in a job object so that killing the shim kills the
    tool too.
 
-   Build: x86_64-w64-mingw32-gcc -O2 -municode -o rackup-shim.exe rackup-shim.c
-          (or: cl /O2 rackup-shim.c)  */
+   The code uses only kernel32 and no C runtime, so the binary is about
+   12 KB and every shim can be a plain copy of it.  Build:
+     x86_64-w64-mingw32-gcc -Os -s -nostdlib -fno-builtin -e shim_entry \
+       -o rackup-shim.exe rackup-shim.c -lkernel32  */
 
 #ifndef UNICODE
 #define UNICODE
 #endif
-#ifndef _UNICODE
-#define _UNICODE
-#endif
 
 #include <windows.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <wchar.h>
 
 #define RACKUP_UNINSTALL_CONFIRMED 10
+
+/* ------------------------------------------------------------------ */
+/* What the C runtime would otherwise provide.  GCC may emit calls to
+   memset/memcpy for struct initialization even with -fno-builtin. */
+
+void *memset(void *dst, int c, size_t n) {
+  unsigned char *d = (unsigned char *)dst;
+  while (n--) *d++ = (unsigned char)c;
+  return dst;
+}
+
+void *memcpy(void *dst, const void *src, size_t n) {
+  unsigned char *d = (unsigned char *)dst;
+  const unsigned char *s = (const unsigned char *)src;
+  while (n--) *d++ = *s++;
+  return dst;
+}
+
+static int is_space(wchar_t c) { return c == L' ' || c == L'\t' || c == L'\r' || c == L'\n' || c == L'\v' || c == L'\f'; }
+static int is_alnum(wchar_t c) { return (c >= L'0' && c <= L'9') || (c >= L'a' && c <= L'z') || (c >= L'A' && c <= L'Z'); }
+static wchar_t to_lower(wchar_t c) { return (c >= L'A' && c <= L'Z') ? (wchar_t)(c - L'A' + L'a') : c; }
+
+static size_t wlen(const wchar_t *s) { return (size_t)lstrlenW(s); }
+static int weq(const wchar_t *a, const wchar_t *b) { return lstrcmpW(a, b) == 0; }
+
+static void *xalloc(size_t bytes);
+
+static wchar_t *wnew(size_t chars) { return (wchar_t *)xalloc((chars + 1) * sizeof(wchar_t)); }
+
+static wchar_t *wdup(const wchar_t *s) {
+  wchar_t *p = wnew(wlen(s));
+  lstrcpyW(p, s);
+  return p;
+}
+
+/* Concatenate strings; the list ends with NULL. */
+static wchar_t *wcat(const wchar_t *first, ...) {
+  va_list ap;
+  size_t n = 0;
+  const wchar_t *s;
+  va_start(ap, first);
+  for (s = first; s; s = va_arg(ap, const wchar_t *)) n += wlen(s);
+  va_end(ap);
+  wchar_t *out = wnew(n);
+  va_start(ap, first);
+  for (s = first; s; s = va_arg(ap, const wchar_t *)) lstrcatW(out, s);
+  va_end(ap);
+  return out;
+}
+
+static wchar_t *wnum(unsigned long v) {
+  wchar_t buf[24];
+  int i = 23;
+  buf[i] = 0;
+  do { buf[--i] = (wchar_t)(L'0' + v % 10); v /= 10; } while (v);
+  return wdup(buf + i);
+}
+
+/* Write to stderr: UTF-16 to a console, UTF-8 to a file or pipe. */
+static void eput(const wchar_t *s) {
+  HANDLE h = GetStdHandle(STD_ERROR_HANDLE);
+  DWORD n = (DWORD)wlen(s), mode, written;
+  if (h == NULL || h == INVALID_HANDLE_VALUE || n == 0) return;
+  if (GetConsoleMode(h, &mode)) {
+    WriteConsoleW(h, s, n, &written, NULL);
+  } else {
+    int bytes = WideCharToMultiByte(CP_UTF8, 0, s, (int)n, NULL, 0, NULL, NULL);
+    char *buf = (char *)xalloc((size_t)bytes + 1);
+    WideCharToMultiByte(CP_UTF8, 0, s, (int)n, buf, bytes, NULL, NULL);
+    WriteFile(h, buf, (DWORD)bytes, &written, NULL);
+  }
+}
+
+static void *xalloc(size_t bytes) {
+  void *p = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, bytes);
+  if (!p) {
+    eput(L"rackup: out of memory\n");
+    ExitProcess(1);
+  }
+  return p;
+}
+
+/* ------------------------------------------------------------------ */
 
 static const wchar_t *racket_env_vars[] = {
   L"PLTCOLLECTS", L"PLTADDONDIR", L"PLTCOMPILEDROOTS",
@@ -37,43 +114,20 @@ static const wchar_t *racket_env_vars[] = {
 
 static const wchar_t *MARKER = L"_RACKUP_MANAGED_PLTCOMPILEDROOTS";
 
-static void die(int code, const wchar_t *fmt, ...) {
-  va_list ap;
-  va_start(ap, fmt);
-  fputws(L"rackup: ", stderr);
-  vfwprintf(stderr, fmt, ap);
-  fputws(L"\n", stderr);
-  va_end(ap);
-  exit(code);
-}
-
-static wchar_t *xalloc(size_t n) {
-  wchar_t *p = (wchar_t *)calloc(n, sizeof(wchar_t));
-  if (!p) die(1, L"out of memory");
-  return p;
-}
-
-static wchar_t *wdup(const wchar_t *s) {
-  wchar_t *p = xalloc(wcslen(s) + 1);
-  wcscpy(p, s);
-  return p;
-}
-
 /* Join path parts with backslashes; the list ends with NULL. */
 static wchar_t *path_join(const wchar_t *first, ...) {
   va_list ap;
-  size_t n = wcslen(first) + 1;
+  size_t n = 0;
   const wchar_t *s;
   va_start(ap, first);
-  while ((s = va_arg(ap, const wchar_t *)) != NULL) n += wcslen(s) + 1;
+  for (s = first; s; s = va_arg(ap, const wchar_t *)) n += wlen(s) + 1;
   va_end(ap);
-  wchar_t *out = xalloc(n + 1);
-  wcscpy(out, first);
+  wchar_t *out = wnew(n);
   va_start(ap, first);
-  while ((s = va_arg(ap, const wchar_t *)) != NULL) {
-    size_t len = wcslen(out);
-    if (len > 0 && out[len - 1] != L'\\' && out[len - 1] != L'/') wcscat(out, L"\\");
-    wcscat(out, s);
+  for (s = first; s; s = va_arg(ap, const wchar_t *)) {
+    size_t len = wlen(out);
+    if (len > 0 && out[len - 1] != L'\\' && out[len - 1] != L'/') lstrcatW(out, L"\\");
+    lstrcatW(out, s);
   }
   va_end(ap);
   return out;
@@ -87,7 +141,7 @@ static int file_exists(const wchar_t *p) {
 static wchar_t *get_env(const wchar_t *name) {
   DWORD n = GetEnvironmentVariableW(name, NULL, 0);
   if (n == 0) return NULL;
-  wchar_t *v = xalloc(n);
+  wchar_t *v = wnew(n);
   GetEnvironmentVariableW(name, v, n);
   return v;
 }
@@ -95,21 +149,21 @@ static wchar_t *get_env(const wchar_t *name) {
 static int is_blank(const wchar_t *s) {
   if (!s) return 1;
   for (; *s; s++)
-    if (!iswspace(*s)) return 0;
+    if (!is_space(*s)) return 0;
   return 1;
 }
 
 static wchar_t *trim(wchar_t *s) {
-  while (*s && iswspace(*s)) s++;
-  size_t n = wcslen(s);
-  while (n > 0 && iswspace(s[n - 1])) s[--n] = 0;
+  while (*s && is_space(*s)) s++;
+  size_t n = wlen(s);
+  while (n > 0 && is_space(s[n - 1])) s[--n] = 0;
   return s;
 }
 
 static int valid_id(const wchar_t *s) {
   if (!*s) return 0;
   for (; *s; s++)
-    if (!(iswalnum(*s) || *s == L'.' || *s == L'_' || *s == L'-')) return 0;
+    if (!(is_alnum(*s) || *s == L'.' || *s == L'_' || *s == L'-')) return 0;
   return 1;
 }
 
@@ -118,19 +172,14 @@ static wchar_t *read_text_file(const wchar_t *p) {
   HANDLE h = CreateFileW(p, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                          NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
   if (h == INVALID_HANDLE_VALUE) return NULL;
-  DWORD size = GetFileSize(h, NULL);
-  char *buf = (char *)calloc(size + 1, 1);
-  DWORD got = 0;
-  if (!buf || !ReadFile(h, buf, size, &got, NULL)) {
-    CloseHandle(h);
-    free(buf);
-    return NULL;
-  }
+  DWORD size = GetFileSize(h, NULL), got = 0;
+  char *buf = (char *)xalloc((size_t)size + 1);
+  BOOL ok = ReadFile(h, buf, size, &got, NULL);
   CloseHandle(h);
+  if (!ok) return NULL;
   int wn = MultiByteToWideChar(CP_UTF8, 0, buf, (int)got, NULL, 0);
-  wchar_t *w = xalloc(wn + 1);
+  wchar_t *w = wnew((size_t)wn);
   MultiByteToWideChar(CP_UTF8, 0, buf, (int)got, w, wn);
-  free(buf);
   return w;
 }
 
@@ -148,30 +197,6 @@ static wchar_t *follow_dir_pointer(const wchar_t *p) {
   return wdup(p);
 }
 
-/* The directory holding this executable, and its tool name: the file
-   name without ".exe", lowercased. */
-static void self_location(wchar_t **dir_out, wchar_t **name_out) {
-  DWORD cap = MAX_PATH;
-  wchar_t *buf = NULL;
-  for (;;) {
-    buf = xalloc(cap);
-    DWORD n = GetModuleFileNameW(NULL, buf, cap);
-    if (n == 0) die(1, L"cannot determine shim path");
-    if (n < cap) break;
-    free(buf);
-    cap *= 2;
-  }
-  wchar_t *slash = wcsrchr(buf, L'\\');
-  wchar_t *base = slash ? slash + 1 : buf;
-  wchar_t *name = wdup(base);
-  size_t n = wcslen(name);
-  if (n > 4 && _wcsicmp(name + n - 4, L".exe") == 0) name[n - 4] = 0;
-  for (wchar_t *c = name; *c; c++) *c = towlower(*c);
-  if (slash) *slash = 0;
-  *dir_out = buf;
-  *name_out = name;
-}
-
 /* The arguments part of this process's command line, verbatim (with
    its leading space), so quoting reaches the tool unchanged. */
 static const wchar_t *command_line_tail(void) {
@@ -186,48 +211,36 @@ static const wchar_t *command_line_tail(void) {
   return p;
 }
 
-/* Append `arg` to `cmd` quoted for CommandLineToArgvW/the MS C runtime. */
-static void append_quoted(wchar_t **cmd, size_t *cap, const wchar_t *arg) {
-  size_t need = wcslen(*cmd) + 2 * wcslen(arg) + 4;
-  if (need > *cap) {
-    *cap = need * 2;
-    wchar_t *n = xalloc(*cap);
-    wcscpy(n, *cmd);
-    free(*cmd);
-    *cmd = n;
-  }
-  wchar_t *o = *cmd + wcslen(*cmd);
-  if (o != *cmd) *o++ = L' ';
+/* `arg` quoted for CommandLineToArgvW and the MS C runtime. */
+static wchar_t *quote_arg(const wchar_t *arg) {
+  wchar_t *out = wnew(2 * wlen(arg) + 2);
+  wchar_t *o = out;
   *o++ = L'"';
   for (const wchar_t *s = arg;; s++) {
-    size_t backslashes = 0;
+    size_t backslashes = 0, i;
     while (*s == L'\\') { backslashes++; s++; }
     if (!*s) {
-      for (size_t i = 0; i < backslashes * 2; i++) *o++ = L'\\';
+      for (i = 0; i < backslashes * 2; i++) *o++ = L'\\';
       break;
     } else if (*s == L'"') {
-      for (size_t i = 0; i < backslashes * 2 + 1; i++) *o++ = L'\\';
+      for (i = 0; i < backslashes * 2 + 1; i++) *o++ = L'\\';
       *o++ = L'"';
     } else {
-      for (size_t i = 0; i < backslashes; i++) *o++ = L'\\';
+      for (i = 0; i < backslashes; i++) *o++ = L'\\';
       *o++ = *s;
     }
   }
   *o++ = L'"';
   *o = 0;
+  return out;
 }
 
 /* Run `exe` with the leading arguments `pre` (quoted here) followed by
    this process's own arguments, wait, and return its exit code. */
 static DWORD run(const wchar_t *exe, const wchar_t **pre) {
-  size_t cap = 1024;
-  wchar_t *cmd = xalloc(cap);
-  append_quoted(&cmd, &cap, exe);
-  for (; pre && *pre; pre++) append_quoted(&cmd, &cap, *pre);
-  const wchar_t *tail = command_line_tail();
-  wchar_t *full = xalloc(wcslen(cmd) + wcslen(tail) + 1);
-  wcscpy(full, cmd);
-  wcscat(full, tail);
+  wchar_t *cmd = quote_arg(exe);
+  for (; pre && *pre; pre++) cmd = wcat(cmd, L" ", quote_arg(*pre), NULL);
+  cmd = wcat(cmd, command_line_tail(), NULL);
 
   HANDLE job = CreateJobObjectW(NULL, NULL);
   if (job) {
@@ -242,8 +255,10 @@ static DWORD run(const wchar_t *exe, const wchar_t **pre) {
   PROCESS_INFORMATION pi;
   memset(&si, 0, sizeof(si));
   si.cb = sizeof(si);
-  if (!CreateProcessW(exe, full, NULL, NULL, TRUE, CREATE_SUSPENDED, NULL, NULL, &si, &pi))
-    die(126, L"cannot run %ls (error %lu)", exe, GetLastError());
+  if (!CreateProcessW(exe, cmd, NULL, NULL, TRUE, CREATE_SUSPENDED, NULL, NULL, &si, &pi)) {
+    eput(wcat(L"rackup: cannot run ", exe, L" (error ", wnum(GetLastError()), L")\n", NULL));
+    return 126;
+  }
   if (job) AssignProcessToJobObject(job, pi.hProcess);
   SetConsoleCtrlHandler(NULL, TRUE); /* the child handles Ctrl+C */
   ResumeThread(pi.hThread);
@@ -256,28 +271,26 @@ static DWORD run(const wchar_t *exe, const wchar_t **pre) {
 }
 
 static int env_equal(const wchar_t *a, const wchar_t *b) {
-  return a && b && wcscmp(a, b) == 0;
+  return a && b && weq(a, b);
 }
 
 /* Apply the NAME=VALUE lines of a toolchain's env.txt, with the same
    PLTCOMPILEDROOTS precedence as env.sh: a user's value wins unless
    rackup itself exported it (it equals the marker). */
 static void apply_env_file(const wchar_t *p) {
-  wchar_t *text = read_text_file(p);
-  if (!text) return;
-  wchar_t *next = text;
+  wchar_t *next = read_text_file(p);
+  if (!next) return;
   while (*next) {
     wchar_t *line = next;
-    size_t len = wcscspn(line, L"\r\n");
-    next = line + len;
+    while (*next && *next != L'\r' && *next != L'\n') next++;
     while (*next == L'\r' || *next == L'\n') *next++ = 0;
-    line[len] = 0;
     if (*line == L'#' || is_blank(line)) continue;
-    wchar_t *eq = wcschr(line, L'=');
-    if (!eq) continue;
+    wchar_t *eq = line;
+    while (*eq && *eq != L'=') eq++;
+    if (!*eq) continue;
     *eq = 0;
     const wchar_t *key = line, *val = eq + 1;
-    if (wcscmp(key, L"PLTCOMPILEDROOTS") == 0) {
+    if (weq(key, L"PLTCOMPILEDROOTS")) {
       wchar_t *cur = get_env(key), *mark = get_env(MARKER);
       if (is_blank(cur) || env_equal(cur, mark)) {
         SetEnvironmentVariableW(key, val);
@@ -293,14 +306,13 @@ static void apply_env_file(const wchar_t *p) {
 static wchar_t *find_addon_exe(const wchar_t *addon, const wchar_t *exe_name) {
   wchar_t *direct = path_join(addon, L"bin", exe_name, NULL);
   if (file_exists(direct)) return direct;
-  wchar_t *pattern = path_join(addon, L"*", NULL);
   WIN32_FIND_DATAW fd;
-  HANDLE h = FindFirstFileW(pattern, &fd);
+  HANDLE h = FindFirstFileW(path_join(addon, L"*", NULL), &fd);
   if (h == INVALID_HANDLE_VALUE) return NULL;
   wchar_t *found = NULL;
   do {
     if ((fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) &&
-        wcscmp(fd.cFileName, L".") != 0 && wcscmp(fd.cFileName, L"..") != 0) {
+        !weq(fd.cFileName, L".") && !weq(fd.cFileName, L"..")) {
       wchar_t *c = path_join(addon, fd.cFileName, L"bin", exe_name, NULL);
       if (file_exists(c)) { found = c; break; }
     }
@@ -314,11 +326,7 @@ static int run_rackup(const wchar_t *home) {
      so rackup's own runtime is not affected (as bin/rackup does). */
   for (const wchar_t **v = racket_env_vars; *v; v++) {
     wchar_t *val = get_env(*v);
-    if (!is_blank(val)) {
-      wchar_t saved[128];
-      swprintf(saved, 128, L"_RACKUP_ORIG_%ls", *v);
-      SetEnvironmentVariableW(saved, val);
-    }
+    if (!is_blank(val)) SetEnvironmentVariableW(wcat(L"_RACKUP_ORIG_", *v, NULL), val);
     SetEnvironmentVariableW(*v, NULL);
   }
   SetEnvironmentVariableW(L"RACKUP_HOME", home);
@@ -331,8 +339,10 @@ static int run_rackup(const wchar_t *home) {
     wchar_t *current = follow_dir_pointer(path_join(home, L"runtime", L"current", NULL));
     wchar_t *bin = follow_dir_pointer(path_join(current, L"bin", NULL));
     wchar_t *racket = path_join(bin, L"racket.exe", NULL);
-    if (!file_exists(racket))
-      die(1, L"hidden runtime is missing (%ls); reinstall rackup", racket);
+    if (!file_exists(racket)) {
+      eput(wcat(L"rackup: hidden runtime is missing (", racket, L"); reinstall rackup\n", NULL));
+      return 1;
+    }
     wchar_t *addon = path_join(home, L"runtime", L"addon", NULL);
     CreateDirectoryW(addon, NULL);
     wchar_t *core = path_join(home, L"libexec", L"rackup-core.rkt", NULL);
@@ -344,9 +354,7 @@ static int run_rackup(const wchar_t *home) {
     /* The running shim (and maybe the shell's cwd) keeps files in
        RACKUP_HOME open, so delete it from a detached helper once this
        process has exited. */
-    size_t n = wcslen(home) + 128;
-    wchar_t *cmd = xalloc(n);
-    swprintf(cmd, n, L"cmd.exe /d /c ping -n 3 127.0.0.1 >nul & rmdir /s /q \"%ls\"", home);
+    wchar_t *cmd = wcat(L"cmd.exe /d /c ping -n 3 127.0.0.1 >nul & rmdir /s /q \"", home, L"\"", NULL);
     STARTUPINFOW si;
     PROCESS_INFORMATION pi;
     memset(&si, 0, sizeof(si));
@@ -356,31 +364,41 @@ static int run_rackup(const wchar_t *home) {
       CloseHandle(pi.hThread);
       CloseHandle(pi.hProcess);
     } else {
-      fwprintf(stderr, L"rackup: could not remove %ls; delete it by hand\n", home);
+      eput(wcat(L"rackup: could not remove ", home, L"; delete it by hand\n", NULL));
     }
     return 0;
   }
   return (int)code;
 }
 
-int wmain(int argc, wchar_t **argv) {
-  (void)argc;
-  (void)argv;
-  wchar_t *self_dir, *name;
-  self_location(&self_dir, &name);
+/* Dispatch for the shim at `shim` (its full path): pick the tool from
+   the file name and run it. */
+static int shim_main(const wchar_t *shim) {
+  wchar_t *dir = wdup(shim);
+  wchar_t *slash = dir;
+  for (wchar_t *c = dir; *c; c++)
+    if (*c == L'\\' || *c == L'/') slash = c;
+  wchar_t *name = wdup(slash == dir ? dir : slash + 1);
+  *slash = 0;
+  size_t n = wlen(name);
+  if (n > 4 && lstrcmpiW(name + n - 4, L".exe") == 0) name[n - 4] = 0;
+  for (wchar_t *c = name; *c; c++) *c = to_lower(*c);
 
   wchar_t *home = get_env(L"RACKUP_HOME");
   if (is_blank(home)) {
-    home = path_join(self_dir, L"..", NULL);
-    wchar_t full[MAX_PATH * 4];
-    if (GetFullPathNameW(home, MAX_PATH * 4, full, NULL)) home = wdup(full);
+    wchar_t *rel = path_join(dir, L"..", NULL);
+    DWORD need = GetFullPathNameW(rel, 0, NULL, NULL);
+    home = wnew(need);
+    if (!GetFullPathNameW(rel, need, home, NULL)) home = rel;
   }
 
-  if (wcscmp(name, L"rackup") == 0) return run_rackup(home);
-  if (wcscmp(name, L"rackup-shim") == 0)
-    die(2, L"this is rackup's shim dispatcher; run a tool through its shim instead");
-  if (wcscmp(name, L"r") == 0) name = wdup(L"racket");
-  if (wcscmp(name, L"dr") == 0) name = wdup(L"drracket");
+  if (weq(name, L"rackup")) return run_rackup(home);
+  if (weq(name, L"rackup-shim")) {
+    eput(L"rackup: this is rackup's shim dispatcher; run a tool through its shim instead\n");
+    return 2;
+  }
+  if (weq(name, L"r")) name = wdup(L"racket");
+  if (weq(name, L"dr")) name = wdup(L"drracket");
 
   /* Active toolchain: RACKUP_TOOLCHAIN, else the default.  A blank
      RACKUP_TOOLCHAIN counts as unset, and an invalid default as none. */
@@ -394,20 +412,20 @@ int wmain(int argc, wchar_t **argv) {
   }
   if (!active) active = default_id;
   if (!active) {
-    fwprintf(stderr,
-             L"rackup: '%ls' is managed by rackup, but no active toolchain is configured.\n"
-             L"Install one with: rackup install stable\n"
-             L"Or select one with: rackup default <toolchain>\n"
-             L"Inspect choices with: rackup list | rackup available --limit 20\n", name);
+    eput(wcat(L"rackup: '", name, L"' is managed by rackup, but no active toolchain is configured.\n"
+              L"Install one with: rackup install stable\n"
+              L"Or select one with: rackup default <toolchain>\n"
+              L"Inspect choices with: rackup list | rackup available --limit 20\n", NULL));
     return 2;
   }
-  if (!valid_id(active)) die(2, L"invalid toolchain ID: %ls", active);
+  if (!valid_id(active)) {
+    eput(wcat(L"rackup: invalid toolchain ID: ", active, L"\n", NULL));
+    return 2;
+  }
 
   wchar_t *tc_dir = path_join(home, L"toolchains", active, NULL);
   wchar_t *bin = follow_dir_pointer(path_join(tc_dir, L"bin", NULL));
-  wchar_t *exe_name = xalloc(wcslen(name) + 5);
-  wcscpy(exe_name, name);
-  wcscat(exe_name, L".exe");
+  wchar_t *exe_name = wcat(name, L".exe", NULL);
   wchar_t *target = path_join(bin, exe_name, NULL);
 
   /* The addon dir comes from the toolchain, never from the shell, and a
@@ -431,18 +449,39 @@ int wmain(int argc, wchar_t **argv) {
   if (!file_exists(target)) {
     wchar_t *alt = find_addon_exe(addon, exe_name);
     if (!alt) {
-      fwprintf(stderr, L"rackup: executable '%ls' not found in toolchain '%ls'\n", name, active);
+      eput(wcat(L"rackup: executable '", name, L"' not found in toolchain '", active, L"'\n", NULL));
       if (!is_blank(env_tc)) {
         if (default_id)
-          fwprintf(stderr, L"rackup: active toolchain came from RACKUP_TOOLCHAIN and overrides default toolchain '%ls'.\n", default_id);
+          eput(wcat(L"rackup: active toolchain came from RACKUP_TOOLCHAIN and overrides default toolchain '",
+                    default_id, L"'.\n", NULL));
         else
-          fwprintf(stderr, L"rackup: active toolchain came from RACKUP_TOOLCHAIN.\n");
-        fwprintf(stderr, L"Clear it with: rackup switch --unset\n");
+          eput(L"rackup: active toolchain came from RACKUP_TOOLCHAIN.\n");
+        eput(L"Clear it with: rackup switch --unset\n");
       }
-      fwprintf(stderr, L"Try: rackup which %ls --toolchain %ls\n", name, active);
+      eput(wcat(L"Try: rackup which ", name, L" --toolchain ", active, L"\n", NULL));
       return 127;
     }
     target = alt;
   }
   return (int)run(target, NULL);
 }
+
+/* The full path of the running executable. */
+static wchar_t *self_path(void) {
+  DWORD cap = MAX_PATH;
+  for (;;) {
+    wchar_t *buf = wnew(cap);
+    DWORD n = GetModuleFileNameW(NULL, buf, cap);
+    if (n == 0) {
+      eput(L"rackup: cannot determine shim path\n");
+      ExitProcess(1);
+    }
+    if (n < cap) return buf;
+    cap *= 2;
+  }
+}
+
+void shim_entry(void) {
+  ExitProcess((UINT)shim_main(self_path()));
+}
+

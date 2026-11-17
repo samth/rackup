@@ -129,8 +129,10 @@
    (cond
      [mingw-gcc
       (define shim-exe (build-path out-dir "rackup-shim-x86_64-win32.exe"))
-      (run mingw-gcc "-O2" "-s" "-municode" "-o" shim-exe
-           (build-path root-dir "libexec" "rackup" "windows" "rackup-shim.c"))
+      ;; No C runtime, only kernel32: the shim is about 12 KB.
+      (run mingw-gcc "-Os" "-s" "-nostdlib" "-fno-builtin" "-e" "shim_entry" "-o" shim-exe
+           (build-path root-dir "libexec" "rackup" "windows" "rackup-shim.c")
+           "-lkernel32")
       (define shim-sha256
         (bytes->hex-string (call-with-input-file shim-exe sha256-bytes)))
       (call-with-output-file (build-path out-dir "rackup-shim-x86_64-win32.exe.sha256")

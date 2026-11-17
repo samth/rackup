@@ -313,11 +313,34 @@ EOF
 ;; the shim looks at its own file name to pick the tool), since symlinks
 ;; need Developer Mode there.  A shim that already matches is left
 ;; alone, so a reshim does not fail on a shim that is running.
+;;
+;; Windows will not delete or overwrite a running executable, but it
+;; will rename one, so a stale shim that is running (rackup.exe always
+;; is during a reshim) is moved aside first and removed by a later
+;; reshim, once nothing runs it.
 (define (install-windows-shim! shim)
   (define dispatcher (rackup-shim-dispatcher))
   (unless (and (file-exists? shim) (same-file-contents? shim dispatcher))
-    (delete-path! shim)
+    (when (file-exists? shim)
+      (with-handlers ([exn:fail:filesystem?
+                       (lambda (_) (rename-file-or-directory shim (stale-shim-path shim)))])
+        (delete-file shim)))
     (copy-file dispatcher shim)))
+
+(define stale-shim-prefix ".rackup-stale-")
+
+(define (stale-shim-path shim)
+  (build-path (rackup-shims-dir)
+              (format "~a~a-~a" stale-shim-prefix (current-milliseconds)
+                      (path->string (file-name-from-path shim)))))
+
+;; Remove shims moved aside by `install-windows-shim!`; one still
+;; running stays until the next reshim.
+(define (delete-stale-shims!)
+  (for ([p (in-list (directory-list (rackup-shims-dir) #:build? #t))]
+        #:when (string-prefix? (path->string (file-name-from-path p)) stale-shim-prefix))
+    (with-handlers ([exn:fail:filesystem? void])
+      (delete-file p))))
 
 (define (same-file-contents? a b)
   (and (= (file-size a) (file-size b))
@@ -358,10 +381,24 @@ EOF
 
 (define (rackup-managed-shim? p)
   (if (windows?)
-      (and (file-exists? p)
-           (file-exists? (rackup-shim-dispatcher))
-           (same-file-contents? p (rackup-shim-dispatcher)))
+      (windows-shim-file? p)
       (rackup-managed-shim?/link p)))
+
+;; A Windows shim from any rackup version: an .exe that contains the
+;; dispatcher's self-description (a UTF-16 string in rackup-shim.c), so
+;; a shim for a removed tool is found even after the dispatcher changed.
+(define windows-shim-signature
+  (byte-regexp (regexp-quote (string->bytes/latin-1
+                         (list->string
+                          (for*/list ([c (in-string "is rackup's shim dispatcher")]
+                                      [ch (in-list (list c #\nul))])
+                            ch))))))
+
+(define (windows-shim-file? p)
+  (and (file-exists? p)
+       (executable-name? p)
+       (< (file-size p) (* 1024 1024))
+       (regexp-match? windows-shim-signature (file->bytes p))))
 
 (define (rackup-managed-shim?/link p)
   (and (link-exists? p)
@@ -677,6 +714,7 @@ EOF
           (backfill-installed-env-vars! id meta)))))
 
 (define/state-locked (reshim!)
+  (when (windows?) (delete-stale-shims!))
   (regenerate-env-files!)
   (ensure-shim-dispatcher!)
   (ensure-core-rackup-shim!)
