@@ -25,6 +25,7 @@
          "env.rkt"
          "error.rkt"
          "paths.rkt"
+         "platform.rkt"
          "process.rkt"
          "rktd-io.rkt"
          "shims.rkt"
@@ -46,7 +47,7 @@
 (define current-native-addon-dir-proc
   (make-parameter
    (lambda (target-id)
-     (define bin (path->string (rackup-toolchain-bin-link target-id)))
+     (define bin (path->string (rackup-toolchain-bin-dir target-id)))
      (define-values (_version _variant addon)
        (probe-local-racket-version+variant+addon-dir bin '()))
      (and addon (string->path addon)))))
@@ -97,10 +98,7 @@
       (environment-variables-set! env key (string->bytes/utf-8 (cdr kv)))))
   (define shims (path->string (rackup-shims-dir)))
   (define old-path (or (getenv "PATH") ""))
-  (define new-path
-    (if (regexp-match? (pregexp (format "(^|:)~a(:|$)" (regexp-quote shims))) old-path)
-        old-path
-        (string-append shims ":" old-path)))
+  (define new-path (prepend-path-list-entry shims old-path))
   (environment-variables-set! env #"PATH" (string->bytes/utf-8 new-path))
   env)
 

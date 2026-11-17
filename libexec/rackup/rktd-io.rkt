@@ -3,7 +3,8 @@
 (require racket/file
          racket/path
          racket/port
-         racket/string)
+         racket/string
+         "platform.rkt")
 
 (provide read-rktd/port
          read-rktd-file
@@ -39,7 +40,8 @@
 ;; an existing file at `path` — the stdlib temp file starts with
 ;; default permissions.
 (define (write-file-atomically path writer)
-  (define perms (and (file-exists? path) (file-or-directory-permissions path 'bits)))
+  (define perms (and (file-exists? path) (not (windows?))
+                     (file-or-directory-permissions path 'bits)))
   (make-directory* (or (path-only path) (current-directory)))
   (call-with-atomic-output-file path (lambda (out _tmp) (writer out)))
   (when perms

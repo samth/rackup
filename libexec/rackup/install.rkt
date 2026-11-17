@@ -21,6 +21,7 @@
          "checksum.rkt"
          "error.rkt"
          "fs.rkt"
+         "platform.rkt"
          "process.rkt"
          "security.rkt"
          "text.rkt"
@@ -165,7 +166,7 @@
 
 (define (make-bin-link! id real-bin-dir)
   (define link (rackup-toolchain-bin-link id))
-  (replace-path! link real-bin-dir #:mode 'link)
+  (replace-dir-pointer! link real-bin-dir)
   link)
 
 (define (link-executable-into-dir! dir src [name #f])
@@ -655,7 +656,7 @@
     (delete-toolchain-dir! tc-dir))
   (define layout (detect-local-source-layout local-path))
   (define real-bin-dir (string->path (hash-ref layout 'bin-dir)))
-  (define racket-exe (build-path real-bin-dir "racket"))
+  (define racket-exe (build-path real-bin-dir (exe-file-name "racket")))
   (unless (file-executable?/safe racket-exe)
     (rackup-error "linked toolchain does not contain an executable racket binary at ~a"
                   (path->string* racket-exe)))
@@ -681,7 +682,7 @@
                                    #:installed-at [installed-at #f]
                                    #:last-rebuilt-at [last-rebuilt-at #f])
   (define real-bin-dir (string->path (hash-ref layout 'bin-dir)))
-  (define racket-exe (build-path real-bin-dir "racket"))
+  (define racket-exe (build-path real-bin-dir (exe-file-name "racket")))
   (unless (file-executable?/safe racket-exe)
     (rackup-error "linked toolchain does not contain an executable racket binary at ~a"
                   (path->string* racket-exe)))
@@ -851,6 +852,9 @@
             (extract-tgz-installer! installer-path install-root
                                     #:check-label 'linux-tgz-installer
                                     #:announce (lambda (msg) (install-verbose "~a" msg)))]
+           ["exe"
+            (extract-nsis-installer! installer-path install-root
+                                     #:announce (lambda (msg) (install-verbose "~a" msg)))]
            ["dmg"
             (install-from-dmg! installer-path install-root
                                #:attach-label 'hdiutil-attach
@@ -898,8 +902,7 @@
 ;; Run raco with the correct env for a toolchain.  Returns stdout as a
 ;; string on success, #f on failure.
 (define (capture-raco-output id . raco-args)
-  (define bin (rackup-toolchain-bin-link id))
-  (define raco-exe (build-path bin "raco"))
+  (define raco-exe (rackup-toolchain-exe-path id "raco"))
   (apply capture-program-output
          #:env (toolchain-runtime-env id)
          raco-exe
@@ -908,8 +911,7 @@
 ;; Run racket -e with the correct env for a toolchain.  Returns stdout
 ;; as a string on success, #f on failure.
 (define (capture-racket-eval-output id expr-text)
-  (define bin (rackup-toolchain-bin-link id))
-  (define racket-exe (build-path bin "racket"))
+  (define racket-exe (rackup-toolchain-exe-path id "racket"))
   (capture-program-output
    #:env (toolchain-runtime-env id)
    racket-exe
@@ -1052,8 +1054,7 @@
                    (length pkgs)
                    (if (= (length pkgs) 1) "" "s")
                    (string-join pkgs " "))
-     (define bin (rackup-toolchain-bin-link new-id))
-     (define raco-exe (build-path bin "raco"))
+     (define raco-exe (rackup-toolchain-exe-path new-id "raco"))
      (define ok?
        (call-with-env-overlay
         (toolchain-runtime-env new-id)

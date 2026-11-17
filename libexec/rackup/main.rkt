@@ -22,6 +22,7 @@
          "mac-apps.rkt"
          "migrate.rkt"
          "paths.rkt"
+         "platform.rkt"
          "rebuild.rkt"
          "remote.rkt"
          "rktd-io.rkt"
@@ -573,10 +574,7 @@
       [else (environment-variables-set! env key val)]))
   (define old-path (or (getenv "PATH") ""))
   (define shims (path->string (rackup-shims-dir)))
-  (define runtime-path
-    (if (regexp-match? (pregexp (format "(^|:)~a(:|$)" (regexp-quote shims))) old-path)
-        old-path
-        (string-append shims ":" old-path)))
+  (define runtime-path (prepend-path-list-entry shims old-path))
   (environment-variables-set! env #"PATH" (string->bytes/utf-8 runtime-path))
   (define cmd (car command))
   (define cmd-args (cdr command))

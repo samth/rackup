@@ -11,6 +11,7 @@
          "installer-backend.rkt"
          "lock.rkt"
          "paths.rkt"
+         "platform.rkt"
          "remote.rkt"
          "rktd-io.rkt"
          "checksum.rkt"
@@ -54,13 +55,9 @@
           (distribution->string (hash-ref req 'distribution))))
 
 (define (runtime-current-id)
-  (define current (rackup-runtime-current-link))
-  (cond
-    [(link-exists? current)
-     (try-or #f
-       (define target (resolve-path current))
-       (and target (path-basename-string target)))]
-    [else #f]))
+  (try-or #f
+    (define target (dir-pointer-target (rackup-runtime-current-link)))
+    (and target (path-basename-string target))))
 
 (define (runtime-current-meta)
   (define id (runtime-current-id))
@@ -82,7 +79,7 @@
                  dest))
 
 (define (replace-link! link-path target-path)
-  (replace-path! link-path target-path #:mode 'link))
+  (replace-dir-pointer! link-path target-path))
 
 (define (write-runtime-meta! id
                              req
@@ -174,7 +171,9 @@
                 (host-platform-token)))
         (define real-bin
           (with-handlers ([exn:fail? (lambda (_) (rackup-runtime-current-bin-dir))])
-            (resolve-path (rackup-runtime-current-bin-dir))))
+            (or (dir-pointer-target
+                 (build-path (follow-dir-pointer (rackup-runtime-current-link)) "bin"))
+                (rackup-runtime-current-bin-dir))))
         (write-runtime-meta! current-id
                              req
                              real-bin
@@ -248,7 +247,7 @@
                                         #:sha1 (hash-ref req 'installer-sha1 #f)
                                         #:announce announce-runtime-installer-download)]
              [installer-ext (detect-installer-type installer-file)])
-        (if (and (directory-exists? version-dir) (file-exists? (build-path bin-link "racket")))
+        (if (and (directory-exists? version-dir) (file-exists? (build-path (follow-dir-pointer bin-link) (exe-file-name "racket"))))
             (begin
               (replace-link! (rackup-runtime-current-link) version-dir)
               (adopt-hidden-runtime! quiet?))

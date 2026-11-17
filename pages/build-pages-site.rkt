@@ -122,6 +122,32 @@
      (call-with-output-file p (lambda (out) (display install-content out)) #:exists 'truncate/replace)
      (file-or-directory-permissions p #o755))
 
+   ;; Windows: build the native shim dispatcher (every shim is a copy of
+   ;; it) with mingw-w64, then fill install.ps1's checksums.  Both are
+   ;; skipped, with a warning, when no mingw-w64 compiler is installed.
+   (define mingw-gcc (find-executable-path "x86_64-w64-mingw32-gcc"))
+   (cond
+     [mingw-gcc
+      (define shim-exe (build-path out-dir "rackup-shim-x86_64-win32.exe"))
+      (run mingw-gcc "-O2" "-s" "-municode" "-o" shim-exe
+           (build-path root-dir "libexec" "rackup" "windows" "rackup-shim.c"))
+      (define shim-sha256
+        (bytes->hex-string (call-with-input-file shim-exe sha256-bytes)))
+      (call-with-output-file (build-path out-dir "rackup-shim-x86_64-win32.exe.sha256")
+        (lambda (out) (fprintf out "~a  rackup-shim-x86_64-win32.exe\n" shim-sha256))
+        #:exists 'truncate/replace)
+      (define ps1-content
+        (for/fold ([s (file->string (build-path root-dir "scripts" "install.ps1"))])
+                  ([sub (in-list (list (cons "@@RACKUP_SRC_SHA256@@" src-sha256)
+                                       (cons "@@RACKUP_SHIM_SHA256@@" shim-sha256)
+                                       (cons "@@RACKUP_RUNTIME_CHECKSUMS@@" runtime-checksums-str)))])
+          (string-replace s (car sub) (cdr sub))))
+      (call-with-output-file (build-path out-dir "install.ps1")
+        (lambda (out) (display ps1-content out))
+        #:exists 'truncate/replace)]
+     [else
+      (eprintf "warning: x86_64-w64-mingw32-gcc not found; skipping Windows shim and install.ps1\n")])
+
    ;; Write install.sh.sha256 sidecar so `rackup self-upgrade` can
    ;; verify the downloaded install script.
    (define install-sh-sha256

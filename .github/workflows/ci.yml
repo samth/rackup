@@ -25,7 +25,10 @@ jobs:
           version: stable
       - name: Install Pages build deps
         shell: bash
-        run: raco pkg install --auto --skip-installed --batch plt-web commonmark
+        run: |
+          raco pkg install --auto --skip-installed --batch plt-web commonmark
+          # Builds the Windows shim (rackup-shim-x86_64-win32.exe).
+          sudo apt-get update -q && sudo apt-get install -y -q gcc-mingw-w64-x86-64
       - name: Download all exe artifacts
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
@@ -38,6 +41,13 @@ jobs:
           test -f /tmp/rackup-pages-site/index.html
           test -f /tmp/rackup-pages-site/install.sh
           test -f /tmp/rackup-pages-site/rackup-src.tar.gz
+          test -f /tmp/rackup-pages-site/install.ps1
+          test -f /tmp/rackup-pages-site/rackup-shim-x86_64-win32.exe
+          test -f /tmp/rackup-pages-site/rackup-shim-x86_64-win32.exe.sha256
+          if grep -n '@@RACKUP_' /tmp/rackup-pages-site/install.ps1; then
+            echo "install.ps1 has unfilled placeholders" >&2
+            exit 1
+          fi
           test -f /tmp/rackup-pages-site/js/libs/jquery.mobile.custom.min.js
           grep -Fq 'btn.innerHTML' /tmp/rackup-pages-site/index.html
           grep -Fq 'sha256sum -c' /tmp/rackup-pages-site/index.html
@@ -789,6 +799,51 @@ jobs:
 
   # Single required status check for branch protection and the merge queue.
   # Fails if any other job failed or was cancelled; skipped jobs are fine.
+  # Windows support is a prototype: this job installs rackup with
+  # install.ps1 from the checkout, then installs Minimal and full Racket
+  # and runs them through the native shims.  The runner image ships
+  # mingw-w64 gcc (for the shim) and 7-Zip (for the full installer).
+  windows-e2e:
+    name: Windows E2E (prototype)
+    runs-on: windows-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Build shim
+        run: gcc -O2 -s -municode -o "$env:RUNNER_TEMP\rackup-shim.exe" libexec/rackup/windows/rackup-shim.c
+      - name: Install rackup with install.ps1
+        run: |
+          ./scripts/install.ps1 -SourceDir . -ShimExe "$env:RUNNER_TEMP\rackup-shim.exe" -RackupHome "$env:RUNNER_TEMP\rk" -NoModifyPath
+      - name: Install toolchains and run them through shims
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          $env:RACKUP_HOME = "$env:RUNNER_TEMP\rk"
+          $shims = "$env:RACKUP_HOME\shims"
+          & "$shims\rackup.exe" install stable --distribution minimal
+          & "$shims\racket.exe" -e '(displayln (version))'
+          & "$shims\raco.exe" pkg show
+          & "$shims\rackup.exe" install stable
+          & "$shims\rackup.exe" list
+          $ids = & "$shims\rackup.exe" list --ids
+          $full = $ids | Where-Object { $_ -like '*-full' }
+          $minimal = $ids | Where-Object { $_ -like '*-minimal' }
+          & "$shims\rackup.exe" default $full
+          & "$shims\racket.exe" -l typed/racket/base -e '(: x Integer) (define x 41) (displayln (add1 x))'
+          & "$shims\raco.exe" pkg install --auto --no-docs -u gregor-lib
+          & "$shims\racket.exe" -l racket/base -l gregor -e '(displayln (date 2026 11 17))'
+          & "$shims\rackup.exe" doctor
+          & "$shims\rackup.exe" remove $minimal
+          $PSNativeCommandUseErrorActionPreference = $false
+          & "$shims\racket.exe" -e '(exit 7)'
+          if ($LASTEXITCODE -ne 7) { throw "exit status not passed through: $LASTEXITCODE" }
+          & "$shims\rackup.exe" uninstall --dangerously-delete-without-prompting $env:RACKUP_HOME
+          if ($LASTEXITCODE -ne 0) { throw "uninstall failed: $LASTEXITCODE" }
+          Start-Sleep -Seconds 30
+          if (Test-Path $env:RACKUP_HOME) { throw "RACKUP_HOME still exists after uninstall" }
+
   ci-success:
     name: CI Success
     if: always()
@@ -811,6 +866,7 @@ jobs:
       - linked-checkout-real-build
       - macos-e2e
       - macos-e2e-bootstrap
+      - windows-e2e
     runs-on: ubuntu-latest
     steps:
       - name: Check that every job passed

@@ -780,6 +780,10 @@
         (match platform
           ["macosx"  '("tgz" "dmg")]
           ["linux"   '("sh" "tgz")]
+          ;; Windows publishes a .tgz only for Minimal Racket; the full
+          ;; distribution is an NSIS .exe that rackup unpacks without
+          ;; running (see `extract-nsis-installer!`).
+          ["win32"   '("tgz" "exe")]
           [_ (rackup-error "no installer extension preferences for platform: ~a" platform)])))
   (define (variant-for version)
     (define legacy-plt? (legacy-plt-version? version))

@@ -7,6 +7,7 @@
          racket/string
          "error.rkt"
          "paths.rkt"
+         "platform.rkt"
          "rktd-io.rkt"
          "state-lock.rkt"
          "fs.rkt"
@@ -303,7 +304,7 @@
      (define fallbacks
        (filter (lambda (s) (not (equal? s key)))
                (map serialize-compiled-root roots-with-same)))
-     (string-join (cons key fallbacks) ":")]))
+     (string-join (cons key fallbacks) (path-list-separator))]))
 
 ;; Build the env-var alist recorded for a toolchain: PLTADDONDIR (when
 ;; a usable addon dir is known) and PLTCOMPILEDROOTS (when the

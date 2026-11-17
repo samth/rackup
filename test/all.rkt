@@ -13,6 +13,7 @@
          (submod "mac-apps.rkt" test)
          (submod "migrate.rkt" test)
          (submod "paths.rkt" test)
+         (submod "platform.rkt" test)
          (submod "process.rkt" test)
          (submod "rebuild.rkt" test)
          (submod "remote.rkt" test)
