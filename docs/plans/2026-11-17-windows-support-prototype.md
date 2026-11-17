@@ -213,13 +213,22 @@ at once while console tools still pass their exit codes, and a
 Wine-built `rackup-core.exe` installing and running a toolchain. Not
 testable here: install.ps1, self-upgrade, the ARM64 shim, and nmake.
 
+## Third pass
+
+- GUI-subsystem shims: reshim patches the PE Subsystem field of the
+  dispatcher copy for GUI tools (found by reading each installed
+  executable's header), so DrRacket started from Explorer opens no
+  console. Without a console, the shim's error messages go to a message
+  box (user32 is loaded only then).
+- Git Bash: `rackup init --shell bash` writes a helper that converts
+  `RACKUP_HOME` with `cygpath -u` and calls `shims/rackup.exe`; `switch`
+  and completion work as on Unix. CI runs `switch` in an interactive
+  login Git Bash and checks the shims' PE subsystems.
+
 ## Still not done
 
-- A GUI-subsystem shim variant, so launching a shim from Explorer or a
-  shortcut does not flash a console window.
 - An ARM64 prebuilt `rackup-core.exe` (needs Racket on `windows-11-arm`
   in `build-exe.yml`).
-- Bash completion and `switch` for Git Bash on Windows.
 - Code signing for the shim and `rackup-core.exe` (SmartScreen).
 - Upstream: ask distro-build to publish a full `.tgz` for Windows next
   to the Minimal one, which would remove the 7-Zip dependency for new

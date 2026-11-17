@@ -318,14 +318,33 @@ EOF
 ;; will rename one, so a stale shim that is running (rackup.exe always
 ;; is during a reshim) is moved aside first and removed by a later
 ;; reshim, once nothing runs it.
-(define (install-windows-shim! shim)
-  (define dispatcher (rackup-shim-dispatcher))
-  (unless (and (file-exists? shim) (same-file-contents? shim dispatcher))
+;;
+;; The shim for a GUI program (DrRacket) is a copy whose PE header says
+;; GUI subsystem, so starting it from Explorer or a shortcut opens no
+;; console window.  From a terminal it behaves the same, since the shim
+;; never waits for a GUI program anyway.
+(define (install-windows-shim! shim [gui? #f])
+  (define dispatcher (file->bytes (rackup-shim-dispatcher)))
+  (define want (if gui? (pe-with-subsystem dispatcher pe-subsystem-gui) dispatcher))
+  (unless (and (file-exists? shim) (equal? (file->bytes shim) want))
     (when (file-exists? shim)
       (with-handlers ([exn:fail:filesystem?
                        (lambda (_) (rename-file-or-directory shim (stale-shim-path shim)))])
         (delete-file shim)))
-    (copy-file dispatcher shim)))
+    (call-with-output-file shim (lambda (out) (write-bytes want out)))))
+
+;; Tool names whose executable is a GUI program in some installed
+;; toolchain, plus the `dr` alias when drracket is one.
+(define (gui-tool-names)
+  (define names
+    (for*/list ([id (in-list (installed-toolchain-ids))]
+                [dir (in-value (with-handlers ([exn:fail? (lambda (e) #f)])
+                                 (rackup-toolchain-bin-dir id)))]
+                #:when (and dir (directory-exists? dir))
+                [p (in-list (directory-list dir #:build? #t))]
+                #:when (and (executable-name? p) (file-exists? p) (gui-executable? p)))
+      (exe-file->tool-name p)))
+  (list->set (if (member "drracket" names) (cons "dr" names) names)))
 
 (define stale-shim-prefix ".rackup-stale-")
 
@@ -341,10 +360,6 @@ EOF
         #:when (string-prefix? (path->string (file-name-from-path p)) stale-shim-prefix))
     (with-handlers ([exn:fail:filesystem? void])
       (delete-file p))))
-
-(define (same-file-contents? a b)
-  (and (= (file-size a) (file-size b))
-       (equal? (file->bytes a) (file->bytes b))))
 
 (define (ensure-core-rackup-shim!)
   (ensure-rackup-layout!)
@@ -730,11 +745,12 @@ EOF
                        bootstrap-shim-names
                        (all-installed-executables)
                        (if aliases-on? (map car shim-alias-pairs) null))))
+  (define gui-names (if (windows?) (gui-tool-names) (set)))
   (for ([name (in-set desired)])
     (unless (equal? name "rackup")
       (define p (rackup-shim-path name))
       (if (windows?)
-          (install-windows-shim! p)
+          (install-windows-shim! p (set-member? gui-names name))
           (replace-path! p dispatcher #:mode 'link))))
   (for ([p (in-list (directory-list shims-dir #:build? #t))])
     (define name (exe-file->tool-name p))

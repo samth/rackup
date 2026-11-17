@@ -81,11 +81,21 @@ static wchar_t *wnum(unsigned long v) {
   return wdup(buf + i);
 }
 
+/* Messages written while there is no stderr: a shim for a GUI program is
+   itself a GUI-subsystem copy (rackup patches its PE header, see
+   shims.rkt), so started from Explorer it has no console.  They are shown
+   in one message box when the shim exits. */
+static wchar_t *pending_messages;
+
 /* Write to stderr: UTF-16 to a console, UTF-8 to a file or pipe. */
 static void eput(const wchar_t *s) {
   HANDLE h = GetStdHandle(STD_ERROR_HANDLE);
   DWORD n = (DWORD)wlen(s), mode, written;
-  if (h == NULL || h == INVALID_HANDLE_VALUE || n == 0) return;
+  if (n == 0) return;
+  if (h == NULL || h == INVALID_HANDLE_VALUE) {
+    pending_messages = wcat(pending_messages ? pending_messages : L"", s, NULL);
+    return;
+  }
   if (GetConsoleMode(h, &mode)) {
     WriteConsoleW(h, s, n, &written, NULL);
   } else {
@@ -524,7 +534,19 @@ static wchar_t *self_path(void) {
   }
 }
 
+/* Show pending_messages in a message box.  user32 is loaded only here,
+   so a console shim never maps it. */
+typedef int (WINAPI *message_box_fn)(HWND, LPCWSTR, LPCWSTR, UINT);
+static void show_pending_messages(void) {
+  HMODULE user32 = LoadLibraryW(L"user32.dll");
+  if (!user32) return;
+  message_box_fn box = (message_box_fn)(void *)GetProcAddress(user32, "MessageBoxW");
+  if (box) box(NULL, pending_messages, L"rackup", MB_OK | MB_ICONERROR);
+}
+
 void shim_entry(void) {
-  ExitProcess((UINT)shim_main(self_path()));
+  int code = shim_main(self_path());
+  if (pending_messages) show_pending_messages();
+  ExitProcess(code);
 }
 

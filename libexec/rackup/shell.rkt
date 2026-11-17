@@ -72,19 +72,54 @@
       (write-posix-shell-helper-script shell-name)))
 
 (define (write-posix-shell-helper-script shell-name)
+  (define body
+    (with-output-to-string
+      (lambda ()
+        (output (include/text "templates/shell-wrapper.scrbl"))
+        (newline)
+        (match shell-name
+          ["bash" (write-bash-completion-script)]
+          ["zsh" (write-zsh-completion-script)]))))
   (display "# rackup shell helper\n")
-  (display path-prepend)
-  (output (include/text "templates/shell-wrapper.scrbl"))
-  (newline)
-  (match shell-name
-    ["bash" (write-bash-completion-script)]
-    ["zsh" (write-zsh-completion-script)]))
+  (cond
+    [(git-bash?)
+     ;; Git Bash: rackup is the rackup.exe shim, and RACKUP_HOME is a
+     ;; Windows path, converted with cygpath for use in bash.
+     (display git-bash-home-fn)
+     (display (posix-path-prepend))
+     (display (string-replace
+               (string-replace body unix-home-expr/bin-rackup "$(_rackup_home)/shims/rackup.exe")
+               unix-home-expr "$(_rackup_home)"))]
+    [else
+     (display (posix-path-prepend))
+     (display body)]))
 
-(define path-prepend
+(define unix-home-expr "${RACKUP_HOME:-$HOME/.rackup}")
+(define unix-home-expr/bin-rackup (string-append unix-home-expr "/bin/rackup"))
+
+;; POSIX shells on Windows are Git Bash (MSYS2).  A parameter for tests.
+(define git-bash? (make-parameter (windows?)))
+
+;; Git Bash on Windows: RACKUP_HOME (or the default under LOCALAPPDATA)
+;; as a POSIX path, since its `C:` would split PATH.
+(define git-bash-home-fn
   (string-append
-   "if [ -d \"${RACKUP_HOME:-$HOME/.rackup}/shims\" ]; then\n"
-   "  case \":$PATH:\" in *\":${RACKUP_HOME:-$HOME/.rackup}/shims:\"*) ;;"
-   " *) export PATH=\"${RACKUP_HOME:-$HOME/.rackup}/shims:$PATH\" ;; esac\n"
+   "_rackup_home() {\n"
+   "  local h=\"${RACKUP_HOME:-$LOCALAPPDATA/rackup}\"\n"
+   "  if command -v cygpath >/dev/null 2>&1; then cygpath -u \"$h\"; else printf '%s\\n' \"$h\"; fi\n"
+   "}\n"))
+
+;; How shell code names RACKUP_HOME: in Git Bash through _rackup_home,
+;; which the helper defines.
+(define (posix-home-expr)
+  (if (git-bash?) "$(_rackup_home)" unix-home-expr))
+
+(define (posix-path-prepend)
+  (define home (posix-home-expr))
+  (string-append
+   "if [ -d \"" home "/shims\" ]; then\n"
+   "  case \":$PATH:\" in *\":" home "/shims:\"*) ;;"
+   " *) export PATH=\"" home "/shims:$PATH\" ;; esac\n"
    "fi\n"))
 
 (define ps-home-expr
@@ -171,11 +206,20 @@
                  end-marker "\n"))
 
 (define (posix-managed-rc-block shell-name)
-  (define shell-script
-    (string-append "${RACKUP_HOME:-$HOME/.rackup}/shell/rackup." shell-name))
-  (string-append start-marker "\n"
-                 "[ -f \"" shell-script "\" ] && . \"" shell-script "\"\n"
-                 end-marker "\n"))
+  (cond
+    [(git-bash?)
+     (string-append start-marker "\n"
+                    "_rackup_init_home=\"${RACKUP_HOME:-$LOCALAPPDATA/rackup}\"\n"
+                    "command -v cygpath >/dev/null 2>&1 && _rackup_init_home=\"$(cygpath -u \"$_rackup_init_home\")\"\n"
+                    "[ -f \"$_rackup_init_home/shell/rackup." shell-name "\" ] && . \"$_rackup_init_home/shell/rackup." shell-name "\"\n"
+                    "unset _rackup_init_home\n"
+                    end-marker "\n")]
+    [else
+     (define shell-script
+       (string-append unix-home-expr "/shell/rackup." shell-name))
+     (string-append start-marker "\n"
+                    "[ -f \"" shell-script "\" ] && . \"" shell-script "\"\n"
+                    end-marker "\n")]))
 
 (define (emit-shell-activation toolchain-id #:syntax [syntax (shell-syntax)])
   (unless (toolchain-exists? toolchain-id)
@@ -189,7 +233,7 @@
      (string-append ps-path-prepend
                     "$env:RACKUP_TOOLCHAIN = " (ps-single-quote toolchain-id) "\n")]
     [else
-     (string-append path-prepend
+     (string-append (posix-path-prepend)
                     "export RACKUP_TOOLCHAIN=" (sh-single-quote toolchain-id) "\n")]))
 
 (define (deactivation-extra-vars)
@@ -214,7 +258,7 @@
               (~a "Remove-Item -LiteralPath Env:" k " -ErrorAction SilentlyContinue\n")))]
     [else
      (apply string-append
-            path-prepend
+            (posix-path-prepend)
             (for/list ([k (in-list vars)])
               (~a "unset " k "\n")))]))
 
@@ -228,7 +272,7 @@
 
 (define (guess-shell)
   (cond
-    [(windows?) "powershell"]
+    [(windows?) (if (getenv "MSYSTEM") "bash" "powershell")]
     [(regexp-match? #px"/zsh$" (or (getenv "SHELL") "")) "zsh"]
     [else "bash"]))
 
@@ -257,6 +301,9 @@
   (or (for/first ([n (in-list bash-login-names)]
                   #:when (file-exists? (build-path home n)))
         (build-path home n))
+      ;; Not on Windows: Git Bash starts login shells, but when it finds
+      ;; ~/.bashrc and no login file it writes a ~/.bash_profile that
+      ;; sources ~/.bashrc, so our block in ~/.bashrc is enough.
       (and (current-macos?) (build-path home ".bash_profile"))))
 
 ;; The Documents folder, which holds PowerShell's profiles.  A parameter
@@ -323,7 +370,7 @@
          [else removed])])))
 
 (define (helper-shells)
-  (if (windows?) '("powershell") '("bash" "zsh")))
+  (if (windows?) '("powershell" "bash") '("bash" "zsh")))
 
 (define (write-shell-helper-files!)
   (make-directory* (rackup-shell-dir))
@@ -407,6 +454,8 @@
 
 (module+ for-testing
   (provide shell-helper-script
+           posix-managed-rc-block
+           git-bash?
            zsh-describe-escape
            powershell-profile-paths)
   (define (shell-helper-script shell-name)

@@ -887,6 +887,14 @@ jobs:
             $full = & "$shims\rackup.exe" list --ids | Where-Object { $_ -like '*-full' }
             & "$shims\rackup.exe" default $full
             & "$shims\racket.exe" -l typed/racket/base -e '(: x Integer) (define x 41) (displayln (add1 x))'
+            # GUI programs get GUI-subsystem shims (no console window from
+            # Explorer); console tools keep console shims.
+            function Get-Subsystem($f) {
+              $b = [IO.File]::ReadAllBytes($f)
+              [BitConverter]::ToUInt16($b, [BitConverter]::ToInt32($b, 0x3C) + 92)
+            }
+            if ((Get-Subsystem "$shims\drracket.exe") -ne 2) { throw "the drracket shim is not a GUI program" }
+            if ((Get-Subsystem "$shims\racket.exe") -ne 3) { throw "the racket shim is not a console program" }
             # DrRacket is a GUI program: its shim starts it and returns at once.
             $sw = [Diagnostics.Stopwatch]::StartNew()
             & "$shims\drracket.exe"
@@ -921,6 +929,21 @@ jobs:
             & $ps -NoLogo -NonInteractive -EncodedCommand $encoded
             if ($LASTEXITCODE -ne 0) { throw "$ps session failed" }
           }
+      - name: rackup switch in Git Bash
+        shell: bash
+        run: |
+          set -eu
+          rk="$(cygpath -u "$RACKUP_HOME")"
+          "$rk/shims/rackup.exe" init --shell bash
+          minimal="$("$rk/shims/rackup.exe" list --ids | tr -d '\r' | grep -- '-minimal$' | head -n 1)"
+          # A Git Bash window runs an interactive login shell.
+          bash -lic "set -eu
+            type rackup | head -n 1 | grep -q function
+            rackup switch '$minimal'
+            test \"\$RACKUP_TOOLCHAIN\" = '$minimal'
+            racket -e '(displayln (version))'
+            rackup switch --unset
+            test -z \"\${RACKUP_TOOLCHAIN:-}\""
       - name: self-upgrade replaces running files
         env:
           RACKUP_TESTING: "1"
@@ -946,6 +969,8 @@ jobs:
           if ([Environment]::GetEnvironmentVariable('RACKUP_HOME', 'User')) { throw "uninstall left RACKUP_HOME set" }
           $profile7 = Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'PowerShell\profile.ps1'
           if ((Test-Path $profile7) -and (Select-String -Quiet -SimpleMatch 'rackup initialize' $profile7)) { throw "uninstall left the profile block" }
+          $bashrc = Join-Path $env:USERPROFILE '.bashrc'
+          if ((Test-Path $bashrc) -and (Select-String -Quiet -SimpleMatch 'rackup initialize' $bashrc)) { throw "uninstall left the .bashrc block" }
           Start-Sleep -Seconds 30
           if (Test-Path $env:RACKUP_HOME) { throw "RACKUP_HOME still exists after uninstall" }
 

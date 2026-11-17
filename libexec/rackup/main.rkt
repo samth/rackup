@@ -411,7 +411,7 @@
     (eprintf "shell integration, and this shell has not loaded it.\n")
     (eprintf "  - If you have not run it yet: `rackup init`, then open a new shell.\n")
     (if (windows?)
-        (eprintf "  - To load it into this PowerShell now: `. $PROFILE.CurrentUserAllHosts`.\n")
+        (eprintf "  - To load it now: `. $PROFILE.CurrentUserAllHosts` (PowerShell) or `. ~~/.bashrc` (Git Bash).\n")
         (eprintf "  - To load it into this shell now: `. ~~/.bashrc` (bash) or `. ~~/.zshrc` (zsh).\n"))
     (eprintf "Without shell integration:\n")
     (eprintf "  - `rackup default set <toolchain>` sets the toolchain for every shell.\n")
