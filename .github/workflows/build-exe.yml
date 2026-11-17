@@ -55,10 +55,6 @@ jobs:
           distribution: full
           variant: CS
           version: stable
-      - name: Install scribble-text-lib (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: raco pkg install --auto --skip-installed --batch scribble-text-lib
       - name: Build and smoke-test executable distribution (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
