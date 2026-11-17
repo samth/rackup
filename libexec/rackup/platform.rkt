@@ -16,7 +16,8 @@
          exe-file->tool-name
          path-list-separator
          set-file-mode!
-         prepend-path-list-entry)
+         prepend-path-list-entry
+         powershell-environment)
 
 (define (windows?)
   (eq? (system-type 'os) 'windows))
@@ -66,3 +67,13 @@
 (define (set-file-mode! p mode)
   (unless (windows?)
     (file-or-directory-permissions p mode)))
+
+;; The environment for starting a PowerShell.  PowerShell 7 puts its own
+;; module folders on PSModulePath, and a Windows PowerShell started from
+;; it then fails to load even core cmdlets (Get-FileHash,
+;; Get-ExecutionPolicy).  Without PSModulePath each PowerShell builds its
+;; own default.
+(define (powershell-environment)
+  (define env (environment-variables-copy (current-environment-variables)))
+  (environment-variables-set! env #"PSModulePath" #f)
+  env)

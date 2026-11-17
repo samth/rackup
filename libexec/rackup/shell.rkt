@@ -391,7 +391,8 @@
                            (string-trim
                             (with-output-to-string
                               (lambda ()
-                                (parameterize ([current-error-port (open-output-nowhere)])
+                                (parameterize ([current-error-port (open-output-nowhere)]
+                                               [current-environment-variables (powershell-environment)])
                                   (system* ps "-NoProfile" "-NonInteractive"
                                            "-Command" profile-policy-command)))))))]
                 #:when (and policy

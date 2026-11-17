@@ -1295,7 +1295,9 @@
               [else null])
             (if ref (list "-Ref" ref) null)
             (if repo (list "-Repo" repo) null)))
-  (define ok? (apply system* powershell args))
+  (define ok?
+    (parameterize ([current-environment-variables (powershell-environment)])
+      (apply system* powershell args)))
   (when (url-like? source)
     (try-or (void) (delete-file script-path)))
   (unless ok?
