@@ -63,7 +63,18 @@ function Write-Step($msg) { Write-Host "rackup: $msg" }
 
 function Test-Placeholder($s) { return $s.StartsWith('@@') }
 
-function Get-Sha256($path) { return (Get-FileHash -Algorithm SHA256 -LiteralPath $path).Hash.ToLowerInvariant() }
+# .NET rather than Get-FileHash, which a Windows PowerShell started from
+# PowerShell 7 may fail to load.
+function Get-Sha256($path) {
+  $sha = [Security.Cryptography.SHA256]::Create()
+  $stream = [IO.File]::OpenRead($path)
+  try {
+    return (($sha.ComputeHash($stream) | ForEach-Object { $_.ToString('x2') }) -join '')
+  } finally {
+    $stream.Dispose()
+    $sha.Dispose()
+  }
+}
 
 function Get-File($url, $dest, $sha256) {
   Write-Step "downloading $url"
@@ -206,7 +217,7 @@ try {
         throw "$exeName has no rackup\bin\rackup-core.exe"
       }
     } catch {
-      if ($Exe) { throw "no prebuilt rackup for $Arch Windows: $_" }
+      if ($Exe -or $ExeArchive) { throw "no prebuilt rackup for $Arch Windows: $_" }
       Write-Step "no prebuilt rackup for $Arch Windows ($($_.Exception.Message)); installing from source"
       $ExeStage = $null
       $InstalledSha = $null
