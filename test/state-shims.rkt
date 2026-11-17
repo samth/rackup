@@ -662,6 +662,18 @@
      (check-true (string-contains? deactivation "unset PLTCOMPILEDROOTS"))
      (check-true (string-contains? deactivation "unset PLTHOME"))
      (expect (run-main '("switch" "--unset")) deactivation)
+     ;; The PowerShell helper sets RACKUP_SHELL=powershell around `rackup
+     ;; switch`, which then prints PowerShell instead of POSIX shell code.
+     (define ps-activation (emit-shell-activation linked-id #:syntax 'powershell))
+     (check-true (string-contains? ps-activation (format "$env:RACKUP_TOOLCHAIN = '~a'" linked-id)))
+     (check-false (string-contains? ps-activation "export "))
+     (define ps-deactivation (emit-shell-deactivation #:syntax 'powershell))
+     (check-true (string-contains? ps-deactivation "Remove-Item -LiteralPath Env:RACKUP_TOOLCHAIN"))
+     (check-true (string-contains? ps-deactivation "Remove-Item -LiteralPath Env:PLTCOMPILEDROOTS"))
+     (check-false (string-contains? ps-deactivation "unset "))
+     (void (putenv "RACKUP_SHELL" "powershell"))
+     (expect (run-main (list "switch" "devsrc")) ps-activation)
+     (void (putenv "RACKUP_SHELL" ""))
      (void (putenv "RACKUP_TOOLCHAIN" ""))))
 
   ;; Test: linking a real source tree and running raco through the shim

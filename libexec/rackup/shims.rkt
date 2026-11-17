@@ -595,6 +595,10 @@ EOF
   (define real-str (hash-ref meta 'real-bin-dir #f))
   (define overlay (rackup-toolchain-bin-link id))
   (cond
+    ;; On Windows the bin is a pointer to the real bin dir, so there is
+    ;; nothing to sync; just list what is there now.
+    [(and (windows?) (string? real-str) (directory-exists? real-str))
+     (enumerate-toolchain-executables (string->path real-str))]
     [(and (string? real-str)
           (directory-exists? real-str)
           (directory-exists? overlay)

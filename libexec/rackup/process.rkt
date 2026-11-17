@@ -8,6 +8,7 @@
          racket/string
          racket/system
          "error.rkt"
+         "platform.rkt"
          "text.rkt")
 
 (provide executable-file?
@@ -84,7 +85,7 @@
 ;; round-trip preserves embedded whitespace and the bare vm symbol that
 ;; `(system-type 'vm)` returns.
 (define (probe-local-racket-version+variant+addon-dir bin-dir env-vars)
-  (define racket-exe (build-path (string->path bin-dir) "racket"))
+  (define racket-exe (build-path (string->path bin-dir) (exe-file-name "racket")))
   (define probe-file (make-temporary-file "rackup-probe-~a.rkt"))
   (dynamic-wind
    void

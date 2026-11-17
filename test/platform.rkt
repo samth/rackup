@@ -5,10 +5,39 @@
 
 (require rackunit
          racket/file
+         racket/string
+         "../libexec/rackup/commands-data.rkt"
          "../libexec/rackup/fs.rkt"
-         "../libexec/rackup/platform.rkt")
+         "../libexec/rackup/platform.rkt"
+         "../libexec/rackup/windows-env.rkt"
+         (submod "../libexec/rackup/windows-env.rkt" for-testing)
+         (submod "../libexec/rackup/shell.rkt" for-testing))
+
+;; Windows paths built from "/"-separated strings, to keep backslashes out
+;; of the test source.
+(define (w s) (string-replace s "/" "\\"))
 
 (module+ test
+  ;; Removing rackup's shims from the user Path (rackup uninstall).
+  (check-equal? (remove-path-list-entry (w "C:/a;C:/Users/x/rackup/shims/;%USERPROFILE%/bin")
+                                        (w "c:/users/X/rackup/shims"))
+                (w "C:/a;%USERPROFILE%/bin"))
+  (check-equal? (remove-path-list-entry (w "C:/rk/shims") (w "C:/rk/shims")) "")
+  (check-false (remove-path-list-entry (w "C:/a;C:/b") (w "C:/rk/shims")))
+  (check-false (remove-path-list-entry "" (w "C:/rk/shims")))
+  (let ([s (string #\a (integer->char #xE9) (integer->char #x1F600) #\b)])
+    (check-equal? (utf-16le->string (string->utf-16le s)) s))
+
+  ;; The PowerShell helper: PATH, the `rackup` function that evaluates
+  ;; `rackup switch`, and completion of every command.
+  (define ps (shell-helper-script "powershell"))
+  (check-true (string-contains? ps "function rackup {"))
+  (check-true (string-contains? ps "$env:RACKUP_SHELL = 'powershell'"))
+  (check-true (string-contains? ps "Invoke-Expression"))
+  (check-true (string-contains? ps "Register-ArgumentCompleter -Native -CommandName rackup"))
+  (for ([c (in-list (map car rackup-commands))])
+    (check-true (string-contains? ps (format "'~a'" c)) c))
+
   (unless (windows?)
     (check-equal? (exe-file-name "racket") "racket")
     (check-true (executable-name? "raco"))

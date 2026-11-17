@@ -143,10 +143,17 @@
 ;; libexec/rackup/windows/rackup-shim.c) that every shim is a copy of.
 (define (rackup-shim-dispatcher)
   (build-path (rackup-libexec-dir) (exe-file-name "rackup-shim")))
-(define-paths-under (rackup-bin-dir)     [rackup-bin-entry        "rackup"])
+;; The command that runs rackup: bin/rackup (a shell script) on Unix, the
+;; rackup.exe shim on Windows.
+(define (rackup-bin-entry)
+  (if (windows?)
+      (rackup-shim-path "rackup")
+      (build-path (rackup-bin-dir) "rackup")))
 
 (define (rackup-shim-path name)          (build-path (rackup-shims-dir) (exe-file-name name)))
-(define (rackup-shell-script shell-name) (build-path (rackup-shell-dir) (format "rackup.~a" shell-name)))
+(define (rackup-shell-script shell-name)
+  (build-path (rackup-shell-dir)
+              (if (equal? shell-name "powershell") "rackup.ps1" (format "rackup.~a" shell-name))))
 
 (define (rackup-toolchain-dir id)
   (build-path (rackup-toolchains-dir) id))

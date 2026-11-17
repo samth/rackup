@@ -31,6 +31,11 @@ jobs:
             artifact_name: aarch64-macosx
             setup_racket_arch: arm64
             cross_target: ""
+          # Windows: scripts/build-dist.ps1 instead of build-dist.sh.
+          - runs_on: windows-latest
+            artifact_name: x86_64-win32
+            setup_racket_arch: x64
+            cross_target: ""
           # Cross-compiled builds for platforms without native GHA runners.
           - runs_on: ubuntu-latest
             artifact_name: arm32-linux
@@ -50,11 +55,29 @@ jobs:
           distribution: full
           variant: CS
           version: stable
+      - name: Install scribble-text-lib (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: raco pkg install --auto --skip-installed --batch scribble-text-lib
+      - name: Build and smoke-test executable distribution (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          ./scripts/build-dist.ps1 -Output "dist/rackup-${{ matrix.artifact_name }}.tar.gz"
+          $t = Join-Path $env:RUNNER_TEMP 'rackup-exe-test'
+          New-Item -ItemType Directory -Force -Path $t | Out-Null
+          tar.exe -xzf "dist/rackup-${{ matrix.artifact_name }}.tar.gz" -C $t
+          $env:RACKUP_HOME = Join-Path $t 'rackup'
+          & "$t\rackup\bin\rackup-core.exe" version
+          if ($LASTEXITCODE -ne 0) { throw "rackup-core.exe version failed" }
+          & "$t\rackup\bin\rackup-core.exe" help | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "rackup-core.exe help failed" }
       - name: Install raco cross (cross-compilation only)
         if: matrix.cross_target != ''
         shell: bash
         run: raco pkg install --auto raco-cross
       - name: Build executable distribution
+        if: runner.os != 'Windows'
         shell: bash
         run: |
           mkdir -p dist
@@ -67,7 +90,7 @@ jobs:
               --output "dist/rackup-${{ matrix.artifact_name }}.tar.gz"
           fi
       - name: Smoke test (native builds only)
-        if: matrix.cross_target == ''
+        if: matrix.cross_target == '' && runner.os != 'Windows'
         shell: bash
         run: |
           mkdir -p /tmp/rackup-exe-test

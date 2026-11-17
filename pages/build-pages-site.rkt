@@ -2,6 +2,7 @@
 
 (require racket/file
          racket/hash
+         racket/list
          racket/match
          racket/path
          racket/port
@@ -123,32 +124,47 @@
      (file-or-directory-permissions p #o755))
 
    ;; Windows: build the native shim dispatcher (every shim is a copy of
-   ;; it) with mingw-w64, then fill install.ps1's checksums.  Both are
-   ;; skipped, with a warning, when no mingw-w64 compiler is installed.
-   (define mingw-gcc (find-executable-path "x86_64-w64-mingw32-gcc"))
+   ;; it) for x86_64 and aarch64 with scripts/build-windows-shim.sh, then
+   ;; fill install.ps1's checksums.  A shim whose compiler is missing is
+   ;; skipped with a warning, and install.ps1 is written only when both
+   ;; were built.
+   (define (sha256-file p) (bytes->hex-string (call-with-input-file p sha256-bytes)))
+   (define (write-sha256-sidecar! p)
+     (define-values (_d name _dir?) (split-path p))
+     (define sha (sha256-file p))
+     (call-with-output-file (string-append (path->string p) ".sha256")
+       (lambda (out) (fprintf out "~a  ~a\n" sha (path->string name)))
+       #:exists 'truncate/replace)
+     sha)
+   (define shim-shas
+     (for/list ([arch (in-list '("x86_64" "aarch64"))]
+                [tools (in-list '(("x86_64-w64-mingw32-gcc") ("clang" "llvm-dlltool" "llvm-nm" "ld.lld")))])
+       (define shim-exe (build-path out-dir (format "rackup-shim-~a-win32.exe" arch)))
+       (cond
+         [(andmap find-executable-path tools)
+          (run (build-path root-dir "scripts" "build-windows-shim.sh") arch shim-exe)
+          (write-sha256-sidecar! shim-exe)]
+         [else
+          (eprintf "warning: ~a not found; skipping the ~a Windows shim\n"
+                   (string-join tools ", ") arch)
+          #f])))
    (cond
-     [mingw-gcc
-      (define shim-exe (build-path out-dir "rackup-shim-x86_64-win32.exe"))
-      ;; No C runtime, only kernel32: the shim is about 12 KB.
-      (run mingw-gcc "-Os" "-s" "-nostdlib" "-fno-builtin" "-e" "shim_entry" "-o" shim-exe
-           (build-path root-dir "libexec" "rackup" "windows" "rackup-shim.c")
-           "-lkernel32")
-      (define shim-sha256
-        (bytes->hex-string (call-with-input-file shim-exe sha256-bytes)))
-      (call-with-output-file (build-path out-dir "rackup-shim-x86_64-win32.exe.sha256")
-        (lambda (out) (fprintf out "~a  rackup-shim-x86_64-win32.exe\n" shim-sha256))
-        #:exists 'truncate/replace)
+     [(andmap values shim-shas)
       (define ps1-content
         (for/fold ([s (file->string (build-path root-dir "scripts" "install.ps1"))])
                   ([sub (in-list (list (cons "@@RACKUP_SRC_SHA256@@" src-sha256)
-                                       (cons "@@RACKUP_SHIM_SHA256@@" shim-sha256)
+                                       (cons "@@RACKUP_SHIM_X86_64_SHA256@@" (first shim-shas))
+                                       (cons "@@RACKUP_SHIM_AARCH64_SHA256@@" (second shim-shas))
                                        (cons "@@RACKUP_RUNTIME_CHECKSUMS@@" runtime-checksums-str)))])
           (string-replace s (car sub) (cdr sub))))
-      (call-with-output-file (build-path out-dir "install.ps1")
+      (define ps1 (build-path out-dir "install.ps1"))
+      (call-with-output-file ps1
         (lambda (out) (display ps1-content out))
-        #:exists 'truncate/replace)]
+        #:exists 'truncate/replace)
+      ;; `rackup self-upgrade` on Windows verifies install.ps1 against this.
+      (write-sha256-sidecar! ps1)]
      [else
-      (eprintf "warning: x86_64-w64-mingw32-gcc not found; skipping Windows shim and install.ps1\n")])
+      (eprintf "warning: skipping install.ps1 (a Windows shim was not built)\n")])
 
    ;; Write install.sh.sha256 sidecar so `rackup self-upgrade` can
    ;; verify the downloaded install script.

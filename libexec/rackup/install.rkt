@@ -175,7 +175,15 @@
   (replace-path! dst src #:mode 'link)
   dst)
 
+;; On Windows, where rackup makes no links, the toolchain's bin is a
+;; pointer to the real bin dir; the extra Chez executables of a source
+;; build are not exposed there.
 (define (make-bin-overlay! id real-bin-dir extra-exes)
+  (if (windows?)
+      (make-bin-link! id real-bin-dir)
+      (make-unix-bin-overlay! id real-bin-dir extra-exes)))
+
+(define (make-unix-bin-overlay! id real-bin-dir extra-exes)
   (define overlay (rackup-toolchain-bin-link id))
   (delete-path! overlay)
   (make-directory* overlay)
@@ -226,6 +234,10 @@
   (file-or-directory-permissions dest #o755))
 
 (define (maybe-wrap-local-chez-extra-executables! id extra-exes layout)
+  (unless (windows?)
+    (wrap-local-chez-extra-executables! id extra-exes layout)))
+
+(define (wrap-local-chez-extra-executables! id extra-exes layout)
   (define overlay (rackup-toolchain-bin-link id))
   (define wrapper-targets (local-chez-wrapper-targets layout))
   (for ([wrapper (in-list wrapper-targets)])
@@ -355,7 +367,28 @@
           (path-complete-string (build-path plthome "share" "racket" "collects"))
           'pkgs-dir
           (and (directory-exists? pkgs) (path-complete-string pkgs))))
+  ;; Windows keeps Racket.exe and raco.exe at the top of plthome, not in
+  ;; bin/ (an in-place build of a checkout and an unpacked distribution
+  ;; alike), so plthome is its own bin dir.
+  (define (windows-plthome? p)
+    (and (windows?)
+         (file-exists? (build-path p (exe-file-name "racket")))
+         (directory-exists? (build-path p "collects"))))
+  (define (windows-layout plthome)
+    (define maybe-root (maybe-parent plthome))
+    (define pkgs (and maybe-root (build-path maybe-root "pkgs")))
+    (define has-pkgs? (and pkgs (directory-exists? pkgs)))
+    (hash 'input-path (path-complete-string input-path)
+          'source-root (and has-pkgs? (path-complete-string maybe-root))
+          'plthome (path-complete-string plthome)
+          'bin-dir (path-complete-string plthome)
+          'collects-dir (path-complete-string (build-path plthome "collects"))
+          'pkgs-dir (and has-pkgs? (path-complete-string pkgs))))
   (cond
+    [(windows-plthome? (build-path input-path "racket"))
+     (windows-layout (build-path input-path "racket"))]
+    [(windows-plthome? input-path)
+     (windows-layout input-path)]
     [(and (dir? "racket") (dir? "racket" "bin") (dir? "racket" "collects"))
      (define source-root input-path)
      (define plthome (build-path source-root "racket"))
@@ -709,7 +742,7 @@
   (maybe-wrap-local-chez-extra-executables! id extra-exes layout)
   (sync-toolchain-env-file! id env-vars)
   (ensure-toolchain-addon-dir! id)
-  (define executables (enumerate-toolchain-executables (rackup-toolchain-bin-link id)))
+  (define executables (enumerate-toolchain-executables (rackup-toolchain-bin-dir id)))
   (define base-meta
     (local-toolchain-meta id name layout real-bin-dir executables env-vars version* variant*))
   (define meta
@@ -830,6 +863,8 @@
                           (delete-toolchain-dir! tc-dir)
                           (raise e))])
          (cond
+           [(and prefix (windows?))
+            (rackup-error "--prefix is not supported on Windows")]
            [prefix
             (define real (build-path prefix id))
             (when (dir-or-link-exists? real)

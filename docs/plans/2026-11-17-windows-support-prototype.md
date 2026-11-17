@@ -153,21 +153,74 @@ cross-compiled with mingw-w64:
   no symlink or junction support and is permissive in other ways), ARM64.
   The `windows-e2e` CI job covers the first two once the branch runs.
 
-## Not done yet
+## Second pass (2026-11-17): making the prototype real
 
-- `rackup init` / `switch` / `shell` for PowerShell (a profile function
-  that sets `$env:RACKUP_TOOLCHAIN`), and PowerShell completions. The
-  shims work in cmd, PowerShell and Git Bash without them.
-- Uninstall should also remove the shims dir from the user `Path`.
-- `rackup self-upgrade` on Windows (re-run `install.ps1`; the running
-  `rackup.exe` copy is locked, so replace it by rename).
-- `rackup link`/`rebuild` for Windows source checkouts (bin overlays use
-  per-file links).
-- GUI tools (`drracket.exe`) launched through a console shim open a
-  console window; the shim could detect GUI-subsystem targets and not
-  wait, as Scoop's shim does.
-- A prebuilt `rackup-core.exe` (`raco exe`) instead of the hidden
-  runtime, as on Unix.
-- An ARM64 shim build (the x86_64 shim runs emulated meanwhile).
+- **PowerShell integration.** `rackup init --shell powershell` (the default
+  on Windows) writes `shell\rackup.ps1` and dot-sources it from
+  `Documents\WindowsPowerShell\profile.ps1` and, when PowerShell 7 is
+  installed, `Documents\PowerShell\profile.ps1`. The helper puts the
+  shims on PATH, defines a `rackup` function that evaluates `rackup
+  switch` / `rackup shell` output (it sets `RACKUP_SHELL=powershell`, so
+  rackup prints `$env:RACKUP_TOOLCHAIN = '...'` instead of `export`), and
+  registers a native argument completer for commands and toolchain names.
+  Profiles do not run under the Restricted default, so install.ps1 skips
+  `init` there with a hint (`Set-ExecutionPolicy -Scope CurrentUser
+  RemoteSigned`), and `rackup init` warns. The check ignores the Process
+  scope, which `-ExecutionPolicy Bypass` sets and child shells inherit.
+- **Uninstall** removes the profile blocks, the shims folder from the
+  user `Path` and the `RACKUP_HOME` user variable (raw registry access
+  through the FFI, keeping `REG_EXPAND_SZ`), then broadcasts
+  `WM_SETTINGCHANGE`.
+- **Self-upgrade** downloads `install.ps1`, checks it against the new
+  `install.ps1.sha256`, and runs it with `-SelfUpgrade`. install.ps1 now
+  replaces files one by one and renames any that are in use (the running
+  `rackup.exe` shim, `rackup-core.exe` and its DLLs) to `.rackup-stale-*`;
+  the next run deletes them. It writes `.installed-sha256` like
+  install.sh, and `--exe`, `--source`, `--ref` and `--repo` map to
+  `-Exe`, `-Source`, `-Ref` and `-Repo`.
+- **Link and rebuild.** A Windows tree keeps `Racket.exe` at the top of
+  plthome, so link detects that layout (in-place checkout or unpacked
+  distribution), points the toolchain's `bin` at plthome, and lists its
+  executables directly instead of syncing an overlay. `rebuild` runs
+  `nmake win`. `install --prefix` is refused on Windows (it needs a link).
+- **GUI tools.** The shim reads the target's PE header; a GUI-subsystem
+  program (DrRacket, GRacket, Slideshow) is started outside the job object
+  and the shim returns at once, so the terminal is not held.
+- **Prebuilt `rackup-core.exe`.** `scripts/build-dist.ps1` runs `raco exe`
+  and `raco distribute` on windows-latest (in `build-exe.yml`); the
+  result is `rackup-x86_64-win32.tar.gz` holding `rackup\bin\rackup-core.exe`
+  and `rackup\bin\lib\`. install.ps1 prefers it and falls back to
+  source when none is published for the arch.
+- **ARM64.** `scripts/build-windows-shim.sh aarch64` builds a native
+  ARM64 shim with clang and lld; mingw-w64 has no ARM64 import libraries,
+  so the script generates kernel32's from the functions the shim
+  references. Racket publishes ARM64 Windows builds (`arm64-win32`, both
+  full `.exe` and Minimal `.tgz`), so rackup itself needed no changes.
+  There is no ARM64 prebuilt `rackup-core.exe` yet; ARM64 installs from
+  source.
+- **CI.** `windows-e2e` is a matrix: x86_64 from source (Minimal and
+  full), x86_64 with the prebuilt exe, and native ARM64 on
+  `windows-11-arm`. Each installs with install.ps1 using the shim from the
+  Pages build, checks the user PATH, runs tools through the shims, tests
+  `rackup switch` and completion in fresh `pwsh` and `powershell`
+  sessions, runs `rackup self-upgrade` against the local files, and
+  checks that uninstall cleans the PATH, `RACKUP_HOME` and the profile.
+
+Tested under Wine before pushing: init and the PowerShell `switch`
+output, uninstall's registry cleanup, linking an unpacked full
+distribution (bin pointer, probe, `env.txt`), the DrRacket shim returning
+at once while console tools still pass their exit codes, and a
+Wine-built `rackup-core.exe` installing and running a toolchain. Not
+testable here: install.ps1, self-upgrade, the ARM64 shim, and nmake.
+
+## Still not done
+
+- A GUI-subsystem shim variant, so launching a shim from Explorer or a
+  shortcut does not flash a console window.
+- An ARM64 prebuilt `rackup-core.exe` (needs Racket on `windows-11-arm`
+  in `build-exe.yml`).
+- Bash completion and `switch` for Git Bash on Windows.
+- Code signing for the shim and `rackup-core.exe` (SmartScreen).
 - Upstream: ask distro-build to publish a full `.tgz` for Windows next
-  to the Minimal one, which would remove the 7-Zip dependency.
+  to the Minimal one, which would remove the 7-Zip dependency for new
+  releases.

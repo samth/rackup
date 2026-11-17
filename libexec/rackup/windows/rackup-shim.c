@@ -237,10 +237,53 @@ static wchar_t *quote_arg(const wchar_t *arg) {
 
 /* Run `exe` with the leading arguments `pre` (quoted here) followed by
    this process's own arguments, wait, and return its exit code. */
-static DWORD run(const wchar_t *exe, const wchar_t **pre) {
+/* True when `p` is a GUI-subsystem executable (DrRacket.exe, GRacket.exe):
+   the PE optional header's Subsystem field is IMAGE_SUBSYSTEM_WINDOWS_GUI.
+   The field sits at the same offset in PE32 and PE32+ headers. */
+static int is_gui_exe(const wchar_t *p) {
+  HANDLE h = CreateFileW(p, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE, NULL,
+                         OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+  if (h == INVALID_HANDLE_VALUE) return 0;
+  unsigned char hdr[512];
+  DWORD got = 0;
+  int gui = 0;
+  if (ReadFile(h, hdr, sizeof(hdr), &got, NULL) && got >= 0x40 && hdr[0] == 'M' && hdr[1] == 'Z') {
+    DWORD pe = hdr[0x3C] | (hdr[0x3D] << 8) | (hdr[0x3E] << 16) | ((DWORD)hdr[0x3F] << 24);
+    /* "PE\0\0", a 20-byte COFF header, then Subsystem at offset 68. */
+    DWORD sub = pe + 4 + 20 + 68;
+    if (pe < got - 4 && sub + 2 <= got && hdr[pe] == 'P' && hdr[pe + 1] == 'E' &&
+        hdr[pe + 2] == 0 && hdr[pe + 3] == 0) {
+      unsigned subsystem = hdr[sub] | (hdr[sub + 1] << 8);
+      gui = subsystem == IMAGE_SUBSYSTEM_WINDOWS_GUI;
+    }
+  }
+  CloseHandle(h);
+  return gui;
+}
+
+/* Run `exe` with the arguments `pre` followed by this shim's own
+   arguments.  A console program runs in a kill-on-close job and its exit
+   code is returned.  A GUI program (`gui`) is started and left running,
+   as when it is launched from Explorer, and the shim returns 0 at once,
+   so a terminal is not held open by DrRacket. */
+static DWORD run_program(const wchar_t *exe, const wchar_t **pre, int gui) {
   wchar_t *cmd = quote_arg(exe);
   for (; pre && *pre; pre++) cmd = wcat(cmd, L" ", quote_arg(*pre), NULL);
   cmd = wcat(cmd, command_line_tail(), NULL);
+
+  if (gui) {
+    STARTUPINFOW si;
+    PROCESS_INFORMATION pi;
+    memset(&si, 0, sizeof(si));
+    si.cb = sizeof(si);
+    if (!CreateProcessW(exe, cmd, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
+      eput(wcat(L"rackup: cannot run ", exe, L" (error ", wnum(GetLastError()), L")\n", NULL));
+      return 126;
+    }
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+    return 0;
+  }
 
   HANDLE job = CreateJobObjectW(NULL, NULL);
   if (job) {
@@ -334,7 +377,7 @@ static int run_rackup(const wchar_t *home) {
   DWORD code;
   wchar_t *core_exe = path_join(home, L"bin", L"rackup-core.exe", NULL);
   if (file_exists(core_exe)) {
-    code = run(core_exe, NULL);
+    code = run_program(core_exe, NULL, 0);
   } else {
     wchar_t *current = follow_dir_pointer(path_join(home, L"runtime", L"current", NULL));
     wchar_t *bin = follow_dir_pointer(path_join(current, L"bin", NULL));
@@ -347,7 +390,7 @@ static int run_rackup(const wchar_t *home) {
     CreateDirectoryW(addon, NULL);
     wchar_t *core = path_join(home, L"libexec", L"rackup-core.rkt", NULL);
     const wchar_t *pre[] = { L"-U", L"-A", addon, core, NULL };
-    code = run(racket, pre);
+    code = run_program(racket, pre, 0);
   }
 
   if (code == RACKUP_UNINSTALL_CONFIRMED) {
@@ -463,7 +506,7 @@ static int shim_main(const wchar_t *shim) {
     }
     target = alt;
   }
-  return (int)run(target, NULL);
+  return (int)run_program(target, NULL, is_gui_exe(target));
 }
 
 /* The full path of the running executable. */
