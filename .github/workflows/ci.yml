@@ -854,8 +854,11 @@ jobs:
         run: |
           $env:RACKUP_HOME = "$env:RUNNER_TEMP\rk"
           "RACKUP_HOME=$env:RACKUP_HOME" >> $env:GITHUB_ENV
-          # Let new PowerShell sessions run the profile that `rackup init` writes.
+          # Let new PowerShell sessions run the profile that `rackup init`
+          # writes.  PowerShell 7 and Windows PowerShell keep separate policies.
           Set-ExecutionPolicy -Scope CurrentUser RemoteSigned -Force
+          powershell -NoProfile -Command 'Set-ExecutionPolicy -Scope CurrentUser RemoteSigned -Force'
+          if ($LASTEXITCODE -ne 0) { throw "could not set the Windows PowerShell execution policy" }
           $site = "$env:RUNNER_TEMP\site"
           New-Item -ItemType Directory -Force -Path $site | Out-Null
           tar.exe -xzf "$env:RUNNER_TEMP\site-artifact\pages-site-ci.tar.gz" -C $site
@@ -897,6 +900,8 @@ jobs:
           $PSNativeCommandUseErrorActionPreference = $false
           & "$shims\racket.exe" -e '(exit 7)'
           if ($LASTEXITCODE -ne 7) { throw "exit status not passed through: $LASTEXITCODE" }
+          # The runner exits the step with $LASTEXITCODE.
+          $global:LASTEXITCODE = 0
       - name: rackup switch in a new PowerShell session
         run: |
           $minimal = & "$env:RACKUP_HOME\shims\rackup.exe" list --ids | Where-Object { $_ -like '*-minimal' } | Select-Object -First 1

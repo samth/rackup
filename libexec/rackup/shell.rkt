@@ -381,22 +381,28 @@
 ;; hint for the user when the effective policy would block the profile,
 ;; else #f.  Asks powershell.exe, so it costs a process start.
 (define (powershell-execution-policy-hint)
-  (define ps (or (find-executable-path "powershell.exe") (find-executable-path "pwsh.exe")))
-  (define policy
-    (and ps
-         (with-handlers ([exn:fail? (lambda (e) #f)])
-           (string-trim
-            (with-output-to-string
-              (lambda ()
-                (parameterize ([current-error-port (open-output-nowhere)])
-                  (system* ps "-NoProfile" "-NonInteractive" "-Command" profile-policy-command))))))))
-  (and policy
-       (member (string-downcase policy) '("restricted" "allsigned" "undefined"))
+  ;; Windows PowerShell and PowerShell 7 keep separate policies.
+  (define blocked
+    (for*/list ([name (in-list '("powershell.exe" "pwsh.exe"))]
+                [ps (in-value (find-executable-path name))]
+                #:when ps
+                [policy (in-value
+                         (with-handlers ([exn:fail? (lambda (e) #f)])
+                           (string-trim
+                            (with-output-to-string
+                              (lambda ()
+                                (parameterize ([current-error-port (open-output-nowhere)])
+                                  (system* ps "-NoProfile" "-NonInteractive"
+                                           "-Command" profile-policy-command)))))))]
+                #:when (and policy
+                            (member (string-downcase policy) '("restricted" "allsigned" "undefined"))))
+      (format "~a (~a)" (if (equal? name "pwsh.exe") "PowerShell 7" "Windows PowerShell") policy)))
+  (and (pair? blocked)
        (format (string-append
-                "PowerShell's execution policy (~a) does not run profile scripts, so\n"
-                "`rackup switch` will not work in PowerShell until you allow them:\n"
+                "the execution policy of ~a does not run profile scripts,\n"
+                "so `rackup switch` will not work there until you allow them; in that shell run:\n"
                 "  Set-ExecutionPolicy -Scope CurrentUser RemoteSigned")
-               policy)))
+               (string-join blocked " and "))))
 
 (module+ for-testing
   (provide shell-helper-script
