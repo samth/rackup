@@ -1,6 +1,7 @@
 #lang racket/base
 
-(require racket/file
+(require file/untgz
+         racket/file
          racket/list
          racket/path
          racket/string
@@ -8,6 +9,7 @@
          "checksum.rkt"
          "error.rkt"
          "paths.rkt"
+         "platform.rkt"
          "process.rkt"
          "remote.rkt"
          "security.rkt"
@@ -17,6 +19,7 @@
          ensure-installer-cached!
          extract-tgz-installer!
          install-from-dmg!
+         extract-nsis-installer!
          discover-bin-dir)
 
 (define (default-announce msg) (displayln msg))
@@ -28,6 +31,7 @@
 ;; - "sh" for shell installers
 ;; - "tgz" for gzip-compressed tar archives
 ;; - "dmg" for macOS disk images
+;; - "exe" for Windows (NSIS) installers
 ;; - #f when the path doesn't match a known type.
 (define (detect-installer-type p)
   (define p* (if (path? p) p (string->path p)))
@@ -41,6 +45,7 @@
     ;; .tgz is represented as a single extension in installer filenames.
     [(string-ci=? ext ".tgz") "tgz"]
     [(string-ci=? ext ".dmg") "dmg"]
+    [(string-ci=? ext ".exe") "exe"]
     [else #f]))
 
 (define (tar-exe) (find-executable-path/default "tar" "/bin/tar"))
@@ -70,7 +75,7 @@
     (announce installer-url)
     (download-url->file installer-url cache-path)
     (verify-installer-checksum! cache-path #:sha256 expected-sha256 #:sha1 expected-sha1)
-    (file-or-directory-permissions cache-path #o755))
+    (set-file-mode! cache-path #o755))
   cache-path)
 
 ;; Extract a .tgz installer archive into install-root.
@@ -86,7 +91,48 @@
   (define dest (path->complete-path install-root))
   (announce (format "Extracting ~a into ~a" archive-noun (path->string dest)))
   (make-directory* dest)
-  (system*/check check-label (tar-exe) "-xzf" archive "-C" dest))
+  (cond
+    ;; Unpack in-process on Windows: tar.exe ships only with Windows 10
+    ;; 1803 and later, and `file/untgz` is part of Minimal Racket.
+    [(windows?) (untgz archive #:dest dest)]
+    [else (system*/check check-label (tar-exe) "-xzf" archive "-C" dest)]))
+
+;; 7-Zip, which can unpack an NSIS installer.  Checked on PATH, then in
+;; its default install folders.
+(define (seven-zip-exe)
+  (or (for/or ([name (in-list '("7z" "7z.exe"))])
+        (find-executable-path name))
+      (for/or ([var (in-list '("ProgramW6432" "ProgramFiles" "ProgramFiles(x86)"))])
+        (define base (getenv var))
+        (and base
+             (let ([p (build-path base "7-Zip" "7z.exe")])
+               (and (file-exists? p) p))))))
+
+;; Unpack a Racket Windows installer (.exe) into install-root without
+;; running it.  Running the installer, even silently (/S /D=...), asks for
+;; administrator rights and writes machine-wide registry keys, file
+;; associations, and Start-menu entries, which clash between side-by-side
+;; versions.  The payload is the installation tree itself, so 7-Zip's
+;; NSIS reader yields exactly what the installer would copy; only the
+;; installer's own plugin files ($PLUGINSDIR) are skipped.
+(define (extract-nsis-installer! installer-file install-root
+                                 #:check-label [check-label 'nsis-installer]
+                                 #:announce [announce default-announce])
+  (define exe (path->complete-path installer-file))
+  (define dest (path->complete-path install-root))
+  (define 7z
+    (or (seven-zip-exe)
+        (rackup-error
+         (string-append
+          "the full Racket distribution for Windows ships only as an .exe installer,\n"
+          "which rackup unpacks with 7-Zip, but 7-Zip (7z.exe) was not found.\n"
+          "Install 7-Zip (https://www.7-zip.org/, or `winget install 7zip.7zip`),\n"
+          "or install Minimal Racket instead: rackup install <version> --distribution minimal"))))
+  (announce (format "Extracting installer into ~a" (path->string dest)))
+  (make-directory* dest)
+  (system*/check check-label 7z "x" "-y" "-bd" "-bso0"
+                 (string-append "-o" (path->string dest))
+                 "-x!$PLUGINSDIR" (path->string exe)))
 
 ;; Mount a DMG, locate the best source directory to copy, copy its contents,
 ;; then detach the mount.
@@ -143,11 +189,18 @@
 ;;
 ;; error-label customizes the error text so callers can preserve existing
 ;; wording (e.g., "Racket" vs "hidden runtime").
+;; A Windows installation has no bin/ directory: Racket.exe, raco.exe,
+;; and the other launchers sit at the top of the tree.
 (define (discover-bin-dir install-root
-                          #:candidates [candidates '("bin" "racket/bin" "plt/bin")]
+                          #:candidates [candidates (if (windows?)
+                                                       '("racket" ".")
+                                                       '("bin" "racket/bin" "plt/bin"))]
                           #:error-label [error-label "Racket"])
   (or (for/or ([c (in-list candidates)])
         (define rel (if (path? c) c (string->path c)))
-        (define maybe (apply build-path install-root (explode-path rel)))
-        (and (directory-exists? maybe) maybe))
+        (define maybe (simplify-path (apply build-path install-root (explode-path rel)) #f))
+        (and (if (windows?)
+                 (file-exists? (build-path maybe (exe-file-name "racket")))
+                 (directory-exists? maybe))
+             maybe))
       (rackup-error "could not find ~a bin dir under ~a" error-label (path->string* install-root))))

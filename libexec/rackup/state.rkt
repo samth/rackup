@@ -7,6 +7,7 @@
          racket/string
          "error.rkt"
          "paths.rkt"
+         "platform.rkt"
          "rktd-io.rkt"
          "state-lock.rkt"
          "fs.rkt"
@@ -161,16 +162,24 @@
 (define (toolchain-addon-dir id)
   (string->path (cdr (assoc "PLTADDONDIR" (toolchain-runtime-env id)))))
 
+;; The plthome above a toolchain's real bin dir: its parent, except on
+;; Windows, where racket.exe sits at the top of plthome itself.
+(define (bin-dir->plthome real-bin-dir)
+  (and real-bin-dir
+       (let ([bin (if (path? real-bin-dir)
+                      real-bin-dir
+                      (string->path (format "~a" real-bin-dir)))])
+         (if (and (windows?)
+                  (or (directory-exists? (build-path bin "collects"))
+                      (directory-exists? (build-path bin "etc"))))
+             bin
+             (let-values ([(d _ __) (split-path bin)]) d)))))
+
 ;; Read the compiled-file-roots from a toolchain's config.rktd.
 ;; Returns a list like (same) or ("/usr/lib/racket/compiled"), or
 ;; (same) as default if the file is missing or has no entry.
 (define (read-toolchain-compiled-file-roots real-bin-dir)
-  (define parent
-    (and real-bin-dir
-         (let-values ([(d _ __) (split-path (if (path? real-bin-dir)
-                                                real-bin-dir
-                                                (string->path (format "~a" real-bin-dir))))])
-           d)))
+  (define parent (bin-dir->plthome real-bin-dir))
   (define candidates
     (if parent
         (list (build-path parent "etc" "config.rktd")
@@ -190,12 +199,7 @@
 ;; read-toolchain-compiled-file-roots consults -- preferring an existing
 ;; one and otherwise defaulting to <plthome>/etc/config.rktd.
 (define (toolchain-config-rktd-path real-bin-dir)
-  (define parent
-    (and real-bin-dir
-         (let-values ([(d _ __) (split-path (if (path? real-bin-dir)
-                                                real-bin-dir
-                                                (string->path (format "~a" real-bin-dir))))])
-           d)))
+  (define parent (bin-dir->plthome real-bin-dir))
   (and parent
        (let ([primary (build-path parent "etc" "config.rktd")]
              [alt (build-path parent "etc" "racket" "config.rktd")])
@@ -303,7 +307,7 @@
      (define fallbacks
        (filter (lambda (s) (not (equal? s key)))
                (map serialize-compiled-root roots-with-same)))
-     (string-join (cons key fallbacks) ":")]))
+     (string-join (cons key fallbacks) (path-list-separator))]))
 
 ;; Build the env-var alist recorded for a toolchain: PLTADDONDIR (when
 ;; a usable addon dir is known) and PLTCOMPILEDROOTS (when the

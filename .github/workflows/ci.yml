@@ -25,7 +25,10 @@ jobs:
           version: stable
       - name: Install Pages build deps
         shell: bash
-        run: raco pkg install --auto --skip-installed --batch plt-web commonmark
+        run: |
+          raco pkg install --auto --skip-installed --batch plt-web commonmark
+          # Builds the Windows shims (scripts/build-windows-shim.sh).
+          sudo apt-get update -q && sudo apt-get install -y -q gcc-mingw-w64-x86-64 clang lld llvm
       - name: Download all exe artifacts
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
@@ -38,6 +41,16 @@ jobs:
           test -f /tmp/rackup-pages-site/index.html
           test -f /tmp/rackup-pages-site/install.sh
           test -f /tmp/rackup-pages-site/rackup-src.tar.gz
+          test -f /tmp/rackup-pages-site/install.ps1
+          test -f /tmp/rackup-pages-site/rackup-shim-x86_64-win32.exe
+          test -f /tmp/rackup-pages-site/rackup-shim-x86_64-win32.exe.sha256
+          test -f /tmp/rackup-pages-site/rackup-shim-aarch64-win32.exe
+          test -f /tmp/rackup-pages-site/rackup-shim-aarch64-win32.exe.sha256
+          test -f /tmp/rackup-pages-site/install.ps1.sha256
+          if grep -n '@@RACKUP_' /tmp/rackup-pages-site/install.ps1; then
+            echo "install.ps1 has unfilled placeholders" >&2
+            exit 1
+          fi
           test -f /tmp/rackup-pages-site/js/libs/jquery.mobile.custom.min.js
           grep -Fq 'btn.innerHTML' /tmp/rackup-pages-site/index.html
           grep -Fq 'sha256sum -c' /tmp/rackup-pages-site/index.html
@@ -789,6 +802,178 @@ jobs:
 
   # Single required status check for branch protection and the merge queue.
   # Fails if any other job failed or was cancelled; skipped jobs are fine.
+  # Windows support is a prototype: this job installs rackup with
+  # install.ps1 from the checkout, then installs Minimal and full Racket
+  # and runs them through the native shims.  The runner image ships
+  # mingw-w64 gcc (for the shim) and 7-Zip (for the full installer).
+  windows-e2e:
+    name: "Windows E2E (${{ matrix.name }})"
+    runs-on: ${{ matrix.runs_on }}
+    needs: [pages-build, build-exe]
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Source install, Minimal and full (the full installer is
+          # unpacked with 7-Zip, which windows-latest has).
+          - name: x86_64 source
+            runs_on: windows-latest
+            arch: x86_64
+            mode: source
+            full: true
+          # Prebuilt rackup-core.exe from the build-exe job.
+          - name: x86_64 exe
+            runs_on: windows-latest
+            arch: x86_64
+            mode: exe
+            full: false
+          # Native ARM64 shim and Racket.
+          - name: aarch64 source
+            runs_on: windows-11-arm
+            arch: aarch64
+            mode: source
+            full: false
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Download Pages site artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: pages-site-ci
+          path: ${{ runner.temp }}/site-artifact
+      - name: Download prebuilt exe artifact
+        if: matrix.mode == 'exe'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: rackup-exe-${{ matrix.arch }}-win32
+          path: ${{ runner.temp }}/exe-artifact
+      - name: Install rackup with install.ps1
+        run: |
+          $env:RACKUP_HOME = "$env:RUNNER_TEMP\rk"
+          "RACKUP_HOME=$env:RACKUP_HOME" >> $env:GITHUB_ENV
+          # Let new PowerShell sessions run the profile that `rackup init`
+          # writes.  PowerShell 7 and Windows PowerShell keep separate policies.
+          Set-ExecutionPolicy -Scope CurrentUser RemoteSigned -Force
+          powershell -NoProfile -Command 'Set-ExecutionPolicy -Scope CurrentUser RemoteSigned -Force'
+          if ($LASTEXITCODE -ne 0) { throw "could not set the Windows PowerShell execution policy" }
+          $site = "$env:RUNNER_TEMP\site"
+          New-Item -ItemType Directory -Force -Path $site | Out-Null
+          tar.exe -xzf "$env:RUNNER_TEMP\site-artifact\pages-site-ci.tar.gz" -C $site
+          $shim = "$site\rackup-shim-${{ matrix.arch }}-win32.exe"
+          "RACKUP_TEST_SHIM_EXE=$shim" >> $env:GITHUB_ENV
+          if ('${{ matrix.mode }}' -eq 'exe') {
+            $archive = "$env:RUNNER_TEMP\exe-artifact\rackup-${{ matrix.arch }}-win32.tar.gz"
+            "RACKUP_TEST_EXE_ARCHIVE=$archive" >> $env:GITHUB_ENV
+            ./scripts/install.ps1 -RackupHome $env:RACKUP_HOME -ShimExe $shim -Exe -ExeArchive $archive
+            if (-not (Test-Path "$env:RACKUP_HOME\bin\rackup-core.exe")) { throw "no prebuilt rackup-core.exe" }
+          } else {
+            "RACKUP_TEST_SOURCE_DIR=$PWD" >> $env:GITHUB_ENV
+            ./scripts/install.ps1 -RackupHome $env:RACKUP_HOME -ShimExe $shim -SourceDir .
+          }
+          $userPath = [Environment]::GetEnvironmentVariable('Path', 'User') -split ';'
+          if (-not ($userPath -contains "$env:RACKUP_HOME\shims")) { throw "install.ps1 did not add the shims to the user PATH" }
+      - name: Install toolchains and run them through shims
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          $shims = "$env:RACKUP_HOME\shims"
+          & "$shims\rackup.exe" install stable --distribution minimal
+          & "$shims\racket.exe" -e '(displayln (list (version) (system-type (quote arch))))'
+          & "$shims\raco.exe" pkg show
+          if ('${{ matrix.full }}' -eq 'true') {
+            & "$shims\rackup.exe" install stable
+            $full = & "$shims\rackup.exe" list --ids | Where-Object { $_ -like '*-full' }
+            & "$shims\rackup.exe" default $full
+            & "$shims\racket.exe" -l typed/racket/base -e '(: x Integer) (define x 41) (displayln (add1 x))'
+            # GUI programs get GUI-subsystem shims (no console window from
+            # Explorer); console tools keep console shims.
+            function Get-Subsystem($f) {
+              $b = [IO.File]::ReadAllBytes($f)
+              [BitConverter]::ToUInt16($b, [BitConverter]::ToInt32($b, 0x3C) + 92)
+            }
+            if ((Get-Subsystem "$shims\drracket.exe") -ne 2) { throw "the drracket shim is not a GUI program" }
+            if ((Get-Subsystem "$shims\racket.exe") -ne 3) { throw "the racket shim is not a console program" }
+            # DrRacket is a GUI program: its shim starts it and returns at once.
+            $sw = [Diagnostics.Stopwatch]::StartNew()
+            & "$shims\drracket.exe"
+            if ($sw.Elapsed.TotalSeconds -gt 20) { throw "the drracket shim waited for DrRacket" }
+            Get-Process -Name DrRacket -ErrorAction SilentlyContinue | Stop-Process -Force
+          }
+          & "$shims\raco.exe" pkg install --auto --no-docs -u gregor-lib
+          & "$shims\racket.exe" -l racket/base -l gregor -e '(displayln (date 2026 11 17))'
+          & "$shims\rackup.exe" list
+          & "$shims\rackup.exe" doctor
+          $PSNativeCommandUseErrorActionPreference = $false
+          & "$shims\racket.exe" -e '(exit 7)'
+          if ($LASTEXITCODE -ne 7) { throw "exit status not passed through: $LASTEXITCODE" }
+          # The runner exits the step with $LASTEXITCODE.
+          $global:LASTEXITCODE = 0
+      - name: rackup switch in a new PowerShell session
+        run: |
+          $minimal = & "$env:RACKUP_HOME\shims\rackup.exe" list --ids | Where-Object { $_ -like '*-minimal' } | Select-Object -First 1
+          $script = @'
+          $c = (TabExpansion2 'rackup swi' 10).CompletionMatches | ForEach-Object { $_.CompletionText }
+          if (-not ($c -contains 'switch')) { throw "no completion for 'rackup swi': $c" }
+          rackup switch MINIMAL
+          if ($env:RACKUP_TOOLCHAIN -ne 'MINIMAL') { throw "switch did not set RACKUP_TOOLCHAIN: $env:RACKUP_TOOLCHAIN" }
+          racket -e '(displayln (version))'
+          if ($LASTEXITCODE -ne 0) { throw "racket failed after switch" }
+          rackup switch --unset
+          if ($env:RACKUP_TOOLCHAIN) { throw "switch --unset left RACKUP_TOOLCHAIN set" }
+          '@ -replace 'MINIMAL', $minimal
+          $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($script))
+          foreach ($ps in 'pwsh', 'powershell') {
+            Write-Host "--- $ps"
+            & $ps -NoLogo -NonInteractive -EncodedCommand $encoded
+            if ($LASTEXITCODE -ne 0) { throw "$ps session failed" }
+          }
+      - name: rackup switch in Git Bash
+        shell: bash
+        run: |
+          set -eu
+          rk="$(cygpath -u "$RACKUP_HOME")"
+          "$rk/shims/rackup.exe" init --shell bash
+          minimal="$("$rk/shims/rackup.exe" list --ids | tr -d '\r' | grep -- '-minimal$' | head -n 1)"
+          # A Git Bash window runs an interactive login shell.
+          bash -lic "set -eu
+            type rackup | head -n 1 | grep -q function
+            rackup switch '$minimal'
+            test \"\$RACKUP_TOOLCHAIN\" = '$minimal'
+            racket -e '(displayln (version))'
+            rackup switch --unset
+            test -z \"\${RACKUP_TOOLCHAIN:-}\""
+      - name: self-upgrade replaces running files
+        env:
+          RACKUP_TESTING: "1"
+        run: |
+          $env:RACKUP_SELF_UPGRADE_INSTALL_PS1 = (Resolve-Path scripts/install.ps1).Path
+          $shims = "$env:RACKUP_HOME\shims"
+          & "$shims\rackup.exe" self-upgrade
+          if ($LASTEXITCODE -ne 0) { throw "self-upgrade failed: $LASTEXITCODE" }
+          & "$shims\rackup.exe" version
+          if ($LASTEXITCODE -ne 0) { throw "rackup broken after self-upgrade" }
+          & "$shims\racket.exe" -e '(displayln (version))'
+          if ($LASTEXITCODE -ne 0) { throw "racket shim broken after self-upgrade" }
+      - name: Remove a toolchain and uninstall
+        run: |
+          $shims = "$env:RACKUP_HOME\shims"
+          $minimal = & "$shims\rackup.exe" list --ids | Where-Object { $_ -like '*-minimal' } | Select-Object -First 1
+          & "$shims\rackup.exe" remove $minimal
+          if ($LASTEXITCODE -ne 0) { throw "remove failed: $LASTEXITCODE" }
+          & "$shims\rackup.exe" uninstall --dangerously-delete-without-prompting $env:RACKUP_HOME
+          if ($LASTEXITCODE -ne 0) { throw "uninstall failed: $LASTEXITCODE" }
+          $userPath = [Environment]::GetEnvironmentVariable('Path', 'User') -split ';'
+          if ($userPath -contains "$shims") { throw "uninstall left the shims on the user PATH" }
+          if ([Environment]::GetEnvironmentVariable('RACKUP_HOME', 'User')) { throw "uninstall left RACKUP_HOME set" }
+          $profile7 = Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'PowerShell\profile.ps1'
+          if ((Test-Path $profile7) -and (Select-String -Quiet -SimpleMatch 'rackup initialize' $profile7)) { throw "uninstall left the profile block" }
+          $bashrc = Join-Path $env:USERPROFILE '.bashrc'
+          if ((Test-Path $bashrc) -and (Select-String -Quiet -SimpleMatch 'rackup initialize' $bashrc)) { throw "uninstall left the .bashrc block" }
+          Start-Sleep -Seconds 30
+          if (Test-Path $env:RACKUP_HOME) { throw "RACKUP_HOME still exists after uninstall" }
+
   ci-success:
     name: CI Success
     if: always()
@@ -811,6 +996,7 @@ jobs:
       - linked-checkout-real-build
       - macos-e2e
       - macos-e2e-bootstrap
+      - windows-e2e
     runs-on: ubuntu-latest
     steps:
       - name: Check that every job passed

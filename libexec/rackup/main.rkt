@@ -22,6 +22,8 @@
          "mac-apps.rkt"
          "migrate.rkt"
          "paths.rkt"
+         "platform.rkt"
+         "windows-env.rkt"
          "rebuild.rkt"
          "remote.rkt"
          "rktd-io.rkt"
@@ -111,7 +113,8 @@
   (usage-line "remove <toolchain>" "Remove an installed or linked toolchain and its addon dir.")
   (usage-line "reshim [--short-aliases|--mac-apps]"
               "Rebuild executable shims (and, with --mac-apps, macOS GUI app wrappers).")
-  (usage-line "init [--shell bash|zsh]" "Install/update shell integration in ~/.bashrc or ~/.zshrc.")
+  (usage-line "init [--shell bash|zsh|powershell]"
+              "Install/update shell integration in ~/.bashrc, ~/.zshrc, or the PowerShell profile.")
   (usage-line "uninstall [--dangerously-delete-without-prompting <rackup-home>]"
               "Remove rackup, its toolchains/runtime, and shell init blocks (destructive).")
   (usage-line "self-upgrade [--with-init] [--exe | --source] [--ref <ref>] [--repo <owner/repo>]"
@@ -407,7 +410,9 @@
     (eprintf "rackup: `rackup ~a` changes this shell's toolchain, which needs rackup's\n" cmd-name)
     (eprintf "shell integration, and this shell has not loaded it.\n")
     (eprintf "  - If you have not run it yet: `rackup init`, then open a new shell.\n")
-    (eprintf "  - To load it into this shell now: `. ~~/.bashrc` (bash) or `. ~~/.zshrc` (zsh).\n")
+    (if (windows?)
+        (eprintf "  - To load it now: `. $PROFILE.CurrentUserAllHosts` (PowerShell) or `. ~~/.bashrc` (Git Bash).\n")
+        (eprintf "  - To load it into this shell now: `. ~~/.bashrc` (bash) or `. ~~/.zshrc` (zsh).\n"))
     (eprintf "Without shell integration:\n")
     (eprintf "  - `rackup default set <toolchain>` sets the toolchain for every shell.\n")
     (eprintf "  - `rackup run <toolchain> -- <command>` runs one command under a toolchain.\n")
@@ -472,13 +477,16 @@
   (command-line #:program "rackup init"
                 #:argv rest
                 #:once-each
-                [("--shell") sh "Shell type (bash or zsh)" (set! shell-name sh)]
+                [("--shell") sh "Shell type (bash, zsh, or powershell)" (set! shell-name sh)]
                 #:args ()
                 (void))
   (define rcs (init-shell! shell-name))
   (with-state-lock (reshim!))
   (printf "Initialized shell integration in ~a\n"
-          (string-join (map path->string rcs) " and ")))
+          (string-join (map path->string rcs) " and "))
+  (when (windows?)
+    (define hint (powershell-execution-policy-hint))
+    (when hint (eprintf "rackup: warning: ~a\n" hint))))
 
 (define (split-on-double-dash xs)
   (define-values (head tail)
@@ -573,10 +581,7 @@
       [else (environment-variables-set! env key val)]))
   (define old-path (or (getenv "PATH") ""))
   (define shims (path->string (rackup-shims-dir)))
-  (define runtime-path
-    (if (regexp-match? (pregexp (format "(^|:)~a(:|$)" (regexp-quote shims))) old-path)
-        old-path
-        (string-append shims ":" old-path)))
+  (define runtime-path (prepend-path-list-entry shims old-path))
   (environment-variables-set! env #"PATH" (string->bytes/utf-8 runtime-path))
   (define cmd (car command))
   (define cmd-args (cdr command))
@@ -1021,8 +1026,11 @@
   (eprintf "  - hidden runtime used to run rackup\n")
   (eprintf "  - installed toolchains and linked-toolchain metadata/overlays\n")
   (eprintf "  - shims, caches, downloaded installers, and per-toolchain addon dirs/packages\n")
-  (eprintf
-   "WARNING: This will also remove rackup-managed shell init blocks from ~~/.bashrc and ~~/.zshrc if present.\n")
+  (if (windows?)
+      (eprintf
+       "WARNING: This will also remove rackup's block from your PowerShell profiles and its shims folder from your user PATH.\n")
+      (eprintf
+       "WARNING: This will also remove rackup-managed shell init blocks from ~~/.bashrc and ~~/.zshrc if present.\n"))
   (eprintf "WARNING: This cannot be undone.\n")
   (eprintf "Detected installed toolchains: ~a\n" (length ids))
   (when (pair? ids)
@@ -1069,6 +1077,26 @@
 
 (define current-remove-shell-init-blocks-proc
   (make-parameter remove-shell-init-blocks!))
+
+;; On Windows, undo what install.ps1 did to the user's environment: the
+;; shims folder on the user Path, and RACKUP_HOME when it names this home.
+;; Returns a description of each change.
+(define (remove-windows-user-env! home-path)
+  (define changes
+    (append
+     (if (remove-user-path-entry! (path->string (rackup-shims-dir)))
+         (list (format "removed ~a from your user PATH" (path->string (rackup-shims-dir))))
+         null)
+     (if (remove-user-env-var-if!
+          "RACKUP_HOME"
+          (lambda (v) (equal? (try-or #f (normalized-path (string->path v))) home-path)))
+         (list "removed the RACKUP_HOME user variable")
+         null)))
+  (when (pair? changes) (broadcast-environment-change!))
+  changes)
+
+(define current-remove-windows-user-env-proc
+  (make-parameter remove-windows-user-env!))
 
 (define current-uninstall-system*-proc
   (make-parameter system*))
@@ -1130,7 +1158,17 @@
                                (eprintf "rackup: warning: failed to remove macOS app wrappers: ~a\n"
                                         (exn-message e)))])
     (remove-mac-apps!))
+  (define env-changes
+    (if (windows?)
+        (with-handlers ([exn:fail? (lambda (e)
+                                     (eprintf "rackup: warning: failed to update your user environment: ~a\n"
+                                              (exn-message e))
+                                     null)])
+          ((current-remove-windows-user-env-proc) home-path))
+        null))
   (displayln "rackup uninstalled.")
+  (for ([c (in-list env-changes)])
+    (printf "rackup: ~a\n" c))
   (when (pair? removed-rcs)
     (displayln "Removed rackup shell init blocks from:")
     (for ([p (in-list removed-rcs)])
@@ -1186,18 +1224,94 @@
                 (void))
   (hash 'with-init? with-init? 'mode mode 'ref ref 'repo repo))
 
+;; The install.ps1 that `rackup self-upgrade` runs on Windows.
+(define (self-upgrade-ps1-source #:ref [ref #f] #:repo [repo #f])
+  (define env-override (getenv "RACKUP_SELF_UPGRADE_INSTALL_PS1"))
+  (cond
+    [(and env-override (getenv "RACKUP_TESTING")) env-override]
+    [(or ref repo)
+     (format "https://raw.githubusercontent.com/~a/~a/scripts/install.ps1"
+             (or repo default-rackup-repo)
+             (or ref "main"))]
+    [else "https://samth.github.io/rackup/install.ps1"]))
+
 (define (cmd-self-upgrade rest)
   (define opts (parse-self-upgrade-options rest))
+  (if (windows?)
+      (self-upgrade-windows! opts)
+      (self-upgrade-unix! opts)))
+
+(define (parse-sha256-sidecar text)
+  (for/or ([line (in-list (string-split (string-downcase text) "\n"))])
+    (match (regexp-match #px"^([0-9a-f]{64})\\b" (string-trim line))
+      [(list _ sha) sha]
+      [_ #f])))
+
+;; Download the installer script at `source` (verified against its .sha256
+;; sidecar unless `verify?` is #f) to a temporary file with suffix `ext`.
+(define (fetch-installer-script source ext verify?)
+  (define expected-sha
+    (and verify?
+         (with-handlers ([exn:fail? (lambda (e)
+                                      (rackup-error
+                                       "could not verify install script integrity.\nChecksum fetch failed: ~a\nTo skip verification, use: rackup self-upgrade --ref <ref>"
+                                       (exn-message e)))])
+           (parse-sha256-sidecar (http-get-string (string-append source ".sha256"))))))
+  (define p (make-temporary-file (string-append "rackup-self-upgrade-~a" ext)))
+  (download-url->file source p)
+  (verify-installer-checksum! p #:sha256 expected-sha)
+  p)
+
+(define (self-upgrade-windows! opts)
+  (define mode (hash-ref opts 'mode #f))
+  (define ref (hash-ref opts 'ref #f))
+  (define repo (hash-ref opts 'repo #f))
+  (define source (self-upgrade-ps1-source #:ref ref #:repo repo))
+  (define script-path
+    (if (url-like? source)
+        (fetch-installer-script source ".ps1" (not (or ref repo)))
+        (string->path source)))
+  (unless (file-exists? script-path)
+    (rackup-error "self-upgrade installer script not found: ~a" source))
+  (define powershell
+    (or (find-executable-path "powershell.exe")
+        (find-executable-path "pwsh.exe")
+        (rackup-error "self-upgrade needs powershell.exe on PATH")))
+  (define sha-file (build-path (rackup-home) ".installed-sha256"))
+  (define (installed-sha) (and (file-exists? sha-file) (file->string sha-file)))
+  (define sha-before (installed-sha))
+  (displayln "Checking for updates...")
+  ;; install.ps1 replaces the running rackup.exe and rackup-core.exe by
+  ;; renaming them aside (a running executable can be renamed but not
+  ;; overwritten), and reshims with the new code when it is done.
+  (define args
+    (append (list "-NoProfile" "-ExecutionPolicy" "Bypass" "-File" (path->string script-path)
+                  "-RackupHome" (path->string (rackup-home))
+                  "-SelfUpgrade" "-NoModifyPath")
+            (if (hash-ref opts 'with-init? #f) null (list "-NoInit"))
+            (case mode
+              [(exe) (list "-Exe")]
+              [(source) (list "-Source")]
+              [else null])
+            (if ref (list "-Ref" ref) null)
+            (if repo (list "-Repo" repo) null)))
+  (define ok?
+    (parameterize ([current-environment-variables (powershell-environment)])
+      (apply system* powershell args)))
+  (when (url-like? source)
+    (try-or (void) (delete-file script-path)))
+  (unless ok?
+    (rackup-error "self-upgrade failed"))
+  (if (equal? sha-before (installed-sha))
+      (displayln "rackup is already up to date.")
+      (displayln "rackup code upgrade complete.")))
+
+(define (self-upgrade-unix! opts)
   (define mode (hash-ref opts 'mode #f))
   (define ref (hash-ref opts 'ref #f))
   (define repo (hash-ref opts 'repo #f))
   (define custom-source? (or ref repo))
   (define source (self-upgrade-script-source #:ref ref #:repo repo))
-  (define (parse-sha256-sidecar text)
-    (for/or ([line (in-list (string-split (string-downcase text) "\n"))])
-      (match (regexp-match #px"^([0-9a-f]{64})\\b" (string-trim line))
-        [(list _ sha) sha]
-        [_ #f])))
   (define script-path
     (cond
       [(url-like? source)
@@ -1364,4 +1478,5 @@
            current-uninstall-exit-proc
            uninstall-confirmed-exit-code
            current-remove-shell-init-blocks-proc
+           current-remove-windows-user-env-proc
            current-uninstall-system*-proc))

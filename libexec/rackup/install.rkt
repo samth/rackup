@@ -21,6 +21,7 @@
          "checksum.rkt"
          "error.rkt"
          "fs.rkt"
+         "platform.rkt"
          "process.rkt"
          "security.rkt"
          "text.rkt"
@@ -165,7 +166,7 @@
 
 (define (make-bin-link! id real-bin-dir)
   (define link (rackup-toolchain-bin-link id))
-  (replace-path! link real-bin-dir #:mode 'link)
+  (replace-dir-pointer! link real-bin-dir)
   link)
 
 (define (link-executable-into-dir! dir src [name #f])
@@ -174,7 +175,15 @@
   (replace-path! dst src #:mode 'link)
   dst)
 
+;; On Windows, where rackup makes no links, the toolchain's bin is a
+;; pointer to the real bin dir; the extra Chez executables of a source
+;; build are not exposed there.
 (define (make-bin-overlay! id real-bin-dir extra-exes)
+  (if (windows?)
+      (make-bin-link! id real-bin-dir)
+      (make-unix-bin-overlay! id real-bin-dir extra-exes)))
+
+(define (make-unix-bin-overlay! id real-bin-dir extra-exes)
   (define overlay (rackup-toolchain-bin-link id))
   (delete-path! overlay)
   (make-directory* overlay)
@@ -225,6 +234,10 @@
   (file-or-directory-permissions dest #o755))
 
 (define (maybe-wrap-local-chez-extra-executables! id extra-exes layout)
+  (unless (windows?)
+    (wrap-local-chez-extra-executables! id extra-exes layout)))
+
+(define (wrap-local-chez-extra-executables! id extra-exes layout)
   (define overlay (rackup-toolchain-bin-link id))
   (define wrapper-targets (local-chez-wrapper-targets layout))
   (for ([wrapper (in-list wrapper-targets)])
@@ -354,7 +367,28 @@
           (path-complete-string (build-path plthome "share" "racket" "collects"))
           'pkgs-dir
           (and (directory-exists? pkgs) (path-complete-string pkgs))))
+  ;; Windows keeps Racket.exe and raco.exe at the top of plthome, not in
+  ;; bin/ (an in-place build of a checkout and an unpacked distribution
+  ;; alike), so plthome is its own bin dir.
+  (define (windows-plthome? p)
+    (and (windows?)
+         (file-exists? (build-path p (exe-file-name "racket")))
+         (directory-exists? (build-path p "collects"))))
+  (define (windows-layout plthome)
+    (define maybe-root (maybe-parent plthome))
+    (define pkgs (and maybe-root (build-path maybe-root "pkgs")))
+    (define has-pkgs? (and pkgs (directory-exists? pkgs)))
+    (hash 'input-path (path-complete-string input-path)
+          'source-root (and has-pkgs? (path-complete-string maybe-root))
+          'plthome (path-complete-string plthome)
+          'bin-dir (path-complete-string plthome)
+          'collects-dir (path-complete-string (build-path plthome "collects"))
+          'pkgs-dir (and has-pkgs? (path-complete-string pkgs))))
   (cond
+    [(windows-plthome? (build-path input-path "racket"))
+     (windows-layout (build-path input-path "racket"))]
+    [(windows-plthome? input-path)
+     (windows-layout input-path)]
     [(and (dir? "racket") (dir? "racket" "bin") (dir? "racket" "collects"))
      (define source-root input-path)
      (define plthome (build-path source-root "racket"))
@@ -655,7 +689,7 @@
     (delete-toolchain-dir! tc-dir))
   (define layout (detect-local-source-layout local-path))
   (define real-bin-dir (string->path (hash-ref layout 'bin-dir)))
-  (define racket-exe (build-path real-bin-dir "racket"))
+  (define racket-exe (build-path real-bin-dir (exe-file-name "racket")))
   (unless (file-executable?/safe racket-exe)
     (rackup-error "linked toolchain does not contain an executable racket binary at ~a"
                   (path->string* racket-exe)))
@@ -681,7 +715,7 @@
                                    #:installed-at [installed-at #f]
                                    #:last-rebuilt-at [last-rebuilt-at #f])
   (define real-bin-dir (string->path (hash-ref layout 'bin-dir)))
-  (define racket-exe (build-path real-bin-dir "racket"))
+  (define racket-exe (build-path real-bin-dir (exe-file-name "racket")))
   (unless (file-executable?/safe racket-exe)
     (rackup-error "linked toolchain does not contain an executable racket binary at ~a"
                   (path->string* racket-exe)))
@@ -708,7 +742,7 @@
   (maybe-wrap-local-chez-extra-executables! id extra-exes layout)
   (sync-toolchain-env-file! id env-vars)
   (ensure-toolchain-addon-dir! id)
-  (define executables (enumerate-toolchain-executables (rackup-toolchain-bin-link id)))
+  (define executables (enumerate-toolchain-executables (rackup-toolchain-bin-dir id)))
   (define base-meta
     (local-toolchain-meta id name layout real-bin-dir executables env-vars version* variant*))
   (define meta
@@ -829,6 +863,8 @@
                           (delete-toolchain-dir! tc-dir)
                           (raise e))])
          (cond
+           [(and prefix (windows?))
+            (rackup-error "--prefix is not supported on Windows")]
            [prefix
             (define real (build-path prefix id))
             (when (dir-or-link-exists? real)
@@ -851,6 +887,9 @@
             (extract-tgz-installer! installer-path install-root
                                     #:check-label 'linux-tgz-installer
                                     #:announce (lambda (msg) (install-verbose "~a" msg)))]
+           ["exe"
+            (extract-nsis-installer! installer-path install-root
+                                     #:announce (lambda (msg) (install-verbose "~a" msg)))]
            ["dmg"
             (install-from-dmg! installer-path install-root
                                #:attach-label 'hdiutil-attach
@@ -898,8 +937,7 @@
 ;; Run raco with the correct env for a toolchain.  Returns stdout as a
 ;; string on success, #f on failure.
 (define (capture-raco-output id . raco-args)
-  (define bin (rackup-toolchain-bin-link id))
-  (define raco-exe (build-path bin "raco"))
+  (define raco-exe (rackup-toolchain-exe-path id "raco"))
   (apply capture-program-output
          #:env (toolchain-runtime-env id)
          raco-exe
@@ -908,8 +946,7 @@
 ;; Run racket -e with the correct env for a toolchain.  Returns stdout
 ;; as a string on success, #f on failure.
 (define (capture-racket-eval-output id expr-text)
-  (define bin (rackup-toolchain-bin-link id))
-  (define racket-exe (build-path bin "racket"))
+  (define racket-exe (rackup-toolchain-exe-path id "racket"))
   (capture-program-output
    #:env (toolchain-runtime-env id)
    racket-exe
@@ -1052,8 +1089,7 @@
                    (length pkgs)
                    (if (= (length pkgs) 1) "" "s")
                    (string-join pkgs " "))
-     (define bin (rackup-toolchain-bin-link new-id))
-     (define raco-exe (build-path bin "raco"))
+     (define raco-exe (rackup-toolchain-exe-path new-id "raco"))
      (define ok?
        (call-with-env-overlay
         (toolchain-runtime-env new-id)

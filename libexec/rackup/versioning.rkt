@@ -115,7 +115,11 @@
   (string-join parts "-"))
 
 (define (normalized-host-arch)
-  (define raw (system-type 'machine))
+  ;; On Windows, (system-type 'machine) describes the OS ("Windows NT
+  ;; 10.0 (Build 19043)"), so use 'arch there (Racket 7.9 and later).
+  (define raw (if (eq? (system-type 'os) 'windows)
+                  (system-type 'arch)
+                  (system-type 'machine)))
   (define m*
     (if (symbol? raw)
         (symbol->string raw)
@@ -137,6 +141,9 @@
   (case (system-type 'os)
     [(macosx) "macosx"]
     [(unix)   "linux"]
+    ;; Racket's Windows installer names use "win32" for every arch
+    ;; ("racket-8.18-x86_64-win32-cs.exe").
+    [(windows) "win32"]
     [else (rackup-error "unsupported platform: ~a" (system-type 'os))]))
 
 ;; Decompose an installer filename's platform token (e.g.

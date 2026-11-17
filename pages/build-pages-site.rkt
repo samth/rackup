@@ -2,6 +2,7 @@
 
 (require racket/file
          racket/hash
+         racket/list
          racket/match
          racket/path
          racket/port
@@ -121,6 +122,49 @@
      (define p (build-path out-dir name))
      (call-with-output-file p (lambda (out) (display install-content out)) #:exists 'truncate/replace)
      (file-or-directory-permissions p #o755))
+
+   ;; Windows: build the native shim dispatcher (every shim is a copy of
+   ;; it) for x86_64 and aarch64 with scripts/build-windows-shim.sh, then
+   ;; fill install.ps1's checksums.  A shim whose compiler is missing is
+   ;; skipped with a warning, and install.ps1 is written only when both
+   ;; were built.
+   (define (sha256-file p) (bytes->hex-string (call-with-input-file p sha256-bytes)))
+   (define (write-sha256-sidecar! p)
+     (define-values (_d name _dir?) (split-path p))
+     (define sha (sha256-file p))
+     (call-with-output-file (string-append (path->string p) ".sha256")
+       (lambda (out) (fprintf out "~a  ~a\n" sha (path->string name)))
+       #:exists 'truncate/replace)
+     sha)
+   (define shim-shas
+     (for/list ([arch (in-list '("x86_64" "aarch64"))]
+                [tools (in-list '(("x86_64-w64-mingw32-gcc") ("clang" "llvm-dlltool" "llvm-nm" "ld.lld")))])
+       (define shim-exe (build-path out-dir (format "rackup-shim-~a-win32.exe" arch)))
+       (cond
+         [(andmap find-executable-path tools)
+          (run (build-path root-dir "scripts" "build-windows-shim.sh") arch shim-exe)
+          (write-sha256-sidecar! shim-exe)]
+         [else
+          (eprintf "warning: ~a not found; skipping the ~a Windows shim\n"
+                   (string-join tools ", ") arch)
+          #f])))
+   (cond
+     [(andmap values shim-shas)
+      (define ps1-content
+        (for/fold ([s (file->string (build-path root-dir "scripts" "install.ps1"))])
+                  ([sub (in-list (list (cons "@@RACKUP_SRC_SHA256@@" src-sha256)
+                                       (cons "@@RACKUP_SHIM_X86_64_SHA256@@" (first shim-shas))
+                                       (cons "@@RACKUP_SHIM_AARCH64_SHA256@@" (second shim-shas))
+                                       (cons "@@RACKUP_RUNTIME_CHECKSUMS@@" runtime-checksums-str)))])
+          (string-replace s (car sub) (cdr sub))))
+      (define ps1 (build-path out-dir "install.ps1"))
+      (call-with-output-file ps1
+        (lambda (out) (display ps1-content out))
+        #:exists 'truncate/replace)
+      ;; `rackup self-upgrade` on Windows verifies install.ps1 against this.
+      (write-sha256-sidecar! ps1)]
+     [else
+      (eprintf "warning: skipping install.ps1 (a Windows shim was not built)\n")])
 
    ;; Write install.sh.sha256 sidecar so `rackup self-upgrade` can
    ;; verify the downloaded install script.

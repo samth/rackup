@@ -8,6 +8,7 @@
          racket/string
          "env.rkt"
          "paths.rkt"
+         "platform.rkt"
          "state.rkt"
          "state-lock.rkt"
          "error.rkt"
@@ -36,13 +37,14 @@
 
 (define (file-executable?/safe p)
   (and (file-exists? p)
+       (executable-name? p)
        (try-or #f
          (member 'execute (file-or-directory-permissions p)))))
 
 (define (enumerate-toolchain-executables real-bin-dir)
   (sort (for/list ([p (in-list (directory-list real-bin-dir #:build? #t))]
                    #:when (and (file-exists? p) (file-executable?/safe p)))
-          (path-basename-string p))
+          (exe-file->tool-name p))
         string<?))
 
 (define bootstrap-shim-names
@@ -293,17 +295,78 @@ exit "$STATUS"
 EOF
   )
 
+;; On Windows the dispatcher is a prebuilt native executable that the
+;; installer places in libexec/; there is nothing to generate.
 (define (ensure-shim-dispatcher!)
   (ensure-rackup-layout!)
   (define p (rackup-shim-dispatcher))
-  (write-string-file p (dispatcher-script))
-  (file-or-directory-permissions p #o755)
+  (cond
+    [(windows?)
+     (unless (file-exists? p)
+       (rackup-error "missing shim dispatcher: ~a (reinstall rackup)" (path->string* p)))]
+    [else
+     (write-string-file p (dispatcher-script))
+     (file-or-directory-permissions p #o755)])
   p)
+
+;; Windows shims are copies of the dispatcher executable (rustup-style:
+;; the shim looks at its own file name to pick the tool), since symlinks
+;; need Developer Mode there.  A shim that already matches is left
+;; alone, so a reshim does not fail on a shim that is running.
+;;
+;; Windows will not delete or overwrite a running executable, but it
+;; will rename one, so a stale shim that is running (rackup.exe always
+;; is during a reshim) is moved aside first and removed by a later
+;; reshim, once nothing runs it.
+;;
+;; The shim for a GUI program (DrRacket) is a copy whose PE header says
+;; GUI subsystem, so starting it from Explorer or a shortcut opens no
+;; console window.  From a terminal it behaves the same, since the shim
+;; never waits for a GUI program anyway.
+(define (install-windows-shim! shim [gui? #f])
+  (define dispatcher (file->bytes (rackup-shim-dispatcher)))
+  (define want (if gui? (pe-with-subsystem dispatcher pe-subsystem-gui) dispatcher))
+  (unless (and (file-exists? shim) (equal? (file->bytes shim) want))
+    (when (file-exists? shim)
+      (with-handlers ([exn:fail:filesystem?
+                       (lambda (_) (rename-file-or-directory shim (stale-shim-path shim)))])
+        (delete-file shim)))
+    (call-with-output-file shim (lambda (out) (write-bytes want out)))))
+
+;; Tool names whose executable is a GUI program in some installed
+;; toolchain, plus the `dr` alias when drracket is one.
+(define (gui-tool-names)
+  (define names
+    (for*/list ([id (in-list (installed-toolchain-ids))]
+                [dir (in-value (with-handlers ([exn:fail? (lambda (e) #f)])
+                                 (rackup-toolchain-bin-dir id)))]
+                #:when (and dir (directory-exists? dir))
+                [p (in-list (directory-list dir #:build? #t))]
+                #:when (and (executable-name? p) (file-exists? p) (gui-executable? p)))
+      (exe-file->tool-name p)))
+  (list->set (if (member "drracket" names) (cons "dr" names) names)))
+
+(define stale-shim-prefix ".rackup-stale-")
+
+(define (stale-shim-path shim)
+  (build-path (rackup-shims-dir)
+              (format "~a~a-~a" stale-shim-prefix (current-milliseconds)
+                      (path->string (file-name-from-path shim)))))
+
+;; Remove shims moved aside by `install-windows-shim!`; one still
+;; running stays until the next reshim.
+(define (delete-stale-shims!)
+  (for ([p (in-list (directory-list (rackup-shims-dir) #:build? #t))]
+        #:when (string-prefix? (path->string (file-name-from-path p)) stale-shim-prefix))
+    (with-handlers ([exn:fail:filesystem? void])
+      (delete-file p))))
 
 (define (ensure-core-rackup-shim!)
   (ensure-rackup-layout!)
   (define shim (rackup-shim-path "rackup"))
-  (replace-path! shim (rackup-bin-entry) #:mode 'link)
+  (if (windows?)
+      (install-windows-shim! shim)
+      (replace-path! shim (rackup-bin-entry) #:mode 'link))
   shim)
 
 (define (resolve-active-toolchain-id)
@@ -332,6 +395,27 @@ EOF
       (find-addon-bin-exe (toolchain-addon-dir id) exe)))
 
 (define (rackup-managed-shim? p)
+  (if (windows?)
+      (windows-shim-file? p)
+      (rackup-managed-shim?/link p)))
+
+;; A Windows shim from any rackup version: an .exe that contains the
+;; dispatcher's self-description (a UTF-16 string in rackup-shim.c), so
+;; a shim for a removed tool is found even after the dispatcher changed.
+(define windows-shim-signature
+  (byte-regexp (regexp-quote (string->bytes/latin-1
+                         (list->string
+                          (for*/list ([c (in-string "is rackup's shim dispatcher")]
+                                      [ch (in-list (list c #\nul))])
+                            ch))))))
+
+(define (windows-shim-file? p)
+  (and (file-exists? p)
+       (executable-name? p)
+       (< (file-size p) (* 1024 1024))
+       (regexp-match? windows-shim-signature (file->bytes p))))
+
+(define (rackup-managed-shim?/link p)
   (and (link-exists? p)
        (let ([target (simplify-path (resolve-path p) #t)])
          (or (equal? target (simplify-path (rackup-shim-dispatcher) #t))
@@ -350,7 +434,7 @@ EOF
 
 (define (find-addon-bin-exe addon-dir exe)
   (for/or ([bin-dir (in-list (addon-bin-dirs addon-dir))])
-    (define candidate (build-path bin-dir exe))
+    (define candidate (build-path bin-dir (exe-file-name exe)))
     (and (file-exists? candidate) candidate)))
 
 (define (addon-bin-executables id)
@@ -358,9 +442,8 @@ EOF
   (define (bin-dir-executables bin-dir)
     (if (directory-exists? bin-dir)
         (for/list ([p (in-list (directory-list bin-dir #:build? #t))]
-                   #:when (and (file-exists? p)
-                               (member 'execute (file-or-directory-permissions p))))
-          (path-basename-string p))
+                   #:when (file-executable?/safe p))
+          (exe-file->tool-name p))
         null))
   (remove-duplicates
    (append* (for/list ([bin-dir (in-list (addon-bin-dirs addon-dir))])
@@ -413,18 +496,32 @@ EOF
 (define (write-toolchain-env-file! id env-vars)
   (define p (rackup-toolchain-env-file id))
   (define body
-    (string-append "#!/usr/bin/env bash\n"
-                   "# rackup managed toolchain environment\n"
-                   (apply string-append
-                          (for/list ([kv (in-list env-vars)])
-                            (env-file-line (car kv) (cdr kv))))))
+    (if (windows?)
+        (windows-env-file-body env-vars)
+        (unix-env-file-body env-vars)))
   (define existing
     (and (file-exists? p)
          (try-or #f
            (file->string p))))
   (unless (equal? existing body)
     (write-string-file p body)
-    (file-or-directory-permissions p #o644)))
+    (set-file-mode! p #o644)))
+
+;; The Windows shim reads NAME=VALUE lines (no quoting: a value runs to
+;; the end of its line) and applies the same PLTCOMPILEDROOTS precedence
+;; as `env-file-line`.
+(define (windows-env-file-body env-vars)
+  (apply string-append
+         "# rackup managed toolchain environment\n"
+         (for/list ([kv (in-list env-vars)])
+           (format "~a=~a\n" (car kv) (cdr kv)))))
+
+(define (unix-env-file-body env-vars)
+    (string-append "#!/usr/bin/env bash\n"
+                   "# rackup managed toolchain environment\n"
+                   (apply string-append
+                          (for/list ([kv (in-list env-vars)])
+                            (env-file-line (car kv) (cdr kv))))))
 
 ;; Write env.sh when there are env vars to record, delete it otherwise
 ;; (an empty env file is never left behind).
@@ -440,7 +537,7 @@ EOF
 (define (reprobe-local-toolchain real-bin-dir-str)
   (cond
     [(not (string? real-bin-dir-str)) (values #f #f #f)]
-    [(not (file-exists? (build-path (string->path real-bin-dir-str) "racket")))
+    [(not (file-exists? (build-path (string->path real-bin-dir-str) (exe-file-name "racket"))))
      (values #f #f #f)]
     [else
      (probe-local-racket-version+variant+addon-dir
@@ -513,6 +610,10 @@ EOF
   (define real-str (hash-ref meta 'real-bin-dir #f))
   (define overlay (rackup-toolchain-bin-link id))
   (cond
+    ;; On Windows the bin is a pointer to the real bin dir, so there is
+    ;; nothing to sync; just list what is there now.
+    [(and (windows?) (string? real-str) (directory-exists? real-str))
+     (enumerate-toolchain-executables (string->path real-str))]
     [(and (string? real-str)
           (directory-exists? real-str)
           (directory-exists? overlay)
@@ -632,6 +733,7 @@ EOF
           (backfill-installed-env-vars! id meta)))))
 
 (define/state-locked (reshim!)
+  (when (windows?) (delete-stale-shims!))
   (regenerate-env-files!)
   (ensure-shim-dispatcher!)
   (ensure-core-rackup-shim!)
@@ -643,12 +745,15 @@ EOF
                        bootstrap-shim-names
                        (all-installed-executables)
                        (if aliases-on? (map car shim-alias-pairs) null))))
+  (define gui-names (if (windows?) (gui-tool-names) (set)))
   (for ([name (in-set desired)])
     (unless (equal? name "rackup")
-      (define p (build-path shims-dir name))
-      (replace-path! p dispatcher #:mode 'link)))
+      (define p (rackup-shim-path name))
+      (if (windows?)
+          (install-windows-shim! p (set-member? gui-names name))
+          (replace-path! p dispatcher #:mode 'link))))
   (for ([p (in-list (directory-list shims-dir #:build? #t))])
-    (define name (path-basename-string p))
+    (define name (exe-file->tool-name p))
     (when (and (not (set-member? desired name)) (rackup-managed-shim? p))
       (delete-file p)))
   ;; Keep macOS GUI app wrappers in sync (no-op off macOS / when disabled).

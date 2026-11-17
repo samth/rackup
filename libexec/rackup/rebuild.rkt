@@ -8,6 +8,7 @@
          "error.rkt"
          "install.rkt"
          "paths.rkt"
+         "platform.rkt"
          "shims.rkt"
          "state.rkt"
          "state-lock.rkt"
@@ -52,7 +53,15 @@
 ;; -j is a make-level flag; CPUS= is what the Racket build's recursive
 ;; invocations honor.  Passing both keeps top-level and subordinate
 ;; jobs in sync; a user-supplied CPUS= in pass-through args wins.
+;;
+;; On Windows the build runs under nmake from a Visual Studio developer
+;; prompt, as `nmake win` (Racket's build.md); nmake has no -j.
 (define (make-argv jobs user-make-args)
+  (if (windows?)
+      (list* "nmake" "win" user-make-args)
+      (unix-make-argv jobs user-make-args)))
+
+(define (unix-make-argv jobs user-make-args)
   (define user-set-cpus?
     (for/or ([a (in-list user-make-args)]) (string-prefix? a "CPUS=")))
   (append (list "make" (format "-j~a" jobs))
@@ -91,9 +100,13 @@
     (rackup-error "git pull --ff-only failed in ~a" source-root)))
 
 (define (run-make! cwd argv system*-proc displayln-proc)
-  (define make-exe (find-executable-path "make"))
+  (define make-exe (find-executable-path (car argv)))
   (unless make-exe
-    (rackup-error "rackup rebuild requires `make` on PATH"))
+    (if (windows?)
+        (rackup-error (string-append
+                       "rackup rebuild requires `nmake` on PATH; run it from a\n"
+                       "Visual Studio Developer PowerShell or Command Prompt"))
+        (rackup-error "rackup rebuild requires `make` on PATH")))
   (displayln-proc (format "+ cd ~a && ~a" cwd (argv->display argv)))
   (parameterize ([current-directory cwd])
     (and (apply system*-proc make-exe (cdr argv)) #t)))
